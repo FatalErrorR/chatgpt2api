@@ -20,6 +20,7 @@ docker-compose-local.yml
 # Environment variables
 .env
 .env.local
+deploy/k3s/.auth-key
 
 # Database files
 *.db
