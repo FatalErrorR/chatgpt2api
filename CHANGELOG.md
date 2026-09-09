@@ -2,6 +2,8 @@
 
 ## Unreleased
 
++ [新增] 支持 ChatGPT Images 2.5：网页链路可选用 `gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`；Codex 链路对应 `codex-gpt-image-2.5*`。`gpt-image-2` 仍映射到默认上游模型名，保持兼容。
+
 ## 1.8.0 - 2026-07-28
 
 + [新增] 新增默认请求上游模型名称和默认思考强度配置，支持在设置页面修改，并可通过模型名的 `-standard`、`-extended`、`-max` 后缀覆盖思考强度。

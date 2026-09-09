@@ -52,7 +52,7 @@ spec:
                   name: chatgpt2api
                   key: auth-key
             - name: CHATGPT2API_BASE_URL
-              value: http://129.226.215.74:3000
+              value: https://yurencc2a.zeabur.app
           volumeMounts:
             - name: data
               mountPath: /app/data
@@ -94,6 +94,16 @@ metadata:
   namespace: chatgpt2api
 spec:
   rules:
+    - host: yurencc2a.zeabur.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chatgpt2api
+                port:
+                  number: 80
     - host: c2a.129.226.215.74.sslip.io
       http:
         paths:

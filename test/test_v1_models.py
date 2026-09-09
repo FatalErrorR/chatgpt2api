@@ -35,10 +35,16 @@ class ModelListTests(unittest.TestCase):
 
         ids = {item["id"] for item in result["data"]}
         self.assertIn("gpt-image-2", ids)
+        self.assertIn("gpt-image-2.5", ids)
+        self.assertIn("gpt-image-2.5-flare", ids)
+        self.assertIn("gpt-image-2.5-sunburst", ids)
         self.assertIn("codex-gpt-image-2", ids)
+        self.assertIn("codex-gpt-image-2.5-flare", ids)
         self.assertIn("team-codex-gpt-image-2", ids)
+        self.assertIn("team-codex-gpt-image-2.5-sunburst", ids)
         self.assertNotIn("plus-codex-gpt-image-2", ids)
         self.assertNotIn("pro-codex-gpt-image-2", ids)
+        self.assertNotIn("plus-codex-gpt-image-2.5-flare", ids)
 
     def test_list_models_does_not_return_codex_models_for_web_plus_accounts(self):
         with (
@@ -59,8 +65,11 @@ class ModelListTests(unittest.TestCase):
 
         ids = {item["id"] for item in result["data"]}
         self.assertIn("gpt-image-2", ids)
+        self.assertIn("gpt-image-2.5-flare", ids)
         self.assertNotIn("codex-gpt-image-2", ids)
+        self.assertNotIn("codex-gpt-image-2.5-flare", ids)
         self.assertNotIn("plus-codex-gpt-image-2", ids)
+        self.assertNotIn("plus-codex-gpt-image-2.5-flare", ids)
 
     def test_list_models_function(self):
         """测试直接调用服务层获取模型列表。"""
