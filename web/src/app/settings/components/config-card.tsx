@@ -27,6 +27,7 @@ export function ConfigCard() {
   const setImagePollTimeoutSecs = useSettingsStore((state) => state.setImagePollTimeoutSecs);
   const setImageAccountConcurrency = useSettingsStore((state) => state.setImageAccountConcurrency);
   const setImageSettleEnabled = useSettingsStore((state) => state.setImageSettleEnabled);
+  const setImageRefFitEnabled = useSettingsStore((state) => state.setImageRefFitEnabled);
   const setImageRemoveConversationAfterResult = useSettingsStore((state) => state.setImageRemoveConversationAfterResult);
   const setImageRemoveConversationAlways = useSettingsStore((state) => state.setImageRemoveConversationAlways);
   const setImageSettleSecs = useSettingsStore((state) => state.setImageSettleSecs);
@@ -226,6 +227,16 @@ export function ConfigCard() {
               <span className="text-sm text-stone-700">图片二次确认机制</span>
             </div>
             <p className="text-xs text-stone-500">打开后能稍微提升获取图片的成功率。</p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">
+              <Checkbox
+                checked={Boolean(config?.image_ref_fit_enabled !== false)}
+                onCheckedChange={(checked) => setImageRefFitEnabled(Boolean(checked))}
+              />
+              <span className="text-sm text-stone-700">参考图超预算压缩</span>
+            </div>
+            <p className="text-xs text-stone-500">Web 生图参考图整包超过 1.5MB 时自动缩边/降质量，避免会话 413。关闭后按原图上传。</p>
           </div>
           <div className="space-y-2">
             <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">

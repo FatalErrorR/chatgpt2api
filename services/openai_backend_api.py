@@ -31,6 +31,7 @@ from utils.helper import (
     new_uuid,
     resolve_image_upstream_model,
 )
+from utils.image_fit import fit_reference_images
 from utils.log import logger
 from utils.pow import build_legacy_requirements_token, build_proof_token, parse_pow_resources
 from utils.turnstile import solve_turnstile_token
@@ -2605,7 +2606,19 @@ class OpenAIBackendAPI:
         if not self.access_token:
             raise RuntimeError("access_token is required for image endpoints")
         self._report_progress("uploading")
-        references = [self._upload_image(image, f"image_{idx}.png") for idx, image in enumerate(images, start=1)]
+        payloads = images
+        if images and config.image_ref_fit_enabled:
+            try:
+                decoded = [self._decode_image_base64(image) for image in images]
+                fitted = fit_reference_images(
+                    decoded,
+                    budget=config.image_ref_fit_budget_bytes,
+                    max_edge=config.image_ref_fit_max_edge,
+                )
+                payloads = [base64.b64encode(item).decode("ascii") for item in fitted]
+            except Exception as exc:
+                logger.warning({"event": "image_ref_fit_skipped", "error": str(exc)})
+        references = [self._upload_image(image, f"image_{idx}.png") for idx, image in enumerate(payloads, start=1)]
         self._report_progress("bootstrapping")
         self._bootstrap()
         self._report_progress("getting_token")
