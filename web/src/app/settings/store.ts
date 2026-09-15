@@ -174,6 +174,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     image_account_concurrency: Number(config.image_account_concurrency || 3),
     image_settle_enabled: Boolean(config.image_settle_enabled !== false),
     image_ref_fit_enabled: Boolean(config.image_ref_fit_enabled !== false),
+    image_req_fit_enabled: Boolean(config.image_req_fit_enabled !== false),
     image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
     image_remove_conversation_after_result: Boolean(config.image_remove_conversation_after_result),
     image_remove_conversation_always: Boolean(config.image_remove_conversation_always),
@@ -298,6 +299,7 @@ type SettingsStore = {
   setImageAccountConcurrency: (value: string) => void;
   setImageSettleEnabled: (value: boolean) => void;
   setImageRefFitEnabled: (value: boolean) => void;
+  setImageReqFitEnabled: (value: boolean) => void;
   setImageCheckBeforeHitEnabled: (value: boolean) => void;
   setImageRemoveConversationAfterResult: (value: boolean) => void;
   setImageRemoveConversationAlways: (value: boolean) => void;
@@ -427,6 +429,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         image_account_concurrency: Math.max(1, Number(config.image_account_concurrency) || 3),
         image_settle_enabled: Boolean(config.image_settle_enabled !== false),
         image_ref_fit_enabled: Boolean(config.image_ref_fit_enabled !== false),
+        image_req_fit_enabled: Boolean(config.image_req_fit_enabled !== false),
         image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
         image_remove_conversation_after_result: Boolean(config.image_remove_conversation_after_result),
         image_remove_conversation_always: Boolean(config.image_remove_conversation_always),
@@ -543,6 +546,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setImageRefFitEnabled: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_ref_fit_enabled: value } } : {});
+  },
+
+  setImageReqFitEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_req_fit_enabled: value } } : {});
   },
 
   setImageCheckBeforeHitEnabled: (value) => {

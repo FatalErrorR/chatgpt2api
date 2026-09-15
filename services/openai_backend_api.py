@@ -31,7 +31,7 @@ from utils.helper import (
     new_uuid,
     resolve_image_upstream_model,
 )
-from utils.image_fit import fit_reference_images
+from utils.image_fit import fit_reference_images, leftover_image_budget
 from utils.log import logger
 from utils.pow import build_legacy_requirements_token, build_proof_token, parse_pow_resources
 from utils.turnstile import solve_turnstile_token
@@ -2607,12 +2607,22 @@ class OpenAIBackendAPI:
             raise RuntimeError("access_token is required for image endpoints")
         self._report_progress("uploading")
         payloads = images
-        if images and config.image_ref_fit_enabled:
+        if images and (config.image_ref_fit_enabled or config.image_req_fit_enabled):
             try:
                 decoded = [self._decode_image_base64(image) for image in images]
+                budget = None
+                if config.image_ref_fit_enabled:
+                    budget = config.image_ref_fit_budget_bytes
+                if config.image_req_fit_enabled:
+                    req_budget = leftover_image_budget(
+                        prompt,
+                        budget=config.image_req_fit_budget_bytes,
+                        n_images=len(decoded),
+                    )
+                    budget = req_budget if budget is None else min(budget, req_budget)
                 fitted = fit_reference_images(
                     decoded,
-                    budget=config.image_ref_fit_budget_bytes,
+                    budget=budget,
                     max_edge=config.image_ref_fit_max_edge,
                 )
                 payloads = [base64.b64encode(item).decode("ascii") for item in fitted]

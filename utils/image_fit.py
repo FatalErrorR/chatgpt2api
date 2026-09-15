@@ -8,11 +8,28 @@ from utils.log import logger
 
 DEFAULT_BUDGET_BYTES = int(1.5 * 1024 * 1024)
 DEFAULT_MAX_EDGE = 2048
+DEFAULT_REQUEST_OVERHEAD_BYTES = 4096
+DEFAULT_REQUEST_PER_IMAGE_BYTES = 256
 JPEG_QUALITIES = (90, 85, 80, 75, 70, 65, 60, 50, 40)
 WEBP_QUALITIES = (90, 85, 80, 75, 70, 60, 50)
 DOWNSCALE_FACTOR = 0.85
 MAX_SHRINK_ROUNDS = 24
 MIN_JUST_FIT_BYTES = 80 * 1024
+
+
+def leftover_image_budget(
+    prompt: str,
+    *,
+    budget: int = DEFAULT_BUDGET_BYTES,
+    n_images: int = 0,
+) -> int:
+    extra = (
+        len((prompt or "").encode("utf-8"))
+        + DEFAULT_REQUEST_OVERHEAD_BYTES
+        + DEFAULT_REQUEST_PER_IMAGE_BYTES * max(n_images, 0)
+    )
+    leftover = budget - extra
+    return leftover if leftover > 0 else 1
 
 
 def fit_reference_images(

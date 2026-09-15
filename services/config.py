@@ -451,6 +451,15 @@ class ConfigStore:
         return _normalize_positive_int(self.data.get("image_ref_fit_max_edge", 2048), 2048, minimum=256)
 
     @property
+    def image_req_fit_enabled(self) -> bool:
+        """Web 生图开画请求（提示词 + 参考图）超预算时是否继续压图。"""
+        return _normalize_bool(self.data.get("image_req_fit_enabled", True), True)
+
+    @property
+    def image_req_fit_budget_bytes(self) -> int:
+        return _normalize_positive_int(self.data.get("image_req_fit_budget_bytes", 1572864), 1572864, minimum=1)
+
+    @property
     def image_check_before_hit_enabled(self) -> bool:
         """先check再hit：通过轮询确认 file_ids 存在后再返回，而非仅依赖 SSE 事件。"""
         value = self.data.get("image_check_before_hit_enabled", True)
@@ -587,6 +596,8 @@ class ConfigStore:
         data["image_ref_fit_enabled"] = self.image_ref_fit_enabled
         data["image_ref_fit_budget_bytes"] = self.image_ref_fit_budget_bytes
         data["image_ref_fit_max_edge"] = self.image_ref_fit_max_edge
+        data["image_req_fit_enabled"] = self.image_req_fit_enabled
+        data["image_req_fit_budget_bytes"] = self.image_req_fit_budget_bytes
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["auto_relogin_after_refresh"] = self.auto_relogin_after_refresh

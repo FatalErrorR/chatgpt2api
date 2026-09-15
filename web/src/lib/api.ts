@@ -172,6 +172,7 @@ export type SettingsConfig = {
   image_parallel_generation?: boolean;
   image_settle_enabled?: boolean;
   image_ref_fit_enabled?: boolean;
+  image_req_fit_enabled?: boolean;
   image_check_before_hit_enabled?: boolean;
   image_remove_conversation_after_result?: boolean;
   image_remove_conversation_always?: boolean;

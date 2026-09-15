@@ -7,7 +7,13 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from utils.image_fit import DEFAULT_BUDGET_BYTES, fit_reference_images
+from utils.image_fit import (
+    DEFAULT_BUDGET_BYTES,
+    DEFAULT_REQUEST_OVERHEAD_BYTES,
+    DEFAULT_REQUEST_PER_IMAGE_BYTES,
+    fit_reference_images,
+    leftover_image_budget,
+)
 
 FLARE10_REF_DIR = Path(__file__).resolve().parents[1] / "tmp-401-out" / "flare10" / "refs"
 
@@ -74,6 +80,25 @@ class ImageFitTests(unittest.TestCase):
 
     def test_empty_list(self) -> None:
         self.assertEqual(fit_reference_images([]), [])
+
+    def test_leftover_image_budget_subtracts_prompt(self) -> None:
+        prompt = "分镜" * 4000
+        leftover = leftover_image_budget(prompt, n_images=10)
+        extra = len(prompt.encode("utf-8")) + DEFAULT_REQUEST_OVERHEAD_BYTES + DEFAULT_REQUEST_PER_IMAGE_BYTES * 10
+        self.assertEqual(leftover, DEFAULT_BUDGET_BYTES - extra)
+        self.assertLess(leftover, DEFAULT_BUDGET_BYTES)
+        self.assertEqual(leftover_image_budget("x" * 3_000_000), 1)
+
+    def test_images_under_file_budget_still_shrink_for_long_prompt(self) -> None:
+        images = [_striped_jpeg(900, 900, quality=90) for _ in range(3)]
+        total = sum(len(item) for item in images)
+        self.assertLess(total, DEFAULT_BUDGET_BYTES)
+        self.assertEqual(sum(len(item) for item in fit_reference_images(images)), total)
+        leftover = leftover_image_budget("hello", budget=total - 10_000, n_images=len(images))
+        self.assertLess(leftover, total)
+        fitted = fit_reference_images(images, budget=leftover)
+        self.assertLessEqual(sum(len(item) for item in fitted), leftover)
+        self.assertLess(sum(len(item) for item in fitted), total)
 
     def test_over_budget_keeps_aspect_ratio(self) -> None:
         large = _noise_jpeg(3000, 2000, quality=95)
