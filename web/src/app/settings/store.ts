@@ -175,6 +175,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     image_settle_enabled: Boolean(config.image_settle_enabled !== false),
     image_ref_fit_enabled: Boolean(config.image_ref_fit_enabled !== false),
     image_req_fit_enabled: Boolean(config.image_req_fit_enabled !== false),
+    image_edit_upload_cooldown_enabled: Boolean(config.image_edit_upload_cooldown_enabled !== false),
     image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
     image_remove_conversation_after_result: Boolean(config.image_remove_conversation_after_result),
     image_remove_conversation_always: Boolean(config.image_remove_conversation_always),
@@ -300,6 +301,7 @@ type SettingsStore = {
   setImageSettleEnabled: (value: boolean) => void;
   setImageRefFitEnabled: (value: boolean) => void;
   setImageReqFitEnabled: (value: boolean) => void;
+  setImageEditUploadCooldownEnabled: (value: boolean) => void;
   setImageCheckBeforeHitEnabled: (value: boolean) => void;
   setImageRemoveConversationAfterResult: (value: boolean) => void;
   setImageRemoveConversationAlways: (value: boolean) => void;
@@ -430,6 +432,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         image_settle_enabled: Boolean(config.image_settle_enabled !== false),
         image_ref_fit_enabled: Boolean(config.image_ref_fit_enabled !== false),
         image_req_fit_enabled: Boolean(config.image_req_fit_enabled !== false),
+        image_edit_upload_cooldown_enabled: Boolean(config.image_edit_upload_cooldown_enabled !== false),
         image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
         image_remove_conversation_after_result: Boolean(config.image_remove_conversation_after_result),
         image_remove_conversation_always: Boolean(config.image_remove_conversation_always),
@@ -550,6 +553,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setImageReqFitEnabled: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_req_fit_enabled: value } } : {});
+  },
+
+  setImageEditUploadCooldownEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_edit_upload_cooldown_enabled: value } } : {});
   },
 
   setImageCheckBeforeHitEnabled: (value) => {

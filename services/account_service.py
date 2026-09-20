@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import secrets
 import time
 import uuid
@@ -19,6 +20,28 @@ from services.log_service import (
 )
 from services.storage.base import StorageBackend
 from utils.helper import anonymize_token
+
+_EDIT_UPLOAD_RETRY_RE = re.compile(r"请\s*(\d+)\s*(小时|分钟)\s*内重试")
+DEFAULT_EDIT_UPLOAD_COOLDOWN = timedelta(hours=5)
+MAX_EDIT_UPLOAD_COOLDOWN = timedelta(hours=24)
+
+
+def is_edit_upload_throttled(error: object) -> bool:
+    text = str(error or "")
+    if "文件上传上限" in text:
+        return True
+    return "file upload limit" in text.lower()
+
+
+def parse_edit_upload_cooldown(error: object) -> timedelta:
+    match = _EDIT_UPLOAD_RETRY_RE.search(str(error or ""))
+    if not match:
+        return DEFAULT_EDIT_UPLOAD_COOLDOWN
+    amount = int(match.group(1))
+    if amount <= 0:
+        return DEFAULT_EDIT_UPLOAD_COOLDOWN
+    delta = timedelta(hours=amount) if match.group(2) == "小时" else timedelta(minutes=amount)
+    return min(delta, MAX_EDIT_UPLOAD_COOLDOWN)
 
 
 class AccountService:
@@ -229,6 +252,9 @@ class AccountService:
         normalized["limits_progress"] = limits_progress if isinstance(limits_progress, list) else []
         normalized["default_model_slug"] = normalized.get("default_model_slug") or None
         normalized["restore_at"] = normalized.get("restore_at") or None
+        normalized["edit_upload_blocked_until"] = str(
+            normalized.get("edit_upload_blocked_until") or ""
+        ).strip() or None
         normalized["success"] = int(normalized.get("success") or 0)
         normalized["fail"] = int(normalized.get("fail") or 0)
         normalized["invalid_count"] = int(normalized.get("invalid_count") or 0)
@@ -953,11 +979,44 @@ class AccountService:
                 self._image_inflight[access_token] = current_inflight - 1
             self._image_slot_condition.notify_all()
 
+    def _is_edit_upload_blocked(self, account: dict | None) -> bool:
+        until = self._parse_time((account or {}).get("edit_upload_blocked_until"))
+        return until is not None and until > datetime.now(timezone.utc)
+
+    def _edit_upload_blocked_tokens(self) -> set[str]:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            return {
+                token
+                for item in self._accounts.values()
+                if (until := self._parse_time(item.get("edit_upload_blocked_until")))
+                and until > now
+                and (token := item.get("access_token") or "")
+            }
+
+    def mark_edit_upload_cooldown(self, access_token: str, error: object) -> str | None:
+        if not access_token:
+            return None
+        until = (datetime.now(timezone.utc) + parse_edit_upload_cooldown(error)).isoformat()
+        account = self.update_account(
+            access_token,
+            {"edit_upload_blocked_until": until},
+            quiet=True,
+        )
+        log_service.add(
+            LOG_TYPE_ACCOUNT,
+            "图生图上传冷却",
+            {"token": anonymize_token(access_token), "until": until},
+        )
+        return str((account or {}).get("edit_upload_blocked_until") or until)
+
     def get_available_access_token(
             self,
             plan_type: str | None = None,
             source_type: str | None = None,
             plan_types: set[str] | tuple[str, ...] | None = None,
+            excluded_tokens: set[str] | None = None,
+            for_edits: bool = False,
     ) -> str:
         """从候选池中获取一个可用的图片生图 token。
 
@@ -965,7 +1024,10 @@ class AccountService:
         限制最大尝试次数防止 token rotation 导致无限循环。
         """
         max_attempts = 20  # 防止无限循环
-        attempted_tokens: set[str] = set()
+        attempted_tokens: set[str] = set(excluded_tokens or set())
+        skip_edit_cooldown = bool(for_edits and config.image_edit_upload_cooldown_enabled)
+        if skip_edit_cooldown:
+            attempted_tokens.update(self._edit_upload_blocked_tokens())
         for _attempt in range(max_attempts):
             access_token = self._acquire_next_candidate_token(
                 excluded_tokens=attempted_tokens,
@@ -989,6 +1051,7 @@ class AccountService:
                     and self._account_matches_plan_type(account or {}, plan_type)
                     and self._account_matches_any_plan_type(account or {}, plan_types)
                     and self._account_matches_source_type(account or {}, source_type)
+                    and not (skip_edit_cooldown and self._is_edit_upload_blocked(account))
             ):
                 return str((account or {}).get("access_token") or access_token)
             self.release_image_slot(access_token)

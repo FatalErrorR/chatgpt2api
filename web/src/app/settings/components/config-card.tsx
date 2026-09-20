@@ -29,6 +29,7 @@ export function ConfigCard() {
   const setImageSettleEnabled = useSettingsStore((state) => state.setImageSettleEnabled);
   const setImageRefFitEnabled = useSettingsStore((state) => state.setImageRefFitEnabled);
   const setImageReqFitEnabled = useSettingsStore((state) => state.setImageReqFitEnabled);
+  const setImageEditUploadCooldownEnabled = useSettingsStore((state) => state.setImageEditUploadCooldownEnabled);
   const setImageRemoveConversationAfterResult = useSettingsStore((state) => state.setImageRemoveConversationAfterResult);
   const setImageRemoveConversationAlways = useSettingsStore((state) => state.setImageRemoveConversationAlways);
   const setImageSettleSecs = useSettingsStore((state) => state.setImageSettleSecs);
@@ -248,6 +249,16 @@ export function ConfigCard() {
               <span className="text-sm text-stone-700">请求超预算压缩</span>
             </div>
             <p className="text-xs text-stone-500">提示词 + 参考图超过 1.5MB 时只压参考图，提示词原文不动。与上一开关独立。</p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">
+              <Checkbox
+                checked={Boolean(config?.image_edit_upload_cooldown_enabled !== false)}
+                onCheckedChange={(checked) => setImageEditUploadCooldownEnabled(Boolean(checked))}
+              />
+              <span className="text-sm text-stone-700">图生图上传冷却</span>
+            </div>
+            <p className="text-xs text-stone-500">谁返回「文件上传上限」就冻谁，按 ChatGPT 说的时间暂停该号图生图并立刻换号（最多 5 次）。文生图不受影响，不限套餐。</p>
           </div>
           <div className="space-y-2">
             <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">

@@ -11,7 +11,7 @@ from typing import Any, Iterable, Iterator
 
 import tiktoken
 
-from services.account_service import account_service
+from services.account_service import account_service, is_edit_upload_throttled
 from services.config import config
 from services.image_storage_service import image_storage_service
 from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeoutError, OpenAIBackendAPI
@@ -1306,11 +1306,16 @@ def _generate_single_image(
     MAX_CONN_TIMEOUT_RETRIES = 3
     # 轮询超时错误最大重试次数（换账号重试）
     MAX_POLL_TIMEOUT_RETRIES = 4
+    # 图生图上传上限：冻当前号后换下一个，最多再试 5 个不同号
+    MAX_EDIT_UPLOAD_THROTTLE_RETRIES = 5
 
     text_reply_retry_count = 0
     tls_retry_count = 0
     conn_timeout_retry_count = 0
     poll_timeout_retry_count = 0
+    edit_upload_retry_count = 0
+    tried_upload_tokens: set[str] = set()
+    for_edits = bool(request.images)
     account_email = ""
 
     while True:
@@ -1323,6 +1328,8 @@ def _generate_single_image(
                 plan_type=plan_type,
                 source_type="codex" if codex_model else None,
                 plan_types=("plus", "team", "pro") if codex_model and not plan_type else None,
+                excluded_tokens=tried_upload_tokens,
+                for_edits=for_edits,
             )
         except RuntimeError as exc:
             raise ImageGenerationError(str(exc) or "image generation failed", account_email=account_email) from exc
@@ -1521,6 +1528,32 @@ def _generate_single_image(
                     })
                     time.sleep(wait_secs)
                     continue
+            if (
+                for_edits
+                and config.image_edit_upload_cooldown_enabled
+                and not emitted_for_token
+                and is_edit_upload_throttled(last_error)
+            ):
+                account_service.mark_edit_upload_cooldown(token, last_error)
+                tried_upload_tokens.add(token)
+                edit_upload_retry_count += 1
+                if edit_upload_retry_count <= MAX_EDIT_UPLOAD_THROTTLE_RETRIES:
+                    logger.warning({
+                        "event": "image_edit_upload_throttle_retry",
+                        "request_token": token,
+                        "account_email": account_email,
+                        "retry_count": edit_upload_retry_count,
+                        "index": index,
+                        "error": last_error[:200],
+                    })
+                    continue
+                logger.warning({
+                    "event": "image_edit_upload_throttle_exhausted_retries",
+                    "request_token": token,
+                    "account_email": account_email,
+                    "retry_count": edit_upload_retry_count,
+                    "index": index,
+                })
             raise ImageGenerationError(image_stream_error_message(last_error), account_email=account_email, conversation_id="") from exc
         finally:
             if backend is not None:

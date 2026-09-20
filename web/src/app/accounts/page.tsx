@@ -128,6 +128,15 @@ function formatRestoreAt(value?: string | null) {
   return { absolute, relative };
 }
 
+function isEditUploadCooled(account: { edit_upload_blocked_until?: string | null }) {
+  const raw = account.edit_upload_blocked_until;
+  if (!raw) {
+    return false;
+  }
+  const date = new Date(raw);
+  return !Number.isNaN(date.getTime()) && date.getTime() > Date.now();
+}
+
 function formatQuotaSummary(accounts: Account[]) {
   const availableAccounts = accounts.filter((account) => account.status === "正常");
   return formatCompact(availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0));
@@ -1108,13 +1117,18 @@ function AccountsPageContent() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge
-                            variant={status.badge}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1"
-                          >
-                            <StatusIcon className="size-3.5" />
-                            {account.status}
-                          </Badge>
+                          <div className="space-y-1">
+                            <Badge
+                              variant={status.badge}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1"
+                            >
+                              <StatusIcon className="size-3.5" />
+                              {account.status}
+                            </Badge>
+                            {isEditUploadCooled(account) ? (
+                              <div className="text-[11px] font-medium text-amber-700">图生图冷却</div>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="text-xs leading-5 text-stone-500">{account.email ?? "—"}</div>
@@ -1138,10 +1152,21 @@ function AccountsPageContent() {
                         <td className="px-4 py-3 text-xs leading-5 text-stone-500">
                           {(() => {
                             const restore = formatRestoreAt(account.restore_at);
+                            const cooldown = isEditUploadCooled(account)
+                              ? formatRestoreAt(account.edit_upload_blocked_until)
+                              : null;
                             return (
-                              <div className="space-y-0.5">
-                                {restore.relative ? <div className="font-medium text-stone-700">{restore.relative}</div> : null}
-                                <div>{restore.absolute}</div>
+                              <div className="space-y-1">
+                                <div className="space-y-0.5">
+                                  {restore.relative ? <div className="font-medium text-stone-700">{restore.relative}</div> : null}
+                                  <div>{restore.absolute}</div>
+                                </div>
+                                {cooldown ? (
+                                  <div className="space-y-0.5 border-t border-stone-100 pt-1">
+                                    <div className="font-medium text-amber-700">图生图冷却 {cooldown.relative}</div>
+                                    <div>{cooldown.absolute}</div>
+                                  </div>
+                                ) : null}
                               </div>
                             );
                           })()}

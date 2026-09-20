@@ -31,6 +31,7 @@ export type Account = {
   }>;
   default_model_slug?: string | null;
   restore_at?: string | null;
+  edit_upload_blocked_until?: string | null;
   success: number;
   fail: number;
   /** 当前图片在途数(正在生成、尚未结束的图片数)。号池空闲时持续 > 0 表示并发槽位泄漏。 */
@@ -173,6 +174,7 @@ export type SettingsConfig = {
   image_settle_enabled?: boolean;
   image_ref_fit_enabled?: boolean;
   image_req_fit_enabled?: boolean;
+  image_edit_upload_cooldown_enabled?: boolean;
   image_check_before_hit_enabled?: boolean;
   image_remove_conversation_after_result?: boolean;
   image_remove_conversation_always?: boolean;

@@ -460,6 +460,11 @@ class ConfigStore:
         return _normalize_positive_int(self.data.get("image_req_fit_budget_bytes", 1572864), 1572864, minimum=1)
 
     @property
+    def image_edit_upload_cooldown_enabled(self) -> bool:
+        """图生图撞上文件上传上限时，按 ChatGPT 给出的时间冷却该号并换号。"""
+        return _normalize_bool(self.data.get("image_edit_upload_cooldown_enabled", True), True)
+
+    @property
     def image_check_before_hit_enabled(self) -> bool:
         """先check再hit：通过轮询确认 file_ids 存在后再返回，而非仅依赖 SSE 事件。"""
         value = self.data.get("image_check_before_hit_enabled", True)
@@ -598,6 +603,7 @@ class ConfigStore:
         data["image_ref_fit_max_edge"] = self.image_ref_fit_max_edge
         data["image_req_fit_enabled"] = self.image_req_fit_enabled
         data["image_req_fit_budget_bytes"] = self.image_req_fit_budget_bytes
+        data["image_edit_upload_cooldown_enabled"] = self.image_edit_upload_cooldown_enabled
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["auto_relogin_after_refresh"] = self.auto_relogin_after_refresh
