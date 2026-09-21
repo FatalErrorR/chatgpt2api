@@ -211,6 +211,14 @@ class UpstreamHTTPError(RuntimeError):
         super().__init__(f"{context} failed: status={status_code}, body={body_str}")
 
 
+def is_conversation_413(error: object) -> bool:
+    """True only for POST /backend-api/f/conversation 413, not /prepare or /files."""
+    if isinstance(error, UpstreamHTTPError):
+        return error.status_code == 413 and str(error.context or "").endswith("/conversation")
+    text = str(error or "")
+    return "status=413" in text and "/conversation failed:" in text
+
+
 def ensure_ok(response: requests.Response, context: str) -> None:
     if 200 <= response.status_code < 300:
         return

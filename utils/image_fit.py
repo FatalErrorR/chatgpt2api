@@ -32,6 +32,29 @@ def leftover_image_budget(
     return leftover if leftover > 0 else 1
 
 
+def fit_web_reference_images(
+    images: list[bytes],
+    prompt: str = "",
+    *,
+    ref_enabled: bool = True,
+    ref_budget: int = DEFAULT_BUDGET_BYTES,
+    req_enabled: bool = True,
+    req_budget: int = DEFAULT_BUDGET_BYTES,
+    max_edge: int = DEFAULT_MAX_EDGE,
+) -> list[bytes]:
+    """Fit the package once to the tighter of the file budget and leftover request budget."""
+    if not images:
+        return []
+    budgets: list[int] = []
+    if ref_enabled:
+        budgets.append(ref_budget)
+    if req_enabled:
+        budgets.append(leftover_image_budget(prompt, budget=req_budget, n_images=len(images)))
+    if not budgets:
+        return list(images)
+    return fit_reference_images(images, budget=min(budgets), max_edge=max_edge)
+
+
 def fit_reference_images(
     images: list[bytes],
     *,

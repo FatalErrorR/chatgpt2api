@@ -5,6 +5,8 @@ import unittest
 from io import BytesIO
 from pathlib import Path
 
+os.environ.setdefault("CHATGPT2API_AUTH_KEY", "test-auth")
+
 from PIL import Image, ImageDraw
 
 from utils.image_fit import (
@@ -12,6 +14,7 @@ from utils.image_fit import (
     DEFAULT_REQUEST_OVERHEAD_BYTES,
     DEFAULT_REQUEST_PER_IMAGE_BYTES,
     fit_reference_images,
+    fit_web_reference_images,
     leftover_image_budget,
 )
 
@@ -100,6 +103,29 @@ class ImageFitTests(unittest.TestCase):
         self.assertLessEqual(sum(len(item) for item in fitted), leftover)
         self.assertLess(sum(len(item) for item in fitted), total)
 
+    def test_web_fit_uses_tighter_request_budget_in_one_pass(self) -> None:
+        images = [_noise_jpeg(1600, 1200, quality=95) for _ in range(3)]
+        file_only = fit_web_reference_images(images, "", ref_enabled=True, req_enabled=False)
+        file_total = sum(len(item) for item in file_only)
+        self.assertLessEqual(file_total, DEFAULT_BUDGET_BYTES)
+        tighter = fit_web_reference_images(
+            images,
+            "hello",
+            ref_enabled=True,
+            req_enabled=True,
+            req_budget=file_total - 20_000,
+        )
+        leftover = leftover_image_budget("hello", budget=file_total - 20_000, n_images=len(images))
+        self.assertLess(sum(len(item) for item in tighter), file_total)
+        self.assertLessEqual(sum(len(item) for item in tighter), leftover)
+
+    def test_web_fit_skips_when_already_under_target(self) -> None:
+        small = [_png_bytes(32, 32)]
+        self.assertEqual(
+            fit_web_reference_images(small, "hi", ref_enabled=True, req_enabled=True),
+            small,
+        )
+
     def test_over_budget_keeps_aspect_ratio(self) -> None:
         large = _noise_jpeg(3000, 2000, quality=95)
         fitted = fit_reference_images([large])
@@ -131,6 +157,64 @@ class ImageFitTests(unittest.TestCase):
             output = Image.open(BytesIO(fitted[index]))
             self.assertGreaterEqual(min(output.size), 256)
             self.assertGreater(len(fitted[index]), 40_000)
+
+
+class Conversation413RetryTests(unittest.TestCase):
+    def test_is_conversation_413_ignores_prepare_and_files(self) -> None:
+        from utils.helper import UpstreamHTTPError, is_conversation_413
+
+        conv = UpstreamHTTPError("/backend-api/f/conversation", 413, "")
+        prepare = UpstreamHTTPError("/backend-api/f/conversation/prepare", 413, "")
+        files = UpstreamHTTPError("/backend-api/files", 413, "")
+        self.assertTrue(is_conversation_413(conv))
+        self.assertTrue(is_conversation_413("/backend-api/f/conversation failed: status=413, body="))
+        self.assertFalse(is_conversation_413(prepare))
+        self.assertFalse(is_conversation_413(files))
+        self.assertFalse(is_conversation_413(UpstreamHTTPError("/backend-api/f/conversation", 429, "")))
+
+    def test_stream_does_not_reupload_on_conversation_413(self) -> None:
+        import base64
+
+        from services.openai_backend_api import OpenAIBackendAPI
+        from utils.helper import UpstreamHTTPError
+
+        jpeg = _noise_jpeg(1600, 1600, quality=95)
+        payload = base64.b64encode(jpeg).decode("ascii")
+        backend = object.__new__(OpenAIBackendAPI)
+        backend.access_token = "token"
+        backend.progress_callback = None
+        backend.uploads = []
+        backend.starts = 0
+
+        def upload(image: str, file_name: str = "image.png") -> dict:
+            data = backend._decode_image_base64(image)
+            backend.uploads.append(len(data))
+            return {
+                "file_id": f"file_{len(backend.uploads)}",
+                "file_name": file_name,
+                "file_size": len(data),
+                "mime_type": "image/jpeg",
+                "width": 10,
+                "height": 10,
+            }
+
+        def start(*_args, **_kwargs):
+            backend.starts += 1
+            raise UpstreamHTTPError("/backend-api/f/conversation", 413, "")
+
+        backend._upload_image = upload  # type: ignore[method-assign]
+        backend._bootstrap = lambda: None  # type: ignore[method-assign]
+        backend._get_chat_requirements = lambda: object()  # type: ignore[method-assign]
+        backend._prepare_image_conversation = lambda *args, **kwargs: "conduit"  # type: ignore[method-assign]
+        backend._start_image_generation = start  # type: ignore[method-assign]
+        backend._iter_sse_payloads_capped = lambda response, _timeout: iter((response,))  # type: ignore[method-assign]
+        backend._report_progress = lambda _step: None  # type: ignore[method-assign]
+
+        with self.assertRaises(UpstreamHTTPError) as raised:
+            list(backend._stream_picture_conversation("prompt", "gpt-image-2.5-sunburst", [payload]))
+        self.assertEqual(raised.exception.status_code, 413)
+        self.assertEqual(backend.starts, 1)
+        self.assertEqual(len(backend.uploads), 1)
 
 
 @unittest.skipUnless(FLARE10_REF_DIR.is_dir(), "flare10 refs are not present")
