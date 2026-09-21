@@ -444,7 +444,7 @@ class ConfigStore:
 
     @property
     def image_ref_fit_budget_bytes(self) -> int:
-        return _normalize_positive_int(self.data.get("image_ref_fit_budget_bytes", 1572864), 1572864, minimum=1)
+        return _normalize_positive_int(self.data.get("image_ref_fit_budget_bytes", 1468006), 1468006, minimum=1)
 
     @property
     def image_ref_fit_max_edge(self) -> int:
@@ -457,7 +457,7 @@ class ConfigStore:
 
     @property
     def image_req_fit_budget_bytes(self) -> int:
-        return _normalize_positive_int(self.data.get("image_req_fit_budget_bytes", 1572864), 1572864, minimum=1)
+        return _normalize_positive_int(self.data.get("image_req_fit_budget_bytes", 1468006), 1468006, minimum=1)
 
     @property
     def image_edit_upload_cooldown_enabled(self) -> bool:
