@@ -5,7 +5,7 @@ import json
 import itertools
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -87,6 +87,60 @@ class LogService:
                 break
         return items
 
+    def image_output_counts(self, now: datetime | None = None) -> dict[str, dict[str, int]]:
+        """Count successful 文生图/图生图 images in Beijing-time windows.
+
+        Log timestamps are server-local. ponytail: one pass over logs.jsonl;
+        switch to a daily rollup if this scan gets slow.
+        """
+        cst = timezone(timedelta(hours=8))
+        moment = now.astimezone(cst) if now is not None else datetime.now(cst)
+        start_today = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        windows: dict[str, tuple[datetime, datetime | None]] = {
+            "today": (start_today, None),
+            "yesterday": (start_today - timedelta(days=1), start_today),
+            "d7": (start_today - timedelta(days=6), None),
+            "d14": (start_today - timedelta(days=13), None),
+            "d30": (start_today - timedelta(days=29), None),
+        }
+        counts = {kind: {key: 0 for key in windows} for kind in ("edits", "generations")}
+        if not self.path.exists():
+            return counts
+        server_tz = datetime.now().astimezone().tzinfo or timezone.utc
+        earliest = windows["d30"][0]
+        endpoints = {
+            "/v1/images/edits": "edits",
+            "/v1/images/generations": "generations",
+        }
+        with self.path.open(encoding="utf-8") as file:
+            for raw_line in file:
+                if '"type":"call"' not in raw_line or "/v1/images/" not in raw_line:
+                    continue
+                try:
+                    item = json.loads(raw_line)
+                except Exception:
+                    continue
+                if not isinstance(item, dict) or item.get("type") != "call":
+                    continue
+                detail = item.get("detail")
+                if not isinstance(detail, dict) or detail.get("status") != "success":
+                    continue
+                kind = endpoints.get(str(detail.get("endpoint") or ""))
+                if kind is None:
+                    continue
+                urls = detail.get("urls")
+                image_count = len(urls) if isinstance(urls, list) else 0
+                if image_count <= 0:
+                    continue
+                occurred = _parse_server_local_time(item.get("time"), server_tz)
+                if occurred is None or occurred < earliest:
+                    continue
+                bucket = counts[kind]
+                for key, (start, end) in windows.items():
+                    if occurred >= start and (end is None or occurred < end):
+                        bucket[key] += image_count
+        return counts
+
     def delete(self, ids: list[str]) -> dict[str, int]:
         target_ids = {str(item or "").strip() for item in ids if str(item or "").strip()}
         if not self.path.exists() or not target_ids:
@@ -108,6 +162,17 @@ class LogService:
             content += "\n"
         self.path.write_text(content, encoding="utf-8")
         return {"removed": removed}
+
+
+def _parse_server_local_time(value: object, server_tz: datetime.tzinfo) -> datetime | None:
+    text = str(value or "").strip()
+    if len(text) < 19:
+        return None
+    try:
+        parsed = datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=server_tz).astimezone(timezone(timedelta(hours=8)))
 
 
 log_service = LogService(DATA_DIR / "logs.jsonl")

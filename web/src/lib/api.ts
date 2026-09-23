@@ -343,10 +343,10 @@ export async function fetchModels() {
   return httpRequest<ModelListResponse>("/v1/models");
 }
 
-export async function createAccounts(tokens: string[], accounts: AccountImportPayload[] = []) {
+export async function createAccounts(tokens: string[], accounts: AccountImportPayload[] = [], proxy = "") {
   return httpRequest<AccountMutationResponse>("/api/accounts", {
     method: "POST",
-    body: { tokens, accounts },
+    body: { tokens, accounts, proxy },
   });
 }
 
@@ -364,11 +364,20 @@ export async function startOAuthLogin(emailHint?: string) {
   });
 }
 
-export async function finishOAuthLogin(sessionId: string, callback: string) {
+export async function finishOAuthLogin(sessionId: string, callback: string, proxy = "") {
   return httpRequest<AccountMutationResponse>("/api/accounts/oauth/finish", {
     method: "POST",
-    body: { session_id: sessionId, callback },
+    body: { session_id: sessionId, callback, proxy },
   });
+}
+
+export type ImageOutputCounts = {
+  edits: Record<"today" | "yesterday" | "d7" | "d14" | "d30", number>;
+  generations: Record<"today" | "yesterday" | "d7" | "d14" | "d30", number>;
+};
+
+export async function fetchImageOutputCounts() {
+  return httpRequest<ImageOutputCounts>("/api/logs/image-counts");
 }
 
 export async function deleteAccounts(tokens: string[]) {

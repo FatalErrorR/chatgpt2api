@@ -48,6 +48,7 @@ class UserKeyUpdateRequest(BaseModel):
 class AccountCreateRequest(BaseModel):
     tokens: list[str] = Field(default_factory=list)
     accounts: list[dict[str, Any]] = Field(default_factory=list)
+    proxy: str = ""
 
 
 class AccountDeleteRequest(BaseModel):
@@ -118,6 +119,7 @@ class OAuthLoginFinishRequest(BaseModel):
     """提交 callback。callback 既可以是完整 URL 也可以只填 code。"""
     session_id: str = ""
     callback: str = ""
+    proxy: str = ""
 
 
 def _account_payload_token(item: dict[str, Any]) -> str:
@@ -220,14 +222,28 @@ def create_router() -> APIRouter:
         tokens = _unique_tokens([*body.tokens, *payload_tokens])
         if not tokens:
             raise HTTPException(status_code=400, detail={"error": "tokens is required"})
+        proxy = body.proxy.strip()
         if account_payloads:
+            if proxy:
+                for item in account_payloads:
+                    item["proxy"] = proxy
             result = account_service.add_account_items(account_payloads)
             payload_token_set = set(_unique_tokens(payload_tokens))
             extra_tokens = [token for token in tokens if token not in payload_token_set]
             if extra_tokens:
-                extra_result = account_service.add_accounts(extra_tokens)
+                extra_result = (
+                    account_service.add_account_items(
+                        [{"access_token": token, "proxy": proxy, "source_type": "web"} for token in extra_tokens]
+                    )
+                    if proxy
+                    else account_service.add_accounts(extra_tokens)
+                )
                 result["added"] = int(result.get("added") or 0) + int(extra_result.get("added") or 0)
                 result["skipped"] = int(result.get("skipped") or 0) + int(extra_result.get("skipped") or 0)
+        elif proxy:
+            result = account_service.add_account_items(
+                [{"access_token": token, "proxy": proxy, "source_type": "web"} for token in tokens]
+            )
         else:
             result = account_service.add_accounts(tokens)
         refresh_result = account_service.refresh_accounts(tokens)
@@ -382,6 +398,8 @@ def create_router() -> APIRouter:
             "id_token": tokens["id_token"],
             "source_type": "oauth_login",
         }
+        if body.proxy.strip():
+            payload["proxy"] = body.proxy.strip()
         add_result = await run_in_threadpool(account_service.add_account_items, [payload])
         refresh_result = await run_in_threadpool(
             account_service.refresh_accounts, [tokens["access_token"]]

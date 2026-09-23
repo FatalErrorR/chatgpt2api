@@ -45,7 +45,7 @@ import {
 import {
   deleteAccounts,
   fetchAccounts,
-  fetchModels,
+  fetchImageOutputCounts,
   fetchRefreshProgress,
   fetchReLoginProgress,
   reLoginAccounts,
@@ -55,7 +55,7 @@ import {
   type Account,
   type AccountRefreshResponse,
   type AccountStatus,
-  type Model,
+  type ImageOutputCounts,
   type RefreshProgressResponse,
 } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
@@ -63,13 +63,24 @@ import { cn } from "@/lib/utils";
 
 import { AccountImportDialog } from "./components/account-import-dialog";
 
-const accountStatusOptions: { label: string; value: AccountStatus | "all" }[] = [
+type StatusFilter = AccountStatus | "all" | "edit_cooldown";
+
+const accountStatusOptions: { label: string; value: StatusFilter }[] = [
   { label: "全部状态", value: "all" },
   { label: "正常", value: "正常" },
   { label: "限流", value: "限流" },
   { label: "异常", value: "异常" },
   { label: "禁用", value: "禁用" },
+  { label: "图生图冷却中", value: "edit_cooldown" },
 ];
+
+const imageCountWindows = [
+  ["today", "今日"],
+  ["yesterday", "昨日"],
+  ["d7", "7天"],
+  ["d14", "14天"],
+  ["d30", "30天"],
+] as const;
 
 const statusMeta: Record<
   AccountStatus,
@@ -177,11 +188,11 @@ function displayAccountSource(account: Account) {
 function AccountsPageContent() {
   const didLoadRef = useRef(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [availableModels, setAvailableModels] = useState<Model[]>([]);
+  const [imageCounts, setImageCounts] = useState<ImageOutputCounts | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<AccountStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("10");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -189,7 +200,6 @@ function AccountsPageContent() {
   const [editProxy, setEditProxy] = useState("");
   const [isTestingProxy, setIsTestingProxy] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshingTokens, setRefreshingTokens] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
@@ -229,16 +239,12 @@ function AccountsPageContent() {
     }
   };
 
-  const loadModels = async () => {
-    setIsLoadingModels(true);
+  const loadImageCounts = async () => {
     try {
-      const data = await fetchModels();
-      setAvailableModels(Array.isArray(data.data) ? data.data : []);
+      setImageCounts(await fetchImageOutputCounts());
     } catch (error) {
-      const message = error instanceof Error ? error.message : "加载模型列表失败";
+      const message = error instanceof Error ? error.message : "加载生图张数失败";
       toast.error(message);
-    } finally {
-      setIsLoadingModels(false);
     }
   };
 
@@ -248,7 +254,7 @@ function AccountsPageContent() {
     }
     didLoadRef.current = true;
     void loadAccounts();
-    void loadModels();
+    void loadImageCounts();
 
     // 清理进度条定时器
     return () => {
@@ -262,7 +268,9 @@ function AccountsPageContent() {
       const searchMatched =
         normalizedQuery.length === 0 || (account.email ?? "").toLowerCase().includes(normalizedQuery);
       const typeMatched = typeFilter === "all" || displayAccountType(account) === typeFilter;
-      const statusMatched = statusFilter === "all" || account.status === statusFilter;
+      const statusMatched =
+        statusFilter === "all" ||
+        (statusFilter === "edit_cooldown" ? isEditUploadCooled(account) : account.status === statusFilter);
       return searchMatched && typeMatched && statusMatched;
     });
   }, [accounts, query, statusFilter, typeFilter]);
@@ -745,6 +753,9 @@ function AccountsPageContent() {
           </Button>
           <AccountImportDialog
             disabled={isLoading || isRefreshing || isDeleting}
+            proxyOptions={Array.from(
+              new Set(accounts.map((account) => (account.proxy || "").trim()).filter(Boolean)),
+            )}
             onImported={(items) => {
               setAccounts(items);
               setSelectedIds([]);
@@ -803,7 +814,7 @@ function AccountsPageContent() {
                 </SelectTrigger>
                 <SelectContent>
                   {accountStatusOptions
-                    .filter((option) => option.value !== "all")
+                    .filter((option) => option.value !== "all" && option.value !== "edit_cooldown")
                     .map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
@@ -877,39 +888,27 @@ function AccountsPageContent() {
           })}
         </div>
         <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
-          <CardContent className="p-4">
-            <div className="mb-3 text-sm font-medium text-stone-700">
-              系统可用模型
-              <span className="ml-1 text-stone-400">({availableModels.length})</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {availableModels.length > 0 ? (
-                availableModels.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    className="inline-flex cursor-pointer items-center rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(model.id);
-                      toast.success("模型名已复制");
-                    }}
-                    title={`点击复制 ${model.id}`}
-                  >
-                    <img
-                      src="/openai.svg"
-                      alt=""
-                      aria-hidden="true"
-                      className="mr-1.5 size-3.5 shrink-0"
-                    />
-                    {model.id}
-                  </button>
-                ))
-              ) : isLoadingModels ? (
-                <span className="text-sm text-stone-400">正在加载模型列表...</span>
-              ) : (
-                <span className="text-sm text-stone-400">当前暂无可用模型</span>
-              )}
-            </div>
+          <CardContent className="grid gap-4 p-4 sm:grid-cols-2">
+            {(
+              [
+                ["edits", "图生图"],
+                ["generations", "文生图"],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key} className="space-y-2">
+                <div className="text-sm font-medium text-stone-700">{label}</div>
+                <div className="grid grid-cols-5 gap-2">
+                  {imageCountWindows.map(([windowKey, windowLabel]) => (
+                    <div key={windowKey} className="rounded-xl bg-stone-50 px-2 py-2 text-center">
+                      <div className="text-[11px] text-stone-400">{windowLabel}</div>
+                      <div className="text-lg font-semibold tracking-tight text-stone-900">
+                        {imageCounts ? formatCompact(imageCounts[key][windowKey] || 0) : "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </section>
@@ -957,11 +956,11 @@ function AccountsPageContent() {
             <Select
               value={statusFilter}
               onValueChange={(value) => {
-                setStatusFilter(value as AccountStatus | "all");
+                setStatusFilter(value as StatusFilter);
                 setPage(1);
               }}
             >
-              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white/85 lg:w-[150px]">
+              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white/85 lg:w-[180px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

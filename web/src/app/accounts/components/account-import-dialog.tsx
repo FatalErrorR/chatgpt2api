@@ -18,6 +18,14 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -42,6 +50,7 @@ type ImportMethod = "menu" | "token" | "session" | "codex-auth" | "account-json"
 
 type AccountImportDialogProps = {
   disabled?: boolean;
+  proxyOptions?: string[];
   onImported: (items: Account[]) => void;
 };
 
@@ -180,7 +189,7 @@ function MethodCard({
   );
 }
 
-export function AccountImportDialog({ disabled, onImported }: AccountImportDialogProps) {
+export function AccountImportDialog({ disabled, proxyOptions = [], onImported }: AccountImportDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<ImportMethod>("menu");
@@ -194,6 +203,8 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
   const [oauthSession, setOauthSession] = useState<OAuthLoginStartResponse | null>(null);
   const [oauthCallbackInput, setOauthCallbackInput] = useState("");
   const [oauthStarting, setOauthStarting] = useState(false);
+  const [proxyChoice, setProxyChoice] = useState("none");
+  const [newProxy, setNewProxy] = useState("");
 
   const txtInputRef = useRef<HTMLInputElement | null>(null);
   const accountJsonInputRef = useRef<HTMLInputElement | null>(null);
@@ -209,6 +220,23 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
     setOauthSession(null);
     setOauthCallbackInput("");
     setOauthStarting(false);
+    setProxyChoice("none");
+    setNewProxy("");
+  };
+
+  const importProxy = () => {
+    if (proxyChoice === "none") {
+      return "";
+    }
+    if (proxyChoice === "new") {
+      const url = newProxy.trim();
+      if (!url) {
+        toast.error("请填写新代理地址");
+        return null;
+      }
+      return url;
+    }
+    return proxyChoice;
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -226,9 +254,14 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
       return;
     }
 
+    const proxy = importProxy();
+    if (proxy === null) {
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const data = await createAccounts(normalizedTokens, accountPayloads);
+      const data = await createAccounts(normalizedTokens, accountPayloads, proxy);
       onImported(data.items);
       setOpen(false);
       resetState();
@@ -286,9 +319,14 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
       return;
     }
 
+    const proxy = importProxy();
+    if (proxy === null) {
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const data = await finishOAuthLogin(oauthSession.session_id, trimmed);
+      const data = await finishOAuthLogin(oauthSession.session_id, trimmed, proxy);
       onImported(data.items);
       setOpen(false);
       resetState();
@@ -810,6 +848,38 @@ export function AccountImportDialog({ disabled, onImported }: AccountImportDialo
                       : "支持读取本项目导出的单账号对象或全部账号数组，并在提交前做数量确认。"}
             </DialogDescription>
           </DialogHeader>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-stone-700">导入代理</label>
+            <Select value={proxyChoice} onValueChange={setProxyChoice}>
+              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不指定，走全局代理</SelectItem>
+                {proxyOptions.map((proxy) => (
+                  <SelectItem key={proxy} value={proxy}>
+                    {proxy}
+                  </SelectItem>
+                ))}
+                <SelectItem value="new">使用新代理</SelectItem>
+              </SelectContent>
+            </Select>
+            {proxyChoice === "new" ? (
+              <Input
+                value={newProxy}
+                onChange={(event) => setNewProxy(event.target.value)}
+                placeholder="http://user:pass@host:port"
+                className="h-10 rounded-xl border-stone-200 bg-white"
+              />
+            ) : (
+              <p className="text-xs text-stone-500">
+                {proxyChoice === "none"
+                  ? "不写专属代理，这些账号继续走全局代理。"
+                  : "这个地址会写到这次导入的账号上，不改全局代理。"}
+              </p>
+            )}
+          </div>
 
           {renderMethodBody()}
 

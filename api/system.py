@@ -132,6 +132,11 @@ def create_router(app_version: str) -> APIRouter:
         require_admin(authorization)
         return {"items": log_service.list(type=type.strip(), start_date=start_date.strip(), end_date=end_date.strip())}
 
+    @router.get("/api/logs/image-counts")
+    async def get_image_output_counts(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        return await run_in_threadpool(log_service.image_output_counts)
+
     @router.post("/api/logs/delete")
     async def delete_logs(body: LogDeleteRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
