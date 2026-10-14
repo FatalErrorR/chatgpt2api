@@ -460,6 +460,22 @@ class ConfigStore:
         return _normalize_positive_int(self.data.get("image_req_fit_budget_bytes", 1468006), 1468006, minimum=1)
 
     @property
+    def image_upscale_enabled(self) -> bool:
+        """出图后是否把长边不足的图放大到目标尺寸（默认关闭）。"""
+        return _normalize_bool(self.data.get("image_upscale_enabled", False), False)
+
+    @property
+    def image_upscale_target_edge(self) -> int:
+        value = _normalize_positive_int(self.data.get("image_upscale_target_edge", 2048), 2048, minimum=1024)
+        return min(value, 4096)
+
+    @property
+    def image_upscale_method(self) -> str:
+        """lanczos：Lanczos + 锐化；model：RealESRGAN 小模型（CPU，较慢，失败回退 lanczos）。"""
+        value = str(self.data.get("image_upscale_method", "lanczos") or "").strip().lower()
+        return value if value in {"lanczos", "model"} else "lanczos"
+
+    @property
     def image_edit_upload_cooldown_enabled(self) -> bool:
         """图生图撞上文件上传上限时，按 ChatGPT 给出的时间冷却该号并换号。"""
         return _normalize_bool(self.data.get("image_edit_upload_cooldown_enabled", True), True)
@@ -603,6 +619,9 @@ class ConfigStore:
         data["image_ref_fit_max_edge"] = self.image_ref_fit_max_edge
         data["image_req_fit_enabled"] = self.image_req_fit_enabled
         data["image_req_fit_budget_bytes"] = self.image_req_fit_budget_bytes
+        data["image_upscale_enabled"] = self.image_upscale_enabled
+        data["image_upscale_target_edge"] = self.image_upscale_target_edge
+        data["image_upscale_method"] = self.image_upscale_method
         data["image_edit_upload_cooldown_enabled"] = self.image_edit_upload_cooldown_enabled
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts

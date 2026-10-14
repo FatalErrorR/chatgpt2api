@@ -30,6 +30,9 @@ export function ConfigCard() {
   const setImageRefFitEnabled = useSettingsStore((state) => state.setImageRefFitEnabled);
   const setImageReqFitEnabled = useSettingsStore((state) => state.setImageReqFitEnabled);
   const setImageEditUploadCooldownEnabled = useSettingsStore((state) => state.setImageEditUploadCooldownEnabled);
+  const setImageUpscaleEnabled = useSettingsStore((state) => state.setImageUpscaleEnabled);
+  const setImageUpscaleTargetEdge = useSettingsStore((state) => state.setImageUpscaleTargetEdge);
+  const setImageUpscaleMethod = useSettingsStore((state) => state.setImageUpscaleMethod);
   const setImageRemoveConversationAfterResult = useSettingsStore((state) => state.setImageRemoveConversationAfterResult);
   const setImageRemoveConversationAlways = useSettingsStore((state) => state.setImageRemoveConversationAlways);
   const setImageSettleSecs = useSettingsStore((state) => state.setImageSettleSecs);
@@ -259,6 +262,44 @@ export function ConfigCard() {
               <span className="text-sm text-stone-700">图生图上传冷却</span>
             </div>
             <p className="text-xs text-stone-500">谁返回「文件上传上限」就冻谁，按 ChatGPT 说的时间暂停该号图生图并立刻换号（最多 5 次）。文生图不受影响，不限套餐。</p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">
+              <Checkbox
+                checked={Boolean(config?.image_upscale_enabled)}
+                onCheckedChange={(checked) => setImageUpscaleEnabled(Boolean(checked))}
+              />
+              <span className="text-sm text-stone-700">出图放大</span>
+            </div>
+            <p className="text-xs text-stone-500">出图后把长边不足的图等比放大到目标长边（Lanczos + 轻度锐化，输出 PNG），已达标的图不处理，失败时返回原图。默认关闭。</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">出图放大目标长边</label>
+            <Input
+              value={String(config?.image_upscale_target_edge || "2048")}
+              onChange={(event) => setImageUpscaleTargetEdge(event.target.value)}
+              placeholder="2048"
+              className="h-10 rounded-xl border-stone-200 bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!config?.image_upscale_enabled}
+            />
+            <p className="text-xs text-stone-500">单位像素，范围 1024 到 4096，默认 2048。</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">出图放大方式</label>
+            <Select
+              value={config?.image_upscale_method === "model" ? "model" : "lanczos"}
+              onValueChange={(value) => setImageUpscaleMethod(value as "lanczos" | "model")}
+              disabled={!config?.image_upscale_enabled}
+            >
+              <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lanczos">Lanczos + 锐化（快）</SelectItem>
+                <SelectItem value="model">RealESRGAN 小模型（CPU，慢）</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-stone-500">小模型会补一些细节但很吃 CPU，同一时刻只处理一张；预计超过 60 秒或出错时自动回退 Lanczos。老旧 CPU 服务器上通常会回退。</p>
           </div>
           <div className="space-y-2">
             <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">

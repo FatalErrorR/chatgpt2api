@@ -23,6 +23,7 @@ from utils.helper import (
     split_image_model,
 )
 from utils.image_tokens import count_image_content_tokens
+from utils.image_upscale import upscale_to_edge
 from utils.log import logger
 
 
@@ -262,6 +263,17 @@ def count_text_tokens(text: str, model: str) -> int:
     return len(encoding_for_model(model).encode(text))
 
 
+def maybe_upscale_image(image_data: bytes) -> bytes:
+    """开启放大且长边不足时放大到目标尺寸；任何失败都返回原图。"""
+    if not config.image_upscale_enabled:
+        return image_data
+    try:
+        return upscale_to_edge(image_data, config.image_upscale_target_edge, config.image_upscale_method)
+    except Exception as exc:
+        logger.warning({"event": "image_upscale_failed", "error": repr(exc)[:300]})
+        return image_data
+
+
 def format_image_result(
     items: list[dict[str, Any]],
     prompt: str,
@@ -276,15 +288,20 @@ def format_image_result(
         if not b64_json:
             continue
         revised_prompt = str(item.get("revised_prompt") or prompt).strip() or prompt
+        image_bytes = base64.b64decode(b64_json)
+        upscaled = maybe_upscale_image(image_bytes)
+        if upscaled is not image_bytes:
+            image_bytes = upscaled
+            b64_json = base64.b64encode(image_bytes).decode("ascii")
         if response_format == "b64_json":
             data.append({
                 "b64_json": b64_json,
-                "url": save_image_bytes(base64.b64decode(b64_json), base_url),
+                "url": save_image_bytes(image_bytes, base_url),
                 "revised_prompt": revised_prompt,
             })
         else:
             data.append({
-                "url": save_image_bytes(base64.b64decode(b64_json), base_url),
+                "url": save_image_bytes(image_bytes, base_url),
                 "revised_prompt": revised_prompt,
             })
     result: dict[str, Any] = {"created": created or int(time.time()), "data": data}

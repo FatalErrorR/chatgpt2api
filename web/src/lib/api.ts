@@ -175,6 +175,9 @@ export type SettingsConfig = {
   image_ref_fit_enabled?: boolean;
   image_req_fit_enabled?: boolean;
   image_edit_upload_cooldown_enabled?: boolean;
+  image_upscale_enabled?: boolean;
+  image_upscale_target_edge?: number | string;
+  image_upscale_method?: "lanczos" | "model";
   image_check_before_hit_enabled?: boolean;
   image_remove_conversation_after_result?: boolean;
   image_remove_conversation_always?: boolean;
