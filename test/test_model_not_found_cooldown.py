@@ -11,7 +11,7 @@ os.environ.setdefault("CHATGPT2API_AUTH_KEY", "test-auth")
 from services.account_service import AccountService
 from services.storage.json_storage import JSONStorageBackend
 from utils.helper import UpstreamHTTPError, is_model_not_found
-from utils.pow import _legacy_parse_time
+from utils.pow import _local_date_string
 
 
 class ModelNotFoundTests(unittest.TestCase):
@@ -56,7 +56,6 @@ class ModelNotFoundTests(unittest.TestCase):
             service.release_image_slot(chosen)
             self.assertEqual(chosen, "ready")
 
-    def test_pow_clock_uses_los_angeles(self) -> None:
-        text = _legacy_parse_time()
-        self.assertTrue(text.endswith("(Pacific Daylight Time)") or text.endswith("(Pacific Standard Time)"))
-        self.assertIn("GMT-0", text)
+    def test_pow_clock_uses_china_time(self) -> None:
+        text = _local_date_string()
+        self.assertTrue(text.endswith("GMT+0800 (中国标准时间)"))

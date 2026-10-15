@@ -1,184 +1,105 @@
-import base64
+"""sentinel dx（turnstile）求解器。
+
+旧版手写 VM 已跟不上上游 SDK 的混淆方式，这里改为在进程内嵌 V8
+（py-mini-racer）中加载真实 sentinel SDK 来求解。
+
+- `assets/sentinel/sdk.js`：上游 sentinel SDK（打补丁暴露内部求解函数）
+- `assets/sentinel/shims.js`：浏览器环境 shim，可用指纹覆盖其中的环境信号
+
+V8 上下文较重，按指纹缓存复用；上下文不可跨线程并发使用，求解全程持有全局锁。
+"""
+from __future__ import annotations
+
 import json
-import random
-import time
+import threading
+from pathlib import Path
 from typing import Any, Dict, Optional
 
+from py_mini_racer import MiniRacer
 
-class OrderedMap:
-    def __init__(self) -> None:
-        self.keys = []
-        self.values = {}
+from utils.log import logger
 
-    def add(self, key: str, value: Any) -> None:
-        if key not in self.values:
-            self.keys.append(key)
-        self.values[key] = value
+_ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets" / "sentinel"
+_SDK_PATCH_MARKER = "t.token=ye,t}({});"
+_SDK_PATCH_REPLACEMENT = "t.token=ye,t.__solve_dx=_n,t.__reg=D,t}({});"
+_CTX_CACHE_LIMIT = 4
+_EVAL_TIMEOUT_MS = 30000
 
-
-def _turnstile_to_str(value: Any) -> str:
-    if value is None:
-        return "undefined"
-    if isinstance(value, float):
-        return str(value)
-    if isinstance(value, str):
-        special = {
-            "window.Math": "[object Math]",
-            "window.Reflect": "[object Reflect]",
-            "window.performance": "[object Performance]",
-            "window.localStorage": "[object Storage]",
-            "window.Object": "function Object() { [native code] }",
-            "window.Reflect.set": "function set() { [native code] }",
-            "window.performance.now": "function () { [native code] }",
-            "window.Object.create": "function create() { [native code] }",
-            "window.Object.keys": "function keys() { [native code] }",
-            "window.Math.random": "function random() { [native code] }",
-        }
-        return special.get(value, value)
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return ",".join(value)
-    return str(value)
+_cache: Dict[str, MiniRacer] = {}
+_lock = threading.Lock()
 
 
-def _xor_string(text: str, key: str) -> str:
-    if not key:
-        return text
-    return "".join(chr(ord(ch) ^ ord(key[i % len(key)])) for i, ch in enumerate(text))
+def _read_asset(name: str) -> str:
+    return (_ASSETS_DIR / name).read_text(encoding="utf-8")
 
 
-def solve_turnstile_token(dx: str, p: str) -> Optional[str]:
-    try:
-        decoded = base64.b64decode(dx).decode()
-        token_list = json.loads(_xor_string(decoded, p))
-    except Exception:
+def _build_ctx(fingerprint: Dict[str, Any] | None) -> MiniRacer:
+    sdk = _read_asset("sdk.js")
+    patched = sdk.replace(_SDK_PATCH_MARKER, _SDK_PATCH_REPLACEMENT)
+    if patched == sdk:
+        raise RuntimeError("sentinel sdk patch marker not found, assets/sentinel/sdk.js may be outdated")
+    ctx = MiniRacer()
+    ctx.eval(
+        "globalThis.setTimeout=globalThis.setTimeout||function(f,m){return 0};"
+        "globalThis.clearTimeout=globalThis.clearTimeout||function(){};",
+        timeout=_EVAL_TIMEOUT_MS,
+    )
+    if fingerprint:
+        ctx.eval("globalThis.__SHIM_FP = %s;" % json.dumps(fingerprint, ensure_ascii=False), timeout=_EVAL_TIMEOUT_MS)
+    ctx.eval(_read_asset("shims.js"), timeout=_EVAL_TIMEOUT_MS)
+    ctx.eval(patched, timeout=_EVAL_TIMEOUT_MS)
+    return ctx
+
+
+def _get_ctx(fingerprint: Dict[str, Any] | None) -> MiniRacer:
+    key = json.dumps(fingerprint or {}, sort_keys=True, ensure_ascii=False)
+    ctx = _cache.get(key)
+    if ctx is None:
+        ctx = _build_ctx(fingerprint)
+        while len(_cache) >= _CTX_CACHE_LIMIT:
+            _cache.popitem()
+        _cache[key] = ctx
+    return ctx
+
+
+def _solve(ctx: MiniRacer, dx: str, p_token: str) -> str:
+    ctx.eval("globalThis.__req = {};", timeout=_EVAL_TIMEOUT_MS)
+    ctx.eval("SentinelSDK.__reg(__req, %s);" % json.dumps(p_token), timeout=_EVAL_TIMEOUT_MS)
+    ctx.eval("globalThis.__token = undefined; globalThis.__err = undefined;", timeout=_EVAL_TIMEOUT_MS)
+    ctx.eval(
+        "SentinelSDK.__solve_dx(__req, %s)"
+        ".then(function(v){globalThis.__token=v},function(e){globalThis.__err=String(e&&e.stack||e)});"
+        % json.dumps(dx),
+        timeout=_EVAL_TIMEOUT_MS,
+    )
+    token = ctx.eval("globalThis.__token", timeout=_EVAL_TIMEOUT_MS)
+    error = ctx.eval("globalThis.__err", timeout=_EVAL_TIMEOUT_MS)
+    if error:
+        raise RuntimeError(f"sentinel solve failed: {error}")
+    if not token:
+        raise RuntimeError("sentinel solve returned no token")
+    return str(token)
+
+
+def solve_turnstile_token(
+    dx: str,
+    p: str,
+    fingerprint: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """求解 sentinel dx 挑战，返回 turnstile token；失败返回 None。
+
+    参数：
+    - `dx`：prepare 响应中的 turnstile.dx
+    - `p`：本次 prepare 使用的 requirements token（dx 外层程序用它做 XOR 解码）
+    - `fingerprint`：浏览器环境信号覆盖（userAgent/languages/oaiDid 等），
+      应与 HTTP 请求头保持一致
+    """
+    if not dx:
         return None
-
-    process_map: Dict[Any, Any] = {}
-    start_time = time.time()
-    result = ""
-
-    def func_1(e: float, t: float) -> None:
-        process_map[e] = _xor_string(_turnstile_to_str(process_map[e]), _turnstile_to_str(process_map[t]))
-
-    def func_2(e: float, t: Any) -> None:
-        process_map[e] = t
-
-    def func_3(e: str) -> None:
-        nonlocal result
-        result = base64.b64encode(e.encode()).decode()
-
-    def func_5(e: float, t: float) -> None:
-        current = process_map[e]
-        incoming = process_map[t]
-        if isinstance(current, (list, tuple)):
-            process_map[e] = list(current) + [incoming]
-            return
-        if isinstance(current, (str, float)) or isinstance(incoming, (str, float)):
-            process_map[e] = _turnstile_to_str(current) + _turnstile_to_str(incoming)
-            return
-        process_map[e] = "NaN"
-
-    def func_6(e: float, t: float, n: float) -> None:
-        tv = process_map[t]
-        nv = process_map[n]
-        if isinstance(tv, str) and isinstance(nv, str):
-            value = f"{tv}.{nv}"
-            process_map[e] = "https://chatgpt.com/" if value == "window.document.location" else value
-
-    def func_7(e: float, *args: float) -> None:
-        target = process_map[e]
-        values = [process_map[arg] for arg in args]
-        if isinstance(target, str) and target == "window.Reflect.set":
-            obj, key_name, val = values
-            obj.add(str(key_name), val)
-        elif callable(target):
-            target(*values)
-
-    def func_8(e: float, t: float) -> None:
-        process_map[e] = process_map[t]
-
-    def func_14(e: float, t: float) -> None:
-        process_map[e] = json.loads(process_map[t])
-
-    def func_15(e: float, t: float) -> None:
-        process_map[e] = json.dumps(process_map[t])
-
-    def func_17(e: float, t: float, *args: float) -> None:
-        call_args = [process_map[arg] for arg in args]
-        target = process_map[t]
-        if target == "window.performance.now":
-            elapsed_ns = time.time_ns() - int(start_time * 1e9)
-            process_map[e] = (elapsed_ns + random.random()) / 1e6
-        elif target == "window.Object.create":
-            process_map[e] = OrderedMap()
-        elif target == "window.Object.keys":
-            if call_args and call_args[0] == "window.localStorage":
-                process_map[e] = [
-                    "STATSIG_LOCAL_STORAGE_INTERNAL_STORE_V4",
-                    "STATSIG_LOCAL_STORAGE_STABLE_ID",
-                    "client-correlated-secret",
-                    "oai/apps/capExpiresAt",
-                    "oai-did",
-                    "STATSIG_LOCAL_STORAGE_LOGGING_REQUEST",
-                    "UiState.isNavigationCollapsed.1",
-                ]
-        elif target == "window.Math.random":
-            process_map[e] = random.random()
-        elif callable(target):
-            process_map[e] = target(*call_args)
-
-    def func_18(e: float) -> None:
-        process_map[e] = base64.b64decode(_turnstile_to_str(process_map[e])).decode()
-
-    def func_19(e: float) -> None:
-        process_map[e] = base64.b64encode(_turnstile_to_str(process_map[e]).encode()).decode()
-
-    def func_20(e: float, t: float, n: float, *args: float) -> None:
-        if process_map[e] == process_map[t]:
-            target = process_map[n]
-            if callable(target):
-                target(*[process_map[arg] for arg in args])
-
-    def func_21(*_: Any) -> None:
-        return
-
-    def func_23(e: float, t: float, *args: float) -> None:
-        if process_map[e] is not None and callable(process_map[t]):
-            process_map[t](*args)
-
-    def func_24(e: float, t: float, n: float) -> None:
-        tv = process_map[t]
-        nv = process_map[n]
-        if isinstance(tv, str) and isinstance(nv, str):
-            process_map[e] = f"{tv}.{nv}"
-
-    process_map.update({
-        1: func_1,
-        2: func_2,
-        3: func_3,
-        5: func_5,
-        6: func_6,
-        7: func_7,
-        8: func_8,
-        9: token_list,
-        10: "window",
-        14: func_14,
-        15: func_15,
-        16: p,
-        17: func_17,
-        18: func_18,
-        19: func_19,
-        20: func_20,
-        21: func_21,
-        23: func_23,
-        24: func_24,
-    })
-
-    for token in token_list:
-        try:
-            fn = process_map.get(token[0])
-            if callable(fn):
-                fn(*token[1:])
-        except Exception:
-            continue
-    return result or None
+    try:
+        with _lock:
+            ctx = _get_ctx(fingerprint)
+            return _solve(ctx, dx, p)
+    except Exception as exc:
+        logger.warning({"event": "solve_turnstile_failed", "error": str(exc)})
+        return None

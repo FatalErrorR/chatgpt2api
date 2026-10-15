@@ -25,7 +25,7 @@ from PIL import Image
 from services.account_service import account_service
 from services.config import config
 from services.proxy_service import proxy_settings
-from services.sentinel_solver_client import solve_turnstile, solver_user_agent
+from utils.turnstile import solve_turnstile_token
 from utils.helper import (
     UpstreamHTTPError,
     codex_tool_model,
@@ -81,6 +81,7 @@ DEFAULT_CLIENT_BUILD_NUMBER = "6708908"
 DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js"
 CODEX_RESPONSES_MODEL = "gpt-5.5"
 SEARCH_MODEL = "gpt-5-5"
+IMAGE_CREATION_MENTION = "@创建图像"
 SEARCH_TIMEOUT_SECS = 300.0
 SEARCH_POLL_INTERVAL_SECS = 3.0
 SEARCH_DONE_STATUS = {"finished_successfully", "finished_partial_completion"}
@@ -431,7 +432,7 @@ class OpenAIBackendAPI:
         turnstile_token = ""
         turnstile_info = data.get("turnstile") or {}
         if turnstile_info.get("required") and turnstile_info.get("dx"):
-            turnstile_token = solve_turnstile(turnstile_info["dx"], source_p)
+            turnstile_token = solve_turnstile_token(turnstile_info["dx"], source_p, self._sentinel_fingerprint()) or ""
 
         return ChatRequirements(
             token=data.get("token", ""),
@@ -592,8 +593,8 @@ class OpenAIBackendAPI:
             return model_name, suffix.lower()
         return upstream_model, self._normalize_thinking_effort(config.default_thinking_effort)
 
-    def _image_headers(self, path: str, requirements: ChatRequirements, conduit_token: str = "", accept: str = "*/*") -> \
-            Dict[str, str]:
+    def _image_headers(self, path: str, requirements: ChatRequirements, conduit_token: str = "", accept: str = "*/*",
+                       trace_id: str = "") -> Dict[str, str]:
         """构造图片链路请求头。"""
         headers = {
             "Content-Type": "application/json",
@@ -602,9 +603,13 @@ class OpenAIBackendAPI:
         }
         if requirements.proof_token:
             headers["OpenAI-Sentinel-Proof-Token"] = requirements.proof_token
+        if requirements.turnstile_token:
+            headers["OpenAI-Sentinel-Turnstile-Token"] = requirements.turnstile_token
         if conduit_token:
             headers["X-Conduit-Token"] = conduit_token
-        if accept == "text/event-stream":
+        if trace_id:
+            headers["X-Oai-Turn-Trace-Id"] = trace_id
+        elif accept == "text/event-stream":
             headers["X-Oai-Turn-Trace-Id"] = new_uuid()
         return self._headers(path, headers)
 
@@ -877,40 +882,46 @@ class OpenAIBackendAPI:
             retry_after = int(retry_after_header) if str(retry_after_header or "").isdigit() else None
             raise UpstreamHTTPError(path, error.code, body, retry_after=retry_after) from error
 
-    def _prepare_image_conversation(self, prompt: str, requirements: ChatRequirements, model: str) -> str:
-        """为图片生成准备 conduit token。"""
+    def _prepare_image_conversation(self, prompt: str, requirements: ChatRequirements, model: str) -> tuple[str, str]:
+        """为图片生成准备 conduit token，返回 (conduit_token, trace_id)。"""
         path = "/backend-api/f/conversation/prepare"
         upstream_model, thinking_effort = self._image_model_settings(model)
-        timezone_name, timezone_offset_min = image_client_timezone()
+        trace_id = new_uuid()
         payload = {
             "action": "next",
-            "fork_from_shared_post": False,
-            "parent_message_id": new_uuid(),
+            "is_do_not_remember": False,
             "model": upstream_model,
-            "client_prepare_state": "success",
-            "timezone_offset_min": timezone_offset_min,
-            "timezone": timezone_name,
-            "conversation_mode": {"kind": "primary_assistant"},
+            "parent_message_id": "client-created-root",
             "system_hints": ["picture_v2"],
+            "timezone": "Asia/Shanghai",
+            "timezone_offset_min": -480,
+            "client_contextual_info": {
+                "app_name": "chatgpt.com",
+                "app_surface": "codex_browser",
+                "has_web_push_capabilities": True,
+                "web_push_notification_permission": "default",
+            },
+            "local_function_names": ["local.continue_in_work"],
+            "supported_encodings": ["v1"],
+            "client_prepare_state": "sent",
             "partial_query": {
                 "id": new_uuid(),
                 "author": {"role": "user"},
                 "content": {"content_type": "text", "parts": [prompt]},
             },
-            "supports_buffering": True,
-            "supported_encodings": ["v1"],
-            "client_contextual_info": {"app_name": "chatgpt.com"},
+            "client_prepare_dispatch": "debounced",
+            "client_prepare_source": "composer_editor_state",
         }
         if thinking_effort:
             payload["thinking_effort"] = thinking_effort
         response = self.session.post(
             self.base_url + path,
-            headers=self._image_headers(path, requirements),
+            headers=self._image_headers(path, requirements, trace_id=trace_id),
             json=payload,
             timeout=60,
         )
         ensure_ok(response, path)
-        return response.json().get("conduit_token", "")
+        return str(response.json().get("conduit_token") or ""), trace_id
 
     def _decode_image_base64(self, image: str) -> bytes:
         """把 base64 图片字符串或本地路径解码成二进制。"""
@@ -987,26 +998,35 @@ class OpenAIBackendAPI:
         }
 
     def _start_image_generation(self, prompt: str, requirements: ChatRequirements, conduit_token: str, model: str,
-                                references: Optional[list[Dict[str, Any]]] = None) -> requests.Response:
+                                references: Optional[list[Dict[str, Any]]] = None, trace_id: str = "") -> requests.Response:
         """启动图片生成或编辑的 SSE 请求。"""
         upstream_model, thinking_effort = self._image_model_settings(model)
         references = references or []
-        parts = [{
+        mention_text = f"{IMAGE_CREATION_MENTION} {prompt}"
+        parts: list[Any] = [{
             "content_type": "image_asset_pointer",
             "asset_pointer": f"file-service://{item['file_id']}",
             "width": item["width"],
             "height": item["height"],
             "size_bytes": item["file_size"],
         } for item in references]
-        parts.append(prompt)
-        content = {"content_type": "multimodal_text", "parts": parts} if references else {"content_type": "text",
-                                                                                          "parts": [prompt]}
-        metadata = {
+        parts.append(mention_text)
+        content = {"content_type": "multimodal_text", "parts": parts} if references else {
+            "content_type": "text", "parts": [mention_text]}
+        metadata: Dict[str, Any] = {
             "developer_mode_connector_ids": [],
             "selected_github_repos": [],
             "selected_all_github_repos": False,
             "system_hints": ["picture_v2"],
-            "serialization_metadata": {"custom_symbol_offsets": []},
+            "serialization_metadata": {
+                "render_format": "markdown",
+                "custom_symbol_offsets": [{
+                    "id": "picture_v2",
+                    "symbol": "ecosystemMention",
+                    "startIndex": 0,
+                    "endIndex": len(IMAGE_CREATION_MENTION),
+                }],
+            },
         }
         if references:
             metadata["attachments"] = [{
@@ -1017,45 +1037,45 @@ class OpenAIBackendAPI:
                 "width": item["width"],
                 "height": item["height"],
             } for item in references]
-        timezone_name, timezone_offset_min = image_client_timezone()
-        payload = {
+        payload: Dict[str, Any] = {
+            "turn_attribution": {"turn_trigger": "composer"},
             "action": "next",
+            "is_do_not_remember": False,
             "messages": [{
                 "id": new_uuid(),
-                "author": {"role": "user"},
+                "author": {"metadata": {}, "name": None, "role": "user"},
+                "channel": None,
                 "create_time": time.time(),
+                "end_turn": None,
                 "content": content,
                 "metadata": metadata,
+                "recipient": "all",
+                "status": "finished_successfully",
+                "update_time": None,
+                "weight": 1,
             }],
-            "parent_message_id": new_uuid(),
+            "parent_message_id": "client-created-root",
             "model": upstream_model,
-            "client_prepare_state": "sent",
-            "timezone_offset_min": timezone_offset_min,
-            "timezone": timezone_name,
-            "conversation_mode": {"kind": "primary_assistant"},
-            "enable_message_followups": True,
             "system_hints": ["picture_v2"],
-            "supports_buffering": True,
-            "supported_encodings": ["v1"],
+            "timezone_offset_min": -480,
+            "timezone": "Asia/Shanghai",
             "client_contextual_info": {
-                "is_dark_mode": False,
-                "time_since_loaded": 1200,
-                "page_height": 1072,
-                "page_width": 1724,
-                "pixel_ratio": 1.2,
-                "screen_height": 1440,
-                "screen_width": 2560,
                 "app_name": "chatgpt.com",
+                "app_surface": "codex_browser",
+                "has_web_push_capabilities": True,
+                "web_push_notification_permission": "default",
             },
-            "paragen_cot_summary_display_override": "allow",
-            "force_parallel_switch": "auto",
+            "local_function_names": ["local.continue_in_work"],
+            "supported_encodings": ["v1"],
+            "genui_state_snapshots": [],
+            "client_prepare_state": "success",
         }
         if thinking_effort:
             payload["thinking_effort"] = thinking_effort
         path = "/backend-api/f/conversation"
         response = self.session.post(
             self.base_url + path,
-            headers=self._image_headers(path, requirements, conduit_token, "text/event-stream"),
+            headers=self._image_headers(path, requirements, conduit_token, "text/event-stream", trace_id=trace_id),
             json=payload,
             timeout=300,
             stream=True,
@@ -2644,9 +2664,9 @@ class OpenAIBackendAPI:
         self._report_progress("getting_token")
         requirements = self._get_chat_requirements()
         self._report_progress("preparing_conversation")
-        conduit_token = self._prepare_image_conversation(prompt, requirements, model)
+        conduit_token, trace_id = self._prepare_image_conversation(prompt, requirements, model)
         self._report_progress("starting_generation")
-        response = self._start_image_generation(prompt, requirements, conduit_token, model, references)
+        response = self._start_image_generation(prompt, requirements, conduit_token, model, references, trace_id=trace_id)
         self._report_progress("generating")
         yield from self._iter_sse_payloads_capped(response, float(config.image_poll_timeout_secs))
 
@@ -2684,25 +2704,63 @@ class OpenAIBackendAPI:
                 pass
 
     def _bootstrap(self) -> None:
-        """预热首页，并提取 PoW 相关脚本引用。"""
-        response = self.session.get(
-            self.base_url + "/",
-            headers=self._bootstrap_headers(),
-            timeout=30,
-        )
+        """预热首页，并提取 PoW 相关脚本引用。
+
+        首页请求不带 Authorization。带着登录态访问首页会被 Cloudflare 挑战。
+        """
+        authorization = self.session.headers.pop("Authorization", None)
+        try:
+            response = self.session.get(
+                self.base_url + "/",
+                headers=self._bootstrap_headers(),
+                timeout=30,
+            )
+        finally:
+            if authorization is not None:
+                self.session.headers["Authorization"] = authorization
         ensure_ok(response, "bootstrap")
         self.pow_script_sources, self.pow_data_build = parse_pow_resources(response.text)
         if not self.pow_script_sources:
             self.pow_script_sources = [DEFAULT_POW_SCRIPT]
 
     def _sentinel_user_agent(self) -> str:
-        """requirements 和 PoW 里的 UA，与求解 Turnstile 的页面保持一致。"""
-        return solver_user_agent() or self.user_agent
+        """requirements 和 PoW 里的 UA，与当前 HTTP 请求头一致。"""
+        return self.user_agent
+
+    def _sentinel_fingerprint(self) -> Dict[str, Any]:
+        """构造与当前请求头一致的 sentinel 环境，供 dx 求解使用。"""
+        user_agent = self.user_agent
+        if "Windows" in user_agent:
+            platform = "Win32"
+        elif "Macintosh" in user_agent:
+            platform = "MacIntel"
+        else:
+            platform = "Linux x86_64"
+        return {
+            "userAgent": user_agent,
+            "appVersion": user_agent.replace("Mozilla/", ""),
+            "platform": platform,
+            "language": "zh-CN",
+            "languages": ["zh-CN", "zh", "en"],
+            "hardwareConcurrency": 32,
+            "deviceMemory": 8,
+            "oaiDid": self.device_id,
+        }
+
+    def _drop_oai_sc_cookie(self) -> None:
+        """finalize 下发的 oai-sc 会把会话标成受限，随后 f/conversation 返回 Model not found。"""
+        try:
+            jar = self.session.cookies.jar
+            for cookie in list(jar):
+                if cookie.name == "oai-sc":
+                    jar.clear(cookie.domain, cookie.path, cookie.name)
+        except Exception:
+            return
 
     def _get_chat_requirements(self) -> ChatRequirements:
         """获取当前模式对话所需的 sentinel token（prepare + finalize 两步流程）。"""
         base = "/backend-api/sentinel/chat-requirements" if self.access_token else "/backend-anon/sentinel/chat-requirements"
-        sentinel_user_agent = self._sentinel_user_agent()
+        sentinel_user_agent = self.user_agent
         p_token = build_legacy_requirements_token(sentinel_user_agent, self.pow_script_sources, self.pow_data_build)
 
         prepare_path = base + "/prepare"
@@ -2732,7 +2790,9 @@ class OpenAIBackendAPI:
         turnstile_token = ""
         turnstile_info = prepare_data.get("turnstile") or {}
         if turnstile_info.get("required") and turnstile_info.get("dx"):
-            turnstile_token = solve_turnstile(turnstile_info["dx"], p_token)
+            turnstile_token = solve_turnstile_token(
+                turnstile_info["dx"], p_token, self._sentinel_fingerprint()
+            ) or ""
 
         finalize_path = base + "/finalize"
         response = self.session.post(
@@ -2747,6 +2807,7 @@ class OpenAIBackendAPI:
         )
         ensure_ok(response, "chat_requirements_finalize")
         data = response.json()
+        self._drop_oai_sc_cookie()
 
         token = data.get("token", "")
         if not token:

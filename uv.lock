@@ -155,6 +155,7 @@ dependencies = [
     { name = "onnxruntime" },
     { name = "pillow" },
     { name = "psycopg2-binary" },
+    { name = "py-mini-racer" },
     { name = "pybase64" },
     { name = "python-multipart" },
     { name = "sqlalchemy" },
@@ -176,6 +177,7 @@ requires-dist = [
     { name = "onnxruntime", specifier = ">=1.31.0" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.0" },
+    { name = "py-mini-racer", specifier = ">=0.6.0" },
     { name = "pybase64", specifier = ">=1.4.3" },
     { name = "python-multipart", specifier = ">=0.0.26" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
@@ -585,6 +587,17 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/56/ad/44b06659949b243ae10112cd3b20a197f9bf3e81d5651379b9eb889bfaad/psycopg2_binary-2.9.12-cp314-cp314-musllinux_1_2_riscv64.whl", hash = "sha256:77b348775efd4cdab410ec6609d81ccecd1139c90265fa583a7255c8064bc03d" },
     { url = "https://mirrors.aliyun.com/pypi/packages/1d/f2/10a1bcebadb6aa55e280e1f58975c36a7b560ea525184c7aa4064c466633/psycopg2_binary-2.9.12-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:527e6342b3e44c2f0544f6b8e927d60de7f163f5723b8f1dfa7d2a84298738cd" },
     { url = "https://mirrors.aliyun.com/pypi/packages/20/be/b732c8418ffa5bcfda002890f5dc4c869fc17db66ff11f53b17cfe44afc0/psycopg2_binary-2.9.12-cp314-cp314-win_amd64.whl", hash = "sha256:f12ae41fcafadb39b2785e64a40f9db05d6de2ac114077457e0e7c597f3af980" },
+]
+
+[[package]]
+name = "py-mini-racer"
+version = "0.6.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/50/97/a578b918b2e5923dd754cb60bb8b8aeffc85255ffb92566e3c65b148ff72/py_mini_racer-0.6.0.tar.gz", hash = "sha256:f71e36b643d947ba698c57cd9bd2232c83ca997b0802fc2f7f79582377040c11" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/13/13/058240c7fd1fbf29a24bda048d93346c2a56275736b76b56afe64050a161/py_mini_racer-0.6.0-py2.py3-none-macosx_10_10_x86_64.whl", hash = "sha256:346e73bb89a2024888244d487834be24a121089ceb0641dd0200cb96c4e24b57" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/29/a9/8ce0ca222ef04d602924a1e099be93f5435ca6f3294182a30574d4159ca2/py_mini_racer-0.6.0-py2.py3-none-manylinux1_x86_64.whl", hash = "sha256:42896c24968481dd953eeeb11de331f6870917811961c9b26ba09071e07180e2" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/5d/71/76ac5d593e14b148a4847b608c5ad9a2c7c4827c796c33b396d0437fa113/py_mini_racer-0.6.0-py2.py3-none-win_amd64.whl", hash = "sha256:97cab31bbf63ce462ba4cd6e978c572c916d8b15586156c7c5e0b2e42c10baab" },
 ]
 
 [[package]]
