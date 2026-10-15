@@ -84,16 +84,29 @@ async ([requirements, key, asset]) => {
       return 'ERR:getEnforcementToken missing';
     }
     // The SDK looks its seed up in a WeakMap keyed by the requirements object;
-    // hand it the p token instead.
+    // hand it the p token instead. Its own tokenCache is a WeakMap too: hooking
+    // that one makes it return p as the token without running the VM.
+    const cache = turnstile.tokenCache;
     const original = WeakMap.prototype.get;
     WeakMap.prototype.get = function (target) {
+      if (this === cache) return original.call(this, target);
       return target === requirements ? key : original.call(this, target);
     };
+    let token = '';
     try {
-      return String(await turnstile.getEnforcementToken(requirements));
+      token = String(await turnstile.getEnforcementToken(requirements) || '');
     } finally {
       WeakMap.prototype.get = original;
     }
+    if (!token) return 'ERR:turnstile returned an empty token';
+    if (token === key) return 'ERR:turnstile VM did not run (p echoed back)';
+    // Over its 500ms budget the VM returns only the step count.
+    if (/^\\d+$/.test(token)) return 'ERR:turnstile VM timed out after ' + token + ' steps';
+    // A VM exception comes back as btoa("<steps>: <error>").
+    let decoded = '';
+    try { decoded = atob(token); } catch (error) {}
+    if (/^\\d+: /.test(decoded)) return 'ERR:turnstile VM error: ' + decoded.slice(0, 160);
+    return token;
   } catch (error) {
     return 'ERR:' + String(error).slice(0, 300);
   }
@@ -113,6 +126,7 @@ HEADLESS = os.getenv("SENTINEL_SOLVER_HEADLESS", "true").strip().lower() not in 
 # 60s SO budget. The page's own module may need to fetch/parse on first use, so it
 # gets room here.
 SDK_SOLVE_TIMEOUT_MS = 120000
+VM_TIMEOUT_ATTEMPTS = 3
 READY_TIMEOUT_SECONDS = 60
 
 
@@ -258,12 +272,16 @@ class SolverPage:
         """Solve via the page's own turnstile module, falling back to the ported VM."""
         if requirements:
             asset = await self.turnstile_asset()
-            try:
-                result = str(await self.evaluate(_SOLVE_VIA_SDK, [requirements, p, asset]) or "")
-            except Exception as exc:  # noqa: BLE001
-                result = f"ERR:{exc}"
-            if result and not result.startswith("ERR:"):
-                return True, result
+            for _ in range(VM_TIMEOUT_ATTEMPTS):
+                try:
+                    result = str(await self.evaluate(_SOLVE_VIA_SDK, [requirements, p, asset]) or "")
+                except Exception as exc:  # noqa: BLE001
+                    result = f"ERR:{exc}"
+                if result and not result.startswith("ERR:"):
+                    return True, result
+                # A cold page often runs over the VM's 500ms budget; the page is fine, so retry.
+                if "turnstile VM timed out" not in result:
+                    break
             self.last_error = result[:300]
             print(f"[sentinel-solver] SDK solve failed via {asset}: {result[:300]}", flush=True)
             # Drop the cached asset and page so the next attempt re-discovers both.

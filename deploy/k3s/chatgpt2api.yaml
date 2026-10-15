@@ -35,7 +35,7 @@ spec:
     spec:
       containers:
         - name: app
-          image: ghcr.io/basketikun/chatgpt2api:latest
+          image: ghcr.io/fatalerrorr/chatgpt2api:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -53,6 +53,14 @@ spec:
                   key: auth-key
             - name: CHATGPT2API_BASE_URL
               value: https://yurencc2a.zeabur.app
+            # 生图 Turnstile 由同一 Pod 里的 sentinel-solver 求解
+            - name: CHATGPT2API_SENTINEL_SOLVER_URL
+              value: http://127.0.0.1:8080
+            - name: CHATGPT2API_SENTINEL_SOLVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: chatgpt2api
+                  key: solver-key
           volumeMounts:
             - name: data
               mountPath: /app/data
@@ -69,10 +77,51 @@ spec:
             limits:
               cpu: "2"
               memory: 2Gi
+        - name: sentinel-solver
+          image: ghcr.io/fatalerrorr/chatgpt2api-sentinel-solver:latest
+          imagePullPolicy: Always
+          # 只给同 Pod 的主服务用，不经 Service 暴露
+          ports:
+            - name: solver
+              containerPort: 8080
+          env:
+            - name: SENTINEL_SOLVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: chatgpt2api
+                  key: solver-key
+            - name: SENTINEL_SOLVER_TIMEZONE
+              value: America/Los_Angeles
+          volumeMounts:
+            # 镜像不含 Chromium，启动时下载；放在数据卷里，重启不用重新下载
+            - name: data
+              mountPath: /ms-playwright
+              subPath: ms-playwright
+            - name: dshm
+              mountPath: /dev/shm
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            # 首次启动要下载 Chromium 和系统依赖
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: chatgpt2api-data
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service
