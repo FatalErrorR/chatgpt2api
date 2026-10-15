@@ -374,6 +374,39 @@ export async function finishOAuthLogin(sessionId: string, callback: string, prox
   });
 }
 
+export type ProtocolLoginItem = {
+  email: string;
+  status: "等待" | "登录中" | "成功" | "失败";
+  error: string;
+  token?: string;
+};
+
+export type ProtocolLoginProgress = {
+  id: string;
+  status: "running" | "done";
+  total: number;
+  completed: number;
+  success: number;
+  failed: number;
+  invalid: Array<{ line: number; email?: string; error: string }>;
+  items: ProtocolLoginItem[];
+};
+
+export async function startProtocolLogin(text: string, proxy = "") {
+  return httpRequest<{
+    progress_id: string;
+    total: number;
+    invalid: ProtocolLoginProgress["invalid"];
+  }>("/api/accounts/protocol-login", {
+    method: "POST",
+    body: { text, proxy },
+  });
+}
+
+export async function fetchProtocolLoginProgress(progressId: string) {
+  return httpRequest<ProtocolLoginProgress>(`/api/accounts/protocol-login/progress/${progressId}`);
+}
+
 export type ImageOutputCounts = {
   edits: Record<"today" | "yesterday" | "d7" | "d14" | "d30", number>;
   generations: Record<"today" | "yesterday" | "d7" | "d14" | "d30", number>;

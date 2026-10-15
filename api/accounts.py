@@ -26,6 +26,7 @@ from api.support import (
 from services.account_service import account_service
 from services.cpa_service import cpa_config, cpa_import_service, list_remote_files
 from services.oauth_login_service import OAuthLoginError, oauth_login_service
+from services.protocol_login_service import protocol_login_service
 from services.sub2api_service import (
     list_remote_accounts as sub2api_list_remote_accounts,
     list_remote_groups as sub2api_list_remote_groups,
@@ -113,6 +114,12 @@ class Sub2APIImportRequest(BaseModel):
 class OAuthLoginStartRequest(BaseModel):
     """起始 OAuth 桥。email_hint 可选，仅用于让 OpenAI 登录页预填邮箱。"""
     email_hint: str = ""
+
+
+class ProtocolLoginRequest(BaseModel):
+    """批量协议登录。text 每行 `邮箱----密码----TOTP密钥`（TOTP 可省略）。"""
+    text: str = ""
+    proxy: str = ""
 
 
 class OAuthLoginFinishRequest(BaseModel):
@@ -359,6 +366,25 @@ def create_router() -> APIRouter:
         if account is None:
             raise HTTPException(status_code=404, detail={"error": "account not found"})
         return {"item": account, "items": account_service.list_accounts()}
+
+    @router.post("/api/accounts/protocol-login")
+    async def protocol_login(body: ProtocolLoginRequest, authorization: str | None = Header(default=None)):
+        """批量协议登录：后台逐个登录并入库，返回 progress_id 供轮询。"""
+        require_admin(authorization)
+        if not body.text.strip():
+            raise HTTPException(status_code=400, detail={"error": "text is required"})
+        try:
+            return await run_in_threadpool(protocol_login_service.start, body.text, body.proxy)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    @router.get("/api/accounts/protocol-login/progress/{progress_id}")
+    async def get_protocol_login_progress(progress_id: str, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        progress = protocol_login_service.get_progress(progress_id)
+        if progress is None:
+            raise HTTPException(status_code=404, detail={"error": "progress not found"})
+        return progress
 
     @router.post("/api/accounts/oauth/start")
     async def start_oauth_login(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
   Copy,
@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   LogIn,
   ServerCog,
+  ShieldCheck,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,15 +39,19 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   createAccounts,
+  fetchAccounts,
+  fetchProtocolLoginProgress,
   finishOAuthLogin,
   startOAuthLogin,
+  startProtocolLogin,
   type Account,
   type AccountImportPayload,
   type OAuthLoginStartResponse,
+  type ProtocolLoginProgress,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type ImportMethod = "menu" | "token" | "session" | "codex-auth" | "account-json" | "oauth";
+type ImportMethod = "menu" | "token" | "session" | "codex-auth" | "account-json" | "oauth" | "protocol";
 
 type AccountImportDialogProps = {
   disabled?: boolean;
@@ -205,6 +210,17 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
   const [oauthStarting, setOauthStarting] = useState(false);
   const [proxyChoice, setProxyChoice] = useState("none");
   const [newProxy, setNewProxy] = useState("");
+  const [protocolInput, setProtocolInput] = useState("");
+  const [protocolProgress, setProtocolProgress] = useState<ProtocolLoginProgress | null>(null);
+  const [protocolRunning, setProtocolRunning] = useState(false);
+  const protocolAbortRef = useRef(false);
+
+  // 组件卸载时停止轮询
+  useEffect(() => {
+    return () => {
+      protocolAbortRef.current = true;
+    };
+  }, []);
 
   const txtInputRef = useRef<HTMLInputElement | null>(null);
   const accountJsonInputRef = useRef<HTMLInputElement | null>(null);
@@ -222,6 +238,10 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
     setOauthStarting(false);
     setProxyChoice("none");
     setNewProxy("");
+    protocolAbortRef.current = true;
+    setProtocolInput("");
+    setProtocolProgress(null);
+    setProtocolRunning(false);
   };
 
   const importProxy = () => {
@@ -308,6 +328,63 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
   };
 
   // 用粘贴回来的 callback URL 完成换 token + 落盘
+  const handleStartProtocolLogin = async () => {
+    if (!protocolInput.trim()) {
+      toast.error("请先粘贴账号，每行一个：邮箱----密码----TOTP密钥");
+      return;
+    }
+    const proxy = importProxy();
+    if (proxy === null) {
+      return;
+    }
+
+    protocolAbortRef.current = false;
+    setProtocolRunning(true);
+    setProtocolProgress(null);
+    try {
+      const started = await startProtocolLogin(protocolInput, proxy);
+      if (started.total === 0) {
+        toast.error(started.invalid[0]?.error ?? "没有识别到有效账号");
+        setProtocolProgress({
+          id: started.progress_id,
+          status: "done",
+          total: 0,
+          completed: 0,
+          success: 0,
+          failed: 0,
+          invalid: started.invalid,
+          items: [],
+        });
+        return;
+      }
+      let progress = await fetchProtocolLoginProgress(started.progress_id);
+      setProtocolProgress(progress);
+      while (progress.status !== "done" && !protocolAbortRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        if (protocolAbortRef.current) {
+          return;
+        }
+        progress = await fetchProtocolLoginProgress(started.progress_id);
+        setProtocolProgress(progress);
+      }
+      if (protocolAbortRef.current) {
+        return;
+      }
+      const list = await fetchAccounts();
+      onImported(list.items);
+      const invalidText = progress.invalid.length > 0 ? `，${progress.invalid.length} 行格式无效` : "";
+      if (progress.failed > 0) {
+        toast.error(`协议登录完成：成功 ${progress.success} 个，失败 ${progress.failed} 个${invalidText}`);
+      } else {
+        toast.success(`协议登录完成：成功 ${progress.success} 个${invalidText}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "批量协议登录失败");
+    } finally {
+      setProtocolRunning(false);
+    }
+  };
+
   const handleFinishOAuth = async () => {
     if (!oauthSession) {
       toast.error("请先点击\"打开授权页面\"获取 session");
@@ -580,6 +657,75 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
       );
     }
 
+    if (method === "protocol") {
+      const lineCount = protocolInput
+        .split(/\r?\n/)
+        .filter((line) => line.trim() && !line.trim().startsWith("#")).length;
+
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setMethod("menu")}
+              disabled={protocolRunning}
+              className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800 disabled:opacity-50"
+            >
+              <ArrowLeft className="size-4" />
+              返回导入方式
+            </button>
+            <span className="text-xs text-stone-400">当前识别 {lineCount} 行</span>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-stone-700">账号列表</label>
+            <Textarea
+              placeholder={"邮箱----密码----TOTP密钥\n没开二步验证的账号可省略 TOTP 密钥：邮箱----密码"}
+              value={protocolInput}
+              onChange={(event) => setProtocolInput(event.target.value)}
+              disabled={protocolRunning}
+              className="min-h-40 resize-none rounded-xl border-stone-200 font-mono text-xs"
+            />
+            <p className="text-xs leading-5 text-stone-500">
+              后台直接走授权协议登录，成功后写入号池并自动刷新额度；同邮箱的账号会更新 token，不会重复添加。一次最多 200 个。
+            </p>
+          </div>
+          {protocolProgress ? (
+            <div className="space-y-2 rounded-2xl border border-stone-200 bg-stone-50 p-3">
+              <div className="text-sm font-medium text-stone-800">
+                进度 {protocolProgress.completed}/{protocolProgress.total}，成功 {protocolProgress.success}，失败{" "}
+                {protocolProgress.failed}
+              </div>
+              <div className="max-h-44 space-y-1 overflow-y-auto text-xs">
+                {protocolProgress.items.map((item) => (
+                  <div key={item.email} className="flex items-start justify-between gap-3">
+                    <span className="truncate text-stone-700">{item.email}</span>
+                    <span
+                      className={cn(
+                        "shrink-0",
+                        item.status === "成功" ? "text-emerald-600" : "",
+                        item.status === "失败" ? "text-rose-600" : "",
+                        item.status === "登录中" ? "text-amber-600" : "",
+                        item.status === "等待" ? "text-stone-400" : "",
+                      )}
+                    >
+                      {item.status}
+                      {item.error ? `：${item.error}` : ""}
+                    </span>
+                  </div>
+                ))}
+                {protocolProgress.invalid.map((item) => (
+                  <div key={`invalid-${item.line}`} className="flex items-start justify-between gap-3 text-rose-600">
+                    <span className="truncate">第 {item.line} 行{item.email ? ` ${item.email}` : ""}</span>
+                    <span className="shrink-0">{item.error}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
     if (method === "oauth") {
       return (
         <div className="space-y-4">
@@ -759,6 +905,12 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
           onClick={() => setMethod("oauth")}
         />
         <MethodCard
+          title="批量协议登录（邮箱----密码----TOTP密钥）"
+          description="粘贴账号列表，后台直接走协议登录，支持二步验证；成功后自动入池并续期。"
+          icon={ShieldCheck}
+          onClick={() => setMethod("protocol")}
+        />
+        <MethodCard
           title="导入 Access Token"
           description="支持直接粘贴，一行一个；也支持从 TXT 文件读取，一行一个。"
           icon={KeyRound}
@@ -832,7 +984,9 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
                       ? "导入 Codex 认证 JSON"
                     : method === "oauth"
                       ? "OAuth 登录已有账号"
-                      : "导入账号 JSON"}
+                      : method === "protocol"
+                        ? "批量协议登录"
+                        : "导入账号 JSON"}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6">
               {method === "menu"
@@ -845,7 +999,9 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
                       ? "粘贴 Codex 认证 JSON，系统会按 codex 来源导入。"
                     : method === "oauth"
                       ? "用浏览器跑一遍 OpenAI 标准 OAuth，拿回 refresh_token 后系统会自动续期。"
-                      : "支持读取本项目导出的单账号对象或全部账号数组，并在提交前做数量确认。"}
+                      : method === "protocol"
+                        ? "每行一个账号：邮箱----密码----TOTP密钥，后台自动完成登录并入池。"
+                        : "支持读取本项目导出的单账号对象或全部账号数组，并在提交前做数量确认。"}
             </DialogDescription>
           </DialogHeader>
 
@@ -933,6 +1089,16 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
               >
                 {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
                 完成导入
+              </Button>
+            ) : null}
+            {method === "protocol" ? (
+              <Button
+                className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+                onClick={() => void handleStartProtocolLogin()}
+                disabled={footerDisabled || protocolRunning || !protocolInput.trim()}
+              >
+                {protocolRunning ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {protocolRunning ? "登录中..." : "开始登录"}
               </Button>
             ) : null}
             {method === "account-json" ? (

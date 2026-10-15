@@ -490,17 +490,17 @@ class AccountService:
                         # 创建新线程执行密码重新登录
                         t = Thread(
                             target=self._password_re_login_thread,
-                            args=(active_token, email, password, event),
+                            args=(active_token, email, password, event, None, str(account.get("totp_secret") or "")),
                             daemon=True,
                         )
                         t.start()
                 return active_token
             return self._apply_refreshed_tokens(active_token, token_data, event)
 
-    def _password_re_login_thread(self, access_token: str, email: str, password: str, event: str, progress_id: str | None = None) -> None:
+    def _password_re_login_thread(self, access_token: str, email: str, password: str, event: str, progress_id: str | None = None, totp_secret: str = "") -> None:
         """密码重新登录线程入口"""
         try:
-            result = self._login_with_password(email, password)
+            result = self._login_with_password(email, password, totp_secret)
             if result.get("ok"):
                 # 登录成功，更新账号
                 new_access_token = result.get("access_token", "")
@@ -609,8 +609,9 @@ class AccountService:
             if progress_id:
                 self.update_relogin_progress(progress_id, access_token, "异常", str(exc))
 
-    def _login_with_password(self, email: str, password: str) -> dict:
-        """通过邮箱+密码登录，返回 {access_token, refresh_token, id_token, ...}"""
+    def _login_with_password(self, email: str, password: str, totp_secret: str = "") -> dict:
+        """通过邮箱+密码登录（账号开了二步验证时用 totp_secret 自动填验证码），
+        返回 {access_token, refresh_token, id_token, ...}"""
         from curl_cffi import requests
         
         # 常量
@@ -753,25 +754,31 @@ class AccountService:
             
             # 获取 authorization code
             continue_url = str(login_data.get("continue_url") or "").strip()
-            auth_code = ""
-            if continue_url:
-                from urllib.parse import parse_qs, urlparse
-                parsed_params = parse_qs(urlparse(continue_url).query)
-                auth_code = str((parsed_params.get("code") or [""])[0]).strip()
-            
-            # ─── 处理邮箱 OTP 验证 ──────────────────────────
+            auth_code = self._extract_auth_code(continue_url)
+
+            # ─── 处理二步验证 / 邮箱 OTP ──────────────────────────
             if not auth_code:
                 page_type = ""
                 page_info = login_data.get("page")
                 if isinstance(page_info, dict):
                     page_type = str(page_info.get("type") or "")
-                
-                if page_type == "email_otp_verification":
-                    # 需要验证码才能登录，直接标记为账号异常
+
+                if self._is_mfa_page(login_data):
+                    if not str(totp_secret or "").strip():
+                        return {"ok": False, "error": "need_totp_secret", "detail": login_data}
+                    mfa_result = self._submit_totp(
+                        session, login_headers, login_data, totp_secret,
+                        auth_base=auth_base, redirect_uri=platform_oauth_redirect_uri,
+                    )
+                    if not mfa_result.get("ok"):
+                        return mfa_result
+                    auth_code = str(mfa_result.get("auth_code") or "")
+                elif page_type == "email_otp_verification":
+                    # 需要邮箱验证码才能登录，直接标记为账号异常
                     return {"ok": False, "error": "need_verification_code", "detail": login_data}
-                else:
+                if not auth_code:
                     return {"ok": False, "error": "no_auth_code", "detail": login_data}
-            
+
             # ④ 用 code 换 token (使用 Platform Client + code_verifier)
             platform_base = "https://platform.openai.com"
             token_resp = session.post(
@@ -859,6 +866,94 @@ class AccountService:
         
         finally:
             session.close()
+
+    @staticmethod
+    def _extract_auth_code(url: str) -> str:
+        """从 URL 的 query 里取 OAuth authorization code。"""
+        from urllib.parse import parse_qs, urlparse
+        if not url:
+            return ""
+        return str((parse_qs(urlparse(url).query).get("code") or [""])[0]).strip()
+
+    @staticmethod
+    def _is_mfa_page(login_data: dict) -> bool:
+        page = login_data.get("page") if isinstance(login_data, dict) else None
+        page_type = str((page or {}).get("type") or "").lower() if isinstance(page, dict) else ""
+        continue_url = str((login_data or {}).get("continue_url") or "").lower()
+        return "mfa" in page_type or "totp" in page_type or "/mfa-challenge" in continue_url
+
+    @staticmethod
+    def _mfa_factor_id(login_data: dict) -> str:
+        """从密码验证响应里找出 TOTP 因子 id；找不到再从 continue_url 的路径里取。"""
+        page = login_data.get("page") if isinstance(login_data.get("page"), dict) else {}
+        payload = page.get("payload") if isinstance(page.get("payload"), dict) else {}
+        candidates: list[Any] = [payload.get("factor_id")]
+        factor = payload.get("factor")
+        if isinstance(factor, dict):
+            candidates.append(factor.get("id"))
+        factors = payload.get("factors")
+        if isinstance(factors, list):
+            usable = [f for f in factors if isinstance(f, dict)]
+            usable.sort(key=lambda f: str(f.get("factor_type") or f.get("type") or "").lower() != "totp")
+            candidates.extend(f.get("id") for f in usable)
+        candidates.append(payload.get("id"))
+        for value in candidates:
+            if str(value or "").strip():
+                return str(value).strip()
+        match = re.search(r"/mfa-challenge/([^/?#]+)", str(login_data.get("continue_url") or ""))
+        return match.group(1) if match else ""
+
+    def _follow_for_auth_code(self, session: Any, url: str, redirect_uri: str, headers: dict, max_hops: int = 8) -> str:
+        """手动跟随重定向链，直到拿到回调地址上的 code。"""
+        from urllib.parse import urljoin
+        current = url
+        for _ in range(max_hops):
+            if current.startswith(redirect_uri):
+                return self._extract_auth_code(current)
+            resp = session.get(current, headers=headers, allow_redirects=False, timeout=30)
+            location = str(resp.headers.get("location") or "").strip()
+            if not location:
+                return self._extract_auth_code(current)
+            current = urljoin(current, location)
+        return self._extract_auth_code(current)
+
+    def _submit_totp(
+            self, session: Any, login_headers: dict, login_data: dict, totp_secret: str,
+            *, auth_base: str, redirect_uri: str,
+    ) -> dict:
+        """提交二步验证码，成功时返回 {"ok": True, "auth_code": ...}。"""
+        from utils.totp import normalize_totp_secret, seconds_left_in_period, totp_code
+        secret = normalize_totp_secret(totp_secret)
+        if not secret:
+            return {"ok": False, "error": "invalid_totp_secret"}
+        factor_id = self._mfa_factor_id(login_data)
+        if not factor_id:
+            return {"ok": False, "error": "mfa_factor_not_found", "detail": login_data}
+        # 验证码窗口快结束时等到下一个窗口，避免提交时恰好过期。
+        remaining = seconds_left_in_period()
+        if remaining < 3:
+            time.sleep(remaining + 0.5)
+        headers = {**login_headers, "referer": f"{auth_base}/mfa-challenge/{factor_id}"}
+        resp = session.post(
+            f"{auth_base}/api/accounts/mfa/verify",
+            headers=headers,
+            json={"id": factor_id, "type": "totp", "code": totp_code(secret)},
+            timeout=30,
+        )
+        data: dict = {}
+        try:
+            data = resp.json() if resp.text else {}
+        except Exception:
+            pass
+        if resp.status_code != 200:
+            return {"ok": False, "error": f"mfa_verify_failed_{resp.status_code}", "detail": data}
+        continue_url = str(data.get("continue_url") or "").strip()
+        auth_code = self._extract_auth_code(continue_url)
+        if not auth_code and continue_url:
+            auth_code = self._follow_for_auth_code(session, continue_url, redirect_uri, login_headers)
+        if not auth_code:
+            return {"ok": False, "error": "mfa_no_auth_code", "detail": data}
+        return {"ok": True, "auth_code": auth_code}
 
     def list_expiring_access_tokens(self) -> list[str]:
         with self._lock:
@@ -1622,7 +1717,7 @@ class AccountService:
                     continue
                 t = Thread(
                     target=self._password_re_login_thread,
-                    args=(token, email, password, "auto_relogin_after_refresh"),
+                    args=(token, email, password, "auto_relogin_after_refresh", None, str(account.get("totp_secret") or "")),
                     daemon=True,
                 )
                 t.start()
@@ -1679,7 +1774,7 @@ class AccountService:
             # 在新线程中执行密码重新登录
             t = Thread(
                 target=self._password_re_login_thread,
-                args=(token, email, password, "manual_relogin", progress_id),
+                args=(token, email, password, "manual_relogin", progress_id, str(account.get("totp_secret") or "")),
                 daemon=True,
             )
             t.start()
@@ -1747,6 +1842,9 @@ class AccountService:
             password = str(account.get("password") or "").strip()
             if password:
                 item["password"] = password
+            totp_secret = str(account.get("totp_secret") or "").strip()
+            if totp_secret:
+                item["totp_secret"] = totp_secret
             items.append(item)
         return items
 
