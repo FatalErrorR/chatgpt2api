@@ -76,7 +76,7 @@ class SolverClientTests(unittest.TestCase):
         with self._config(), mock.patch.object(sentinel_solver_client.requests, "post", return_value=response) as post:
             token = sentinel_solver_client.solve_turnstile("dx-value", "p-value")
         self.assertEqual(token, "solved-token")
-        self.assertEqual(post.call_args.kwargs["json"], {"dx": "dx-value", "p": "p-value"})
+        self.assertEqual(post.call_args.kwargs["json"], {"dx": "dx-value", "p": "p-value", "proxy": ""})
         self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer secret")
 
     def test_empty_token_fails_closed(self):
@@ -114,10 +114,25 @@ class SolverClientTests(unittest.TestCase):
         requirements = {"prepare_token": "prepare", "turnstile": {"required": True, "dx": "dx"}}
         with self._config(), mock.patch.object(sentinel_solver_client.requests, "post", return_value=response) as post:
             sentinel_solver_client.solve_turnstile("dx", "p", requirements)
-        self.assertEqual(post.call_args.kwargs["json"], {"dx": "dx", "p": "p", "requirements": requirements})
+        self.assertEqual(post.call_args.kwargs["json"], {"dx": "dx", "p": "p", "proxy": "", "requirements": requirements})
+
+
+    def test_egress_proxy_is_forwarded(self):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {"token": "solved"}
+        with self._config(), mock.patch.object(sentinel_solver_client.requests, "post", return_value=response) as post:
+            sentinel_solver_client.solve_turnstile("dx", "p", proxy="http://user:pass@proxy:8118")
+        self.assertEqual(post.call_args.kwargs["json"]["proxy"], "http://user:pass@proxy:8118")
 
 
 class SentinelHandshakeTests(unittest.TestCase):
+    def test_solver_gets_the_proxy_this_account_egresses_through(self):
+        with mock.patch.object(openai_backend_api.account_service, "get_account",
+                               return_value={"proxy": "http://user:pass@account-proxy:8118"}):
+            api = OpenAIBackendAPI("token")
+        self.addCleanup(api.close)
+        self.assertEqual(api.proxy_url, "http://user:pass@account-proxy:8118")
+
     def test_prepare_finalize_uses_solver_ua_tokens_and_clears_only_restricted_cookie(self):
         api = OpenAIBackendAPI("")
         self.addCleanup(api.close)
@@ -138,7 +153,7 @@ class SentinelHandshakeTests(unittest.TestCase):
             result = api._get_chat_requirements()
         self.assertEqual(build.call_args.args[0], "solver-UA")
         self.assertEqual(proof.call_args.args[2], "solver-UA")
-        solve.assert_called_once_with("dx", "p", prepare)
+        solve.assert_called_once_with("dx", "p", prepare, "")
         self.assertEqual(post.call_args_list[1].kwargs["json"], {
             "prepare_token": "prepare", "proofofwork": "proof", "turnstile": "turnstile"})
         self.assertEqual(result.token, "requirements")

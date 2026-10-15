@@ -7,7 +7,8 @@ conversation endpoint answers a disguised `404 {"detail": "Model not found"}`.
 The solver keeps a headless Chromium on that page and computes the token for us.
 
 The solver only ever receives challenge parameters (`dx` and the requirements
-`p`); account tokens, cookies and user prompts stay in this process.
+`p`) plus the egress proxy to solve from; account tokens, cookies and user
+prompts stay in this process.
 """
 
 from __future__ import annotations
@@ -73,7 +74,7 @@ def solver_user_agent() -> str:
         return value
 
 
-def solve_turnstile(dx: str, p: str, requirements: dict | None = None) -> str:
+def solve_turnstile(dx: str, p: str, requirements: dict | None = None, proxy: str = "") -> str:
     """Solve the Turnstile challenge.
 
     `dx` comes from the prepare response and `p` is the requirements token we sent.
@@ -81,6 +82,9 @@ def solve_turnstile(dx: str, p: str, requirements: dict | None = None) -> str:
     the page's own turnstile module instead of emulating the challenge, which is
     the only thing that currently produces an accepted token. It is pure challenge
     material: no account token, cookie or user prompt is involved.
+
+    `proxy` is the egress this account's requests go through ("" for direct). The
+    token is only accepted from the same IP, so the solver opens its page there too.
 
     Fails closed: without a solved token the conversation request would come back
     as a disguised 404 and burn the whole retry budget, so an unsolvable challenge
@@ -91,7 +95,7 @@ def solve_turnstile(dx: str, p: str, requirements: dict | None = None) -> str:
         raise SentinelSolverError(
             "sentinel solver is not configured (CHATGPT2API_SENTINEL_SOLVER_URL / config.json sentinel_solver_url)"
         )
-    body: dict[str, object] = {"dx": dx, "p": p}
+    body: dict[str, object] = {"dx": dx, "p": p, "proxy": proxy}
     if requirements:
         body["requirements"] = requirements
     try:

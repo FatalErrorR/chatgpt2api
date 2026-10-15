@@ -16,7 +16,7 @@ Turnstile。主服务本身不打包浏览器，只通过 HTTP 调用这里。
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 页面状态及页面使用的 UA（主服务据此生成 requirements/proof token） |
-| POST | `/v1/turnstile` | `{"dx", "p", "requirements"}` → `{"token"}`；`requirements` 是 prepare 的完整响应，给了它就调用页面自带的 turnstile 模块求解；只给 `dx`/`p` 时退回内置 VM |
+| POST | `/v1/turnstile` | `{"dx", "p", "requirements", "proxy"}` → `{"token"}`；`requirements` 是 prepare 的完整响应，给了它就调用页面自带的 turnstile 模块求解；只给 `dx`/`p` 时退回内置 VM |
 | POST | `/v1/so` | `{"collector_dx", "snapshot_dx", "p"}` → `{"token"}`；目前对话接口还不强制要求 |
 
 `solve` 优先走页面自带的 turnstile 模块（`import` chatgpt.com 自己的 chunk 后调用
@@ -28,8 +28,8 @@ Turnstile。主服务本身不打包浏览器，只通过 HTTP 调用这里。
 
 ### 只看挑战参数
 
-求解服务只接收 `dx`、`p` 和 prepare 响应等挑战参数。账号 access token、Cookie、用户 prompt 都不会离开主
-服务进程。建议仅在内网提供服务，并配置访问密钥。
+求解服务只接收 `dx`、`p` 和 prepare 响应等挑战参数，以及该账号的出口代理地址（可能含代理账号密码）。账号
+access token、Cookie、用户 prompt 都不会离开主服务进程。建议仅在内网提供服务，并配置访问密钥。
 
 ## 部署
 
@@ -57,12 +57,19 @@ Docker 镜像不包含 Chromium；容器启动时由入口脚本下载完整 Chr
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `SENTINEL_SOLVER_KEY` | 空 | 访问密钥 |
-| `SENTINEL_SOLVER_PROXY` | 空 | 浏览器出网代理，应与主服务访问 chatgpt.com 的出口一致 |
+| `SENTINEL_SOLVER_PROXY` | 空 | 请求未携带 `proxy` 时浏览器使用的代理（兼容旧版主服务） |
 | `SENTINEL_SOLVER_USER_AGENT` | 按内置 Chromium 版本生成 | 页面 UA |
 | `SENTINEL_SOLVER_TIMEZONE` | 跟随系统 | 页面时区（如 `Asia/Shanghai`），应与出口 IP 所在地一致 |
 | `SENTINEL_SOLVER_REFRESH_SECONDS` | 1800 | 页面定期重开的间隔 |
 | `SENTINEL_SOLVER_HEADLESS` | true | 调试时可设为 false |
 | `PORT` | 8080 | 监听端口 |
+
+## 出口 IP 一致
+
+Turnstile token 必须和对话请求来自同一个出口 IP。主服务每次求解都会带上该账号实际使用的代理
+（账号代理 > 代理运行时 > 全局代理，直连时为空），求解服务按代理各开一个页面（最多 4 个，按最近使用淘汰），
+所以只需要在主服务里配置代理，不用再给求解服务单独配置。带账号密码的 HTTP 代理同样可用；Chromium 不支持
+带认证的 SOCKS5 代理。
 
 ## 注意
 

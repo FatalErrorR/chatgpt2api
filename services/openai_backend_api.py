@@ -206,11 +206,14 @@ class OpenAIBackendAPI:
         self.pow_script_sources: list[str] = []
         self.pow_data_build = ""
         self.progress_callback: Callable[[str], None] | None = None
-        self.session = requests.Session(**proxy_settings.build_session_kwargs(
+        session_kwargs = proxy_settings.build_session_kwargs(
             account=self.account,
             impersonate=self.fp["impersonate"],
             verify=True,
-        ))
+        )
+        # The solver has to compute Turnstile from this same egress IP.
+        self.proxy_url = str(session_kwargs.get("proxy") or "")
+        self.session = requests.Session(**session_kwargs)
         self.session.headers.update({
             "User-Agent": self.user_agent,
             "Origin": self.base_url,
@@ -448,7 +451,7 @@ class OpenAIBackendAPI:
         turnstile_token = ""
         turnstile_info = data.get("turnstile") or {}
         if turnstile_info.get("required"):
-            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), source_p, data)
+            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), source_p, data, self.proxy_url)
 
         return ChatRequirements(
             token=data.get("token", ""),
@@ -2776,7 +2779,7 @@ class OpenAIBackendAPI:
         turnstile_info = prepare_data.get("turnstile") or {}
         if turnstile_info.get("required"):
             # 传入完整 prepare 响应，让求解器调用页面自带的 Turnstile 模块。
-            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), p_token, prepare_data)
+            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), p_token, prepare_data, self.proxy_url)
 
         finalize_path = base + "/finalize"
         response = self.session.post(
