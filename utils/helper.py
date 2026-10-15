@@ -257,8 +257,14 @@ def ensure_ok(response: requests.Response, context: str) -> None:
     body: Any = response.text
     if not body:
         try:
-            raw = response.content
-            body = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+            chunks = []
+            for chunk in response.iter_content():
+                if isinstance(chunk, str):
+                    chunk = chunk.encode()
+                if chunk:
+                    chunks.append(chunk)
+            if chunks:
+                body = b"".join(chunks).decode("utf-8", errors="replace")
         except Exception:
             body = response.text
     if isinstance(body, str) and body:
