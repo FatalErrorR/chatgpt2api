@@ -78,8 +78,25 @@ class ChatRequirements:
 DEFAULT_CLIENT_VERSION = "prod-a194cd50d4416d3c0b47c740f206b12ce60f5887"
 DEFAULT_CLIENT_BUILD_NUMBER = "6708908"
 DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js"
-DEFAULT_IMPERSONATE = "chrome131"
-LEGACY_IMPERSONATES = {"chrome110", "edge101", "chrome146"}
+DEFAULT_IMPERSONATE = "chrome146"
+LEGACY_IMPERSONATES = {"chrome110", "edge101"}
+# 请求头中的浏览器身份必须与 TLS 指纹一致，不能混用 Edge。品牌列表（含 GREASE 项及顺序）
+# 取自 curl_cffi chrome146 自带的默认头；完整版本号取 Chrome 146 的稳定版。
+_FINGERPRINT_BROWSER_VERSION = DEFAULT_IMPERSONATE.removeprefix("chrome") or "146"
+_FINGERPRINT_FULL_VERSION = "146.0.7680.180"
+FINGERPRINT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    f"(KHTML, like Gecko) Chrome/{_FINGERPRINT_BROWSER_VERSION}.0.0.0 Safari/537.36"
+)
+FINGERPRINT_SEC_CH_UA = (
+    f'"Chromium";v="{_FINGERPRINT_BROWSER_VERSION}", "Not-A.Brand";v="24", '
+    f'"Google Chrome";v="{_FINGERPRINT_BROWSER_VERSION}"'
+)
+FINGERPRINT_FULL_VERSION = f'"{_FINGERPRINT_FULL_VERSION}"'
+FINGERPRINT_FULL_VERSION_LIST = (
+    f'"Chromium";v="{_FINGERPRINT_FULL_VERSION}", "Not-A.Brand";v="24.0.0.0", '
+    f'"Google Chrome";v="{_FINGERPRINT_FULL_VERSION}"'
+)
 CLIENT_CREATED_ROOT = "client-created-root"
 IMAGE_CREATION_MENTION = "@创建图像"
 CODEX_RESPONSES_MODEL = "gpt-5.5"
@@ -225,8 +242,8 @@ class OpenAIBackendAPI:
             "Sec-Ch-Ua": self.fp["sec-ch-ua"],
             "Sec-Ch-Ua-Arch": '"x86"',
             "Sec-Ch-Ua-Bitness": '"64"',
-            "Sec-Ch-Ua-Full-Version": '"143.0.3650.96"',
-            "Sec-Ch-Ua-Full-Version-List": '"Microsoft Edge";v="143.0.3650.96", "Chromium";v="143.0.7499.147", "Not A(Brand";v="24.0.0.0"',
+            "Sec-Ch-Ua-Full-Version": FINGERPRINT_FULL_VERSION,
+            "Sec-Ch-Ua-Full-Version-List": FINGERPRINT_FULL_VERSION_LIST,
             "Sec-Ch-Ua-Mobile": self.fp["sec-ch-ua-mobile"],
             "Sec-Ch-Ua-Model": '""',
             "Sec-Ch-Ua-Platform": self.fp["sec-ch-ua-platform"],
@@ -280,25 +297,21 @@ class OpenAIBackendAPI:
             value = str(account.get(key) or "").strip()
             if value:
                 fp[key] = value
-        fp.setdefault(
-            "user-agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
-        )
+        fp.setdefault("user-agent", FINGERPRINT_UA)
         if fp.get("impersonate") in LEGACY_IMPERSONATES:
             fp.pop("impersonate")
         fp.setdefault("impersonate", DEFAULT_IMPERSONATE)
         fp.setdefault("oai-device-id", new_uuid())
         fp.setdefault("oai-session-id", new_uuid())
-        fp.setdefault("sec-ch-ua", '"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"')
+        fp.setdefault("sec-ch-ua", FINGERPRINT_SEC_CH_UA)
         fp.setdefault("sec-ch-ua-mobile", "?0")
         fp.setdefault("sec-ch-ua-platform", '"Windows"')
         return fp
 
     def _headers(self, path: str, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-        """构造请求头，并补上 web 端要求的 target route。"""
+        """构造请求头，并补上 web 端要求的 target path/route。"""
         headers = dict(self.session.headers)
-        # 同时发送 Target-Path 和 Target-Route 会间歇触发 Cloudflare 403 挑战页。
+        headers["X-OpenAI-Target-Path"] = path
         headers["X-OpenAI-Target-Route"] = path
         if extra:
             headers.update(extra)
@@ -316,25 +329,52 @@ class OpenAIBackendAPI:
             raise InvalidAccessTokenError(f"token invalidated ({path})")
         raise RuntimeError(f"{path} failed: HTTP {response.status_code}")
 
+    @staticmethod
+    def _is_cloudflare_challenge(response: requests.Response) -> bool:
+        """仅识别 Cloudflare 挑战页，JSON 403 仍按授权拒绝处理。"""
+        if response.status_code != 403:
+            return False
+        content_type = str(response.headers.get("content-type") or "").lower()
+        if "json" in content_type:
+            return False
+        return (
+            str(response.headers.get("cf-mitigated") or "").strip().lower() == "challenge"
+            or "text/html" in content_type
+        )
+
+    def _retry_cloudflare_challenge(self, request: Callable[[], requests.Response]) -> requests.Response:
+        """账号刷新遇到临时挑战时最多尝试三次，避免健康账号被误判为无额度。"""
+        response = request()
+        for attempt in range(1, 3):
+            if not self._is_cloudflare_challenge(response):
+                return response
+            time.sleep(1.5 * attempt)
+            response = request()
+        return response
+
     def _get_me(self) -> Dict[str, Any]:
         path = "/backend-api/me"
-        response = self.session.get(self.base_url + path, headers=self._headers(path), timeout=20)
+        response = self._retry_cloudflare_challenge(
+            lambda: self.session.get(self.base_url + path, headers=self._headers(path), timeout=20)
+        )
         if response.status_code != 200:
             self._raise_on_error(response, path)
         return response.json()
 
     def _get_conversation_init(self) -> Dict[str, Any]:
         path = "/backend-api/conversation/init"
-        response = self.session.post(
-            self.base_url + path,
-            headers=self._headers(path, {"Content-Type": "application/json"}),
-            json={
-                "gizmo_id": None,
-                "requested_default_model": None,
-                "conversation_id": None,
-                "timezone_offset_min": -480,
-            },
-            timeout=20,
+        response = self._retry_cloudflare_challenge(
+            lambda: self.session.post(
+                self.base_url + path,
+                headers=self._headers(path, {"Content-Type": "application/json"}),
+                json={
+                    "gizmo_id": None,
+                    "requested_default_model": None,
+                    "conversation_id": None,
+                    "timezone_offset_min": -480,
+                },
+                timeout=20,
+            )
         )
         if response.status_code != 200:
             self._raise_on_error(response, path)
@@ -342,8 +382,10 @@ class OpenAIBackendAPI:
 
     def _get_default_account(self) -> Dict[str, Any]:
         path = "/backend-api/accounts/check/v4-2023-04-27"
-        response = self.session.get(self.base_url + path + "?timezone_offset_min=-480", headers=self._headers(path),
-                                    timeout=20)
+        response = self._retry_cloudflare_challenge(
+            lambda: self.session.get(self.base_url + path + "?timezone_offset_min=-480",
+                                     headers=self._headers(path), timeout=20)
+        )
         if response.status_code != 200:
             self._raise_on_error(response, path)
         payload = response.json()
