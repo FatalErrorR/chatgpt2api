@@ -39,6 +39,12 @@ services:
     container_name: chatgpt2api-sentinel-solver
     restart: unless-stopped
     shm_size: "1gb"
+    volumes:
+      # 镜像不含 Chromium，首次启动时下载；挂载后重启不用重新下载。
+      - sentinel-solver-browsers:/ms-playwright
     environment:
       - SENTINEL_SOLVER_KEY=${SENTINEL_SOLVER_KEY:-}
       - SENTINEL_SOLVER_TIMEZONE=America/Los_Angeles
+
+volumes:
+  sentinel-solver-browsers:

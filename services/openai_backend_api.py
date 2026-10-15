@@ -25,7 +25,7 @@ from PIL import Image
 from services.account_service import account_service
 from services.config import config
 from services.proxy_service import proxy_settings
-from utils.turnstile import solve_turnstile_token
+from services.sentinel_solver_client import solve_turnstile, solver_user_agent
 from utils.helper import (
     UpstreamHTTPError,
     codex_tool_model,
@@ -75,13 +75,15 @@ class ChatRequirements:
     raw_finalize: Optional[Dict[str, Any]] = None
 
 
-DEFAULT_IMPERSONATE = "chrome131"
 DEFAULT_CLIENT_VERSION = "prod-a194cd50d4416d3c0b47c740f206b12ce60f5887"
 DEFAULT_CLIENT_BUILD_NUMBER = "6708908"
 DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js"
+DEFAULT_IMPERSONATE = "chrome146"
+LEGACY_IMPERSONATES = {"chrome110", "edge101"}
+CLIENT_CREATED_ROOT = "client-created-root"
+IMAGE_CREATION_MENTION = "@创建图像"
 CODEX_RESPONSES_MODEL = "gpt-5.5"
 SEARCH_MODEL = "gpt-5-5"
-IMAGE_CREATION_MENTION = "@创建图像"
 SEARCH_TIMEOUT_SECS = 300.0
 SEARCH_POLL_INTERVAL_SECS = 3.0
 SEARCH_DONE_STATUS = {"finished_successfully", "finished_partial_completion"}
@@ -196,6 +198,7 @@ class OpenAIBackendAPI:
         self.access_token = access_token
         self.account = account_service.get_account(self.access_token) if self.access_token else {}
         self.account = self.account if isinstance(self.account, dict) else {}
+        self._image_turn_trace_id = ""
         self.fp = self._build_fp()
         self.user_agent = self.fp["user-agent"]
         self.device_id = self.fp["oai-device-id"]
@@ -279,6 +282,8 @@ class OpenAIBackendAPI:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
         )
+        if fp.get("impersonate") in LEGACY_IMPERSONATES:
+            fp.pop("impersonate")
         fp.setdefault("impersonate", DEFAULT_IMPERSONATE)
         fp.setdefault("oai-device-id", new_uuid())
         fp.setdefault("oai-session-id", new_uuid())
@@ -288,9 +293,9 @@ class OpenAIBackendAPI:
         return fp
 
     def _headers(self, path: str, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-        """构造请求头，并补上 web 端要求的 target path/route。"""
+        """构造请求头，并补上 web 端要求的 target route。"""
         headers = dict(self.session.headers)
-        headers["X-OpenAI-Target-Path"] = path
+        # 同时发送 Target-Path 和 Target-Route 会间歇触发 Cloudflare 403 挑战页。
         headers["X-OpenAI-Target-Route"] = path
         if extra:
             headers.update(extra)
@@ -413,6 +418,17 @@ class OpenAIBackendAPI:
             "Upgrade-Insecure-Requests": "1",
         }
 
+    def _drop_restricted_cookies(self) -> None:
+        """移除 finalize 设置的限制 Cookie，避免后续对话伪装返回 Model not found。"""
+        jar = self.session.cookies.jar
+        for cookie in list(jar):
+            if cookie.name == "oai-sc":
+                jar.clear(cookie.domain, cookie.path, cookie.name)
+
+    def _sentinel_user_agent(self) -> str:
+        """requirements/proof 中的 UA 必须与求解 Turnstile 的页面一致。"""
+        return solver_user_agent() or self.user_agent
+
     def _build_requirements(self, data: Dict[str, Any], source_p: str = "") -> ChatRequirements:
         """把 sentinel 响应整理成后续对话需要的 token 集合。"""
         if (data.get("arkose") or {}).get("required"):
@@ -431,8 +447,8 @@ class OpenAIBackendAPI:
 
         turnstile_token = ""
         turnstile_info = data.get("turnstile") or {}
-        if turnstile_info.get("required") and turnstile_info.get("dx"):
-            turnstile_token = solve_turnstile_token(turnstile_info["dx"], source_p, self._sentinel_fingerprint()) or ""
+        if turnstile_info.get("required"):
+            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), source_p, data)
 
         return ChatRequirements(
             token=data.get("token", ""),
@@ -605,12 +621,14 @@ class OpenAIBackendAPI:
             headers["OpenAI-Sentinel-Proof-Token"] = requirements.proof_token
         if requirements.turnstile_token:
             headers["OpenAI-Sentinel-Turnstile-Token"] = requirements.turnstile_token
+        if requirements.so_token:
+            headers["OpenAI-Sentinel-SO-Token"] = requirements.so_token
         if conduit_token:
             headers["X-Conduit-Token"] = conduit_token
-        if trace_id:
-            headers["X-Oai-Turn-Trace-Id"] = trace_id
-        elif accept == "text/event-stream":
-            headers["X-Oai-Turn-Trace-Id"] = new_uuid()
+        # prepare 和后续对话必须共用同一个 turn trace id。
+        trace_id = str(trace_id or self._image_turn_trace_id or "").strip()
+        if accept == "text/event-stream" or trace_id:
+            headers["X-Oai-Turn-Trace-Id"] = trace_id or new_uuid()
         return self._headers(path, headers)
 
     def _codex_responses_headers(self) -> Dict[str, str]:
@@ -887,6 +905,7 @@ class OpenAIBackendAPI:
         path = "/backend-api/f/conversation/prepare"
         upstream_model, thinking_effort = self._image_model_settings(model)
         trace_id = new_uuid()
+        self._image_turn_trace_id = trace_id
         payload = {
             "action": "next",
             "is_do_not_remember": False,
@@ -912,8 +931,6 @@ class OpenAIBackendAPI:
             "client_prepare_dispatch": "debounced",
             "client_prepare_source": "composer_editor_state",
         }
-        if thinking_effort:
-            payload["thinking_effort"] = thinking_effort
         response = self.session.post(
             self.base_url + path,
             headers=self._image_headers(path, requirements, trace_id=trace_id),
@@ -1054,7 +1071,7 @@ class OpenAIBackendAPI:
                 "update_time": None,
                 "weight": 1,
             }],
-            "parent_message_id": "client-created-root",
+            "parent_message_id": CLIENT_CREATED_ROOT,
             "model": upstream_model,
             "system_hints": ["picture_v2"],
             "timezone_offset_min": -480,
@@ -1070,8 +1087,6 @@ class OpenAIBackendAPI:
             "genui_state_snapshots": [],
             "client_prepare_state": "success",
         }
-        if thinking_effort:
-            payload["thinking_effort"] = thinking_effort
         path = "/backend-api/f/conversation"
         response = self.session.post(
             self.base_url + path,
@@ -2723,45 +2738,15 @@ class OpenAIBackendAPI:
         if not self.pow_script_sources:
             self.pow_script_sources = [DEFAULT_POW_SCRIPT]
 
-    def _sentinel_user_agent(self) -> str:
-        """requirements 和 PoW 里的 UA，与当前 HTTP 请求头一致。"""
-        return self.user_agent
-
-    def _sentinel_fingerprint(self) -> Dict[str, Any]:
-        """构造与当前请求头一致的 sentinel 环境，供 dx 求解使用。"""
-        user_agent = self.user_agent
-        if "Windows" in user_agent:
-            platform = "Win32"
-        elif "Macintosh" in user_agent:
-            platform = "MacIntel"
-        else:
-            platform = "Linux x86_64"
-        return {
-            "userAgent": user_agent,
-            "appVersion": user_agent.replace("Mozilla/", ""),
-            "platform": platform,
-            "language": "zh-CN",
-            "languages": ["zh-CN", "zh", "en"],
-            "hardwareConcurrency": 32,
-            "deviceMemory": 8,
-            "oaiDid": self.device_id,
-        }
-
-    def _drop_oai_sc_cookie(self) -> None:
-        """finalize 下发的 oai-sc 会把会话标成受限，随后 f/conversation 返回 Model not found。"""
-        try:
-            jar = self.session.cookies.jar
-            for cookie in list(jar):
-                if cookie.name == "oai-sc":
-                    jar.clear(cookie.domain, cookie.path, cookie.name)
-        except Exception:
-            return
-
     def _get_chat_requirements(self) -> ChatRequirements:
-        """获取当前模式对话所需的 sentinel token（prepare + finalize 两步流程）。"""
-        base = "/backend-api/sentinel/chat-requirements" if self.access_token else "/backend-anon/sentinel/chat-requirements"
-        sentinel_user_agent = self.user_agent
-        p_token = build_legacy_requirements_token(sentinel_user_agent, self.pow_script_sources, self.pow_data_build)
+        """完成 prepare/finalize 握手；质量不足时对话会伪装返回 Model not found 404。"""
+        base = "/backend-api/sentinel/chat-requirements" if self.access_token else (
+            "/backend-anon/sentinel/chat-requirements"
+        )
+        sentinel_user_agent = self._sentinel_user_agent()
+        p_token = build_legacy_requirements_token(
+            sentinel_user_agent, self.pow_script_sources, self.pow_data_build
+        )
 
         prepare_path = base + "/prepare"
         response = self.session.post(
@@ -2789,10 +2774,9 @@ class OpenAIBackendAPI:
 
         turnstile_token = ""
         turnstile_info = prepare_data.get("turnstile") or {}
-        if turnstile_info.get("required") and turnstile_info.get("dx"):
-            turnstile_token = solve_turnstile_token(
-                turnstile_info["dx"], p_token, self._sentinel_fingerprint()
-            ) or ""
+        if turnstile_info.get("required"):
+            # 传入完整 prepare 响应，让求解器调用页面自带的 Turnstile 模块。
+            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), p_token, prepare_data)
 
         finalize_path = base + "/finalize"
         response = self.session.post(
@@ -2807,13 +2791,12 @@ class OpenAIBackendAPI:
         )
         ensure_ok(response, "chat_requirements_finalize")
         data = response.json()
-        self._drop_oai_sc_cookie()
+        self._drop_restricted_cookies()
 
         token = data.get("token", "")
         if not token:
             message = "missing auth chat requirements token" if self.access_token else "missing chat requirements token"
             raise RuntimeError(f"{message}: {data}")
-
         return ChatRequirements(
             token=token,
             proof_token=proof_token,

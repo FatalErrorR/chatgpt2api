@@ -77,6 +77,7 @@ class AccountService:
         self._index = 0
         self._accounts = self._load_accounts()
         self._image_inflight: dict[str, int] = {}
+        self._image_unavailable_until: dict[str, float] = {}
         self._token_aliases: dict[str, str] = {}
         self._cumulative_total = self._load_cumulative_total()
 
@@ -254,9 +255,6 @@ class AccountService:
         normalized["restore_at"] = normalized.get("restore_at") or None
         normalized["edit_upload_blocked_until"] = str(
             normalized.get("edit_upload_blocked_until") or ""
-        ).strip() or None
-        normalized["model_not_found_until"] = str(
-            normalized.get("model_not_found_until") or ""
         ).strip() or None
         normalized["success"] = int(normalized.get("success") or 0)
         normalized["fail"] = int(normalized.get("fail") or 0)
@@ -932,6 +930,7 @@ class AccountService:
                and self._account_matches_source_type(item, source_type)
                and (token := item.get("access_token") or "")
                and token not in excluded
+               and self._image_unavailable_until.get(token, 0.0) <= time.monotonic()
         ]
 
     def _list_available_candidate_tokens(
@@ -969,6 +968,13 @@ class AccountService:
                     self._image_inflight[access_token] = int(self._image_inflight.get(access_token, 0)) + 1
                     return access_token
                 self._image_slot_condition.wait(timeout=1.0)
+
+    def sideline_image_account(self, access_token: str, seconds: int) -> None:
+        """仅在当前进程内暂避图片账号，保留额度和账号状态。"""
+        with self._image_slot_condition:
+            access_token = self._resolve_access_token_locked(access_token)
+            self._image_unavailable_until[access_token] = time.monotonic() + seconds
+            self._image_slot_condition.notify_all()
 
     def release_image_slot(self, access_token: str) -> None:
         if not access_token:
@@ -1013,34 +1019,6 @@ class AccountService:
         )
         return str((account or {}).get("edit_upload_blocked_until") or until)
 
-    def _model_not_found_blocked_tokens(self) -> set[str]:
-        now = datetime.now(timezone.utc)
-        with self._lock:
-            return {
-                token
-                for item in self._accounts.values()
-                if (until := self._parse_time(item.get("model_not_found_until")))
-                and until > now
-                and (token := item.get("access_token") or "")
-            }
-
-    def mark_model_not_found_cooldown(self, access_token: str, seconds: int = 600) -> str | None:
-        """生图会话被上游以 Model not found 拒绝后，短时间不再选这个号。不改额度，也不封号。"""
-        if not access_token:
-            return None
-        until = (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(seconds)))).isoformat()
-        account = self.update_account(
-            access_token,
-            {"model_not_found_until": until},
-            quiet=True,
-        )
-        log_service.add(
-            LOG_TYPE_ACCOUNT,
-            "生图 Model not found 冷却",
-            {"token": anonymize_token(access_token), "until": until},
-        )
-        return str((account or {}).get("model_not_found_until") or until)
-
     def get_available_access_token(
             self,
             plan_type: str | None = None,
@@ -1056,7 +1034,6 @@ class AccountService:
         """
         max_attempts = 20  # 防止无限循环
         attempted_tokens: set[str] = set(excluded_tokens or set())
-        attempted_tokens.update(self._model_not_found_blocked_tokens())
         skip_edit_cooldown = bool(for_edits and config.image_edit_upload_cooldown_enabled)
         if skip_edit_cooldown:
             attempted_tokens.update(self._edit_upload_blocked_tokens())

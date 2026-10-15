@@ -596,8 +596,16 @@ class ConfigStore:
         ).strip().rstrip("/")
 
     @property
+    def app_version(self) -> str:
+        try:
+            value = VERSION_FILE.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            return "0.0.0"
+        return value or "0.0.0"
+
+    @property
     def sentinel_solver_url(self) -> str:
-        """内网 sentinel 求解服务。为空时退回本地 Turnstile 模拟。"""
+        """常驻 Chromium 的 sentinel 求解服务地址。"""
         return str(
             os.getenv("CHATGPT2API_SENTINEL_SOLVER_URL")
             or self.data.get("sentinel_solver_url")
@@ -606,19 +614,12 @@ class ConfigStore:
 
     @property
     def sentinel_solver_key(self) -> str:
+        """求解服务访问密钥，不通过设置接口返回。"""
         return str(
             os.getenv("CHATGPT2API_SENTINEL_SOLVER_KEY")
             or self.data.get("sentinel_solver_key")
             or ""
         ).strip()
-
-    @property
-    def app_version(self) -> str:
-        try:
-            value = VERSION_FILE.read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
-            return "0.0.0"
-        return value or "0.0.0"
 
     def get(self) -> dict[str, object]:
         data = dict(self.data)
@@ -641,7 +642,6 @@ class ConfigStore:
         data["image_upscale_method"] = self.image_upscale_method
         data["image_edit_upload_cooldown_enabled"] = self.image_edit_upload_cooldown_enabled
         data["sentinel_solver_url"] = self.sentinel_solver_url
-        data.pop("sentinel_solver_key", None)
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["auto_relogin_after_refresh"] = self.auto_relogin_after_refresh
@@ -656,6 +656,7 @@ class ConfigStore:
         data["chat_completion_cache"] = self.get_chat_completion_cache_settings()
         data["proxy_runtime"] = self.get_public_proxy_runtime_settings()
         data["third_party_apps"] = self.get_third_party_apps_settings()
+        data.pop("sentinel_solver_key", None)
         data.pop("auth-key", None)
         return data
 

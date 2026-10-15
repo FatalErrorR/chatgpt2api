@@ -1,16 +1,24 @@
-"""sentinel 求解服务：常驻一个无头 Chrome 的 chatgpt.com 页面，替主服务计算 Turnstile / SO token。
+"""Sentinel solver service: keeps a headless Chromium on chatgpt.com and computes Turnstile tokens.
 
-2026-10-14 起 chatgpt.com 的对话接口要求 Turnstile token 必须在真实的 chatgpt.com 页面里算出，
-纯 Python/Node 模拟的结果会被拒（403）。主服务不打包浏览器，改为通过 HTTP 调用本服务。
+Since 2026-10-14 the chatgpt.com conversation endpoint only accepts a Turnstile
+token that was produced inside a real chatgpt.com page; a pure Python/Node
+emulation is rejected. The main service does not bundle a browser, so it calls
+this one over HTTP.
 
-环境变量：
-- SENTINEL_SOLVER_KEY：可选，设置后请求需带 `Authorization: Bearer <key>`
-- SENTINEL_SOLVER_PROXY：可选，浏览器出网代理（如 http://host:7890），应与主服务出口一致
-- SENTINEL_SOLVER_USER_AGENT：可选，默认按内置 Chromium 版本生成 Linux Chrome UA
-- SENTINEL_SOLVER_TIMEZONE：可选，页面时区（如 Asia/Tokyo），应与出口 IP 所在地一致；默认跟随系统
-- SENTINEL_SOLVER_REFRESH_SECONDS：页面定期重开的间隔，默认 1800
-- SENTINEL_SOLVER_HEADLESS：默认 true；调试时可设为 false
-- PORT：监听端口，默认 8080
+`vm.js` is a port of the two isomorphic VMs in the chatgpt.com frontend bundle
+(the challenge program is served as an obfuscated instruction list and has to run
+against the real `window`/`document`). It follows the implementation in
+MEIZU16/chatgpt2api's `sentinel_solver/` (MIT), kept byte-identical so it can be
+re-synced against the frontend bundle when OpenAI changes the instruction set.
+
+Environment:
+- SENTINEL_SOLVER_KEY: when set, requests must send `Authorization: Bearer <key>`
+- SENTINEL_SOLVER_PROXY: outbound proxy for the browser, should match the main service egress
+- SENTINEL_SOLVER_USER_AGENT: optional, defaults to a Linux Chrome UA built from the bundled Chromium
+- SENTINEL_SOLVER_TIMEZONE: optional page timezone (e.g. Asia/Shanghai), should match the egress IP
+- SENTINEL_SOLVER_REFRESH_SECONDS: how often the page is reopened, default 1800
+- SENTINEL_SOLVER_HEADLESS: default true, set false to debug
+- PORT: listen port, default 8080
 """
 from __future__ import annotations
 
@@ -20,6 +28,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
@@ -35,17 +44,80 @@ Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 window.chrome = window.chrome || { runtime: {} };
 """
 
+# Preferred path: load OpenAI's own turnstile chunk from this very page and let it
+# compute the token against the real environment. A hand-ported VM has to track
+# whatever the frontend does next; calling the shipped module does not.
+#
+# The chunk is content-hashed and changes on every deploy, so it is discovered at
+# solve time instead of being pinned. See `_DISCOVER_TURNSTILE_ASSET`.
+_PINNED_ASSET = "/unauth-mweb/assets/turnstile-DykPLDEM.js"
+_DISCOVER_TURNSTILE_ASSET = """
+() => {
+  const pattern = /\\/turnstile-[^/"']+\\.js/;
+  const seen = [];
+  const push = (url) => { if (url && pattern.test(url) && !seen.includes(url)) seen.push(url); };
+  try { performance.getEntriesByType('resource').forEach((e) => push(e.name)); } catch (err) {}
+  try { Array.from(document.scripts).forEach((s) => push(s.src)); } catch (err) {}
+  return seen;
+}
+"""
+_SCAN_ASSET_IN_SCRIPTS = """
+async (pattern) => {
+  const re = new RegExp(pattern);
+  for (const script of Array.from(document.scripts)) {
+    if (!script.src) continue;
+    try {
+      const text = await (await fetch(script.src)).text();
+      const hit = text.match(re);
+      if (hit) return hit[0];
+    } catch (err) {}
+  }
+  return null;
+}
+"""
+_SOLVE_VIA_SDK = """
+async ([requirements, key, asset]) => {
+  try {
+    const mod = await import(asset);
+    const turnstile = mod.turnstile || (mod.default && mod.default.turnstile);
+    if (!turnstile || typeof turnstile.getEnforcementToken !== 'function') {
+      return 'ERR:getEnforcementToken missing';
+    }
+    // The SDK looks its seed up in a WeakMap keyed by the requirements object;
+    // hand it the p token instead.
+    const original = WeakMap.prototype.get;
+    WeakMap.prototype.get = function (target) {
+      return target === requirements ? key : original.call(this, target);
+    };
+    try {
+      return String(await turnstile.getEnforcementToken(requirements));
+    } finally {
+      WeakMap.prototype.get = original;
+    }
+  } catch (error) {
+    return 'ERR:' + String(error).slice(0, 300);
+  }
+}
+"""
+_SOLVE_VIA_VM = "([dx, p]) => window.__sentinelVM.turnstile(dx, p)"
+
 SOLVER_KEY = os.getenv("SENTINEL_SOLVER_KEY", "").strip()
 PROXY = os.getenv("SENTINEL_SOLVER_PROXY", "").strip()
 USER_AGENT = os.getenv("SENTINEL_SOLVER_USER_AGENT", "").strip()
 TIMEZONE = os.getenv("SENTINEL_SOLVER_TIMEZONE", "").strip()
 REFRESH_SECONDS = max(60, int(os.getenv("SENTINEL_SOLVER_REFRESH_SECONDS", "1800")))
 HEADLESS = os.getenv("SENTINEL_SOLVER_HEADLESS", "true").strip().lower() not in {"0", "false", "no"}
+# Turnstile runs on a 500ms budget in the frontend and reports the step count on
+# timeout, so a slow solve is not an error there. SO gets a real deadline.
+# The ported VM inside vm.js keeps the frontend's own 500ms turnstile budget and
+# 60s SO budget. The page's own module may need to fetch/parse on first use, so it
+# gets room here.
+SDK_SOLVE_TIMEOUT_MS = 120000
 READY_TIMEOUT_SECONDS = 60
 
 
 class SolverPage:
-    """维护一个已通过 Cloudflare 校验的 chatgpt.com 页面，按需重开。"""
+    """Keeps one Cloudflare-cleared chatgpt.com page alive, reopening it when it goes stale."""
 
     def __init__(self) -> None:
         self._playwright: Playwright | None = None
@@ -54,6 +126,7 @@ class SolverPage:
         self._page: Page | None = None
         self._opened_at = 0.0
         self._lock = asyncio.Lock()
+        self._turnstile_asset = ""
         self.user_agent = USER_AGENT
         self.last_error = ""
 
@@ -61,7 +134,8 @@ class SolverPage:
         self._playwright = await async_playwright().start()
         launch_kwargs = {
             "headless": HEADLESS,
-            # channel="chromium" 使用完整 Chromium 的新版无头模式；默认的 headless shell 过不了 Cloudflare
+            # channel="chromium" uses full Chromium's new headless mode; the default
+            # headless shell cannot clear the Cloudflare challenge.
             "channel": "chromium",
             "args": ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
         }
@@ -76,7 +150,8 @@ class SolverPage:
             )
         try:
             await self.page()
-        except Exception as exc:  # 启动时页面暂时打不开不致命，首个请求会重试
+        except Exception as exc:  # noqa: BLE001
+            # A page that cannot open yet is not fatal; the first request retries.
             self.last_error = str(exc)
             print(f"[sentinel-solver] initial page open failed: {exc}", flush=True)
 
@@ -105,10 +180,10 @@ class SolverPage:
         if self._context is not None:
             try:
                 await self._context.close()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         self._page = None
-        context_kwargs = {
+        context_kwargs: dict[str, object] = {
             "locale": "zh-CN",
             "viewport": {"width": 1280, "height": 800},
             "user_agent": self.user_agent,
@@ -116,6 +191,9 @@ class SolverPage:
         if TIMEZONE:
             context_kwargs["timezone_id"] = TIMEZONE
         context = await self._browser.new_context(**context_kwargs)
+        # page.evaluate has no per-call timeout, so widen the context default; the
+        # page's own module can take a moment on first use.
+        context.set_default_timeout(SDK_SOLVE_TIMEOUT_MS)
         await context.add_init_script(BASE_INIT_SCRIPT)
         await context.add_init_script(VM_SCRIPT)
         await Stealth().apply_stealth_async(context)
@@ -126,7 +204,9 @@ class SolverPage:
             if time.monotonic() > deadline:
                 title = await page.title()
                 await context.close()
-                raise RuntimeError(f"chatgpt.com page not ready (title={title!r}), likely stuck on a Cloudflare challenge")
+                raise RuntimeError(
+                    f"chatgpt.com page not ready (title={title!r}), likely stuck on a Cloudflare challenge"
+                )
             await asyncio.sleep(1)
         self._context = context
         self._page = page
@@ -142,17 +222,67 @@ class SolverPage:
             title = await page.title()
             if any(marker in title for marker in CHALLENGE_TITLES):
                 return False
-            return await page.evaluate("location.hostname === 'chatgpt.com' && typeof window.__sentinelVM === 'object'")
-        except Exception:
+            return await page.evaluate(
+                "location.hostname === 'chatgpt.com' && typeof window.__sentinelVM === 'object'"
+            )
+        except Exception:  # noqa: BLE001
             return False
 
+    async def turnstile_asset(self) -> str:
+        """Locate chatgpt.com's own turnstile chunk.
+
+        The file name is content-hashed and changes on every deploy, so look for
+        the URL that is actually loaded on this page first, then scan the page's
+        own scripts for the literal path. The pinned path is only a last resort.
+        """
+        if self._turnstile_asset:
+            return self._turnstile_asset
+        try:
+            loaded = await self.evaluate(_DISCOVER_TURNSTILE_ASSET, None)
+            if loaded:
+                self._turnstile_asset = str(loaded[0])
+                print(f"[sentinel-solver] turnstile asset (loaded): {self._turnstile_asset}", flush=True)
+                return self._turnstile_asset
+            scanned = await self.evaluate(_SCAN_ASSET_IN_SCRIPTS, r"/unauth-mweb/assets/turnstile-[A-Za-z0-9_-]+\.js")
+            if scanned:
+                self._turnstile_asset = str(scanned)
+                print(f"[sentinel-solver] turnstile asset (scanned): {self._turnstile_asset}", flush=True)
+                return self._turnstile_asset
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = str(exc)
+        print(f"[sentinel-solver] turnstile asset discovery fell back to {_PINNED_ASSET}", flush=True)
+        self._turnstile_asset = _PINNED_ASSET
+        return self._turnstile_asset
+
+    async def solve_turnstile(self, requirements: dict[str, Any] | None, dx: str, p: str) -> tuple[bool, str]:
+        """Solve via the page's own turnstile module, falling back to the ported VM."""
+        if requirements:
+            asset = await self.turnstile_asset()
+            try:
+                result = str(await self.evaluate(_SOLVE_VIA_SDK, [requirements, p, asset]) or "")
+            except Exception as exc:  # noqa: BLE001
+                result = f"ERR:{exc}"
+            if result and not result.startswith("ERR:"):
+                return True, result
+            self.last_error = result[:300]
+            print(f"[sentinel-solver] SDK solve failed via {asset}: {result[:300]}", flush=True)
+            # Drop the cached asset and page so the next attempt re-discovers both.
+            self._turnstile_asset = ""
+            await self.invalidate()
+        if not dx:
+            return False, self.last_error or "no dx and no requirements supplied"
+        result = str(await self.evaluate(_SOLVE_VIA_VM, [dx, p]) or "")
+        if result.startswith("ERR:"):
+            return False, result[4:]
+        return bool(result), result
+
     async def evaluate(self, expression: str, arg: object) -> object:
-        """在页面里执行；页面失效时重开一次再试。"""
+        """Run in the page, reopening once if the page turned out to be dead."""
         for attempt in range(2):
             page = await self.page()
             try:
                 return await page.evaluate(expression, arg)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 self.last_error = str(exc)
                 if attempt:
                     raise
@@ -184,8 +314,12 @@ app = FastAPI(title="chatgpt2api sentinel solver", lifespan=lifespan)
 
 
 class TurnstileRequest(BaseModel):
-    dx: str
     p: str
+    dx: str = ""
+    # The full `/chat-requirements/prepare` response: pure challenge material
+    # (prepare token, dx, proof-of-work seed, SO handle). No account token,
+    # cookie or user prompt is ever sent here.
+    requirements: dict[str, Any] | None = None
 
 
 class SORequest(BaseModel):
@@ -211,10 +345,12 @@ async def health() -> dict[str, object]:
 async def solve_turnstile(body: TurnstileRequest, authorization: str | None = Header(default=None)) -> dict[str, str]:
     require_key(authorization)
     try:
-        token = await solver.evaluate("([dx, p]) => window.__sentinelVM.turnstile(dx, p)", [body.dx, body.p])
-    except Exception as exc:
+        ok, token = await solver.solve_turnstile(body.requirements, body.dx, body.p)
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"turnstile solve failed: {exc}") from exc
-    return {"token": str(token or "")}
+    if not ok:
+        raise HTTPException(status_code=503, detail=f"turnstile solve failed: {token[:300]}")
+    return {"token": token}
 
 
 @app.post("/v1/so")
@@ -224,7 +360,7 @@ async def solve_so(body: SORequest, authorization: str | None = Header(default=N
         token = await solver.evaluate(
             "([c, s, p]) => window.__sentinelVM.so(c, s, p)", [body.collector_dx, body.snapshot_dx, body.p]
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"so solve failed: {exc}") from exc
     return {"token": str(token or "")}
 

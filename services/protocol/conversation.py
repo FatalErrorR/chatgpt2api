@@ -17,15 +17,32 @@ from services.image_storage_service import image_storage_service
 from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeoutError, OpenAIBackendAPI
 from utils.helper import (
     IMAGE_MODELS,
+    UpstreamHTTPError,
     extract_image_from_message_content,
     is_codex_image_model,
-    is_model_not_found,
     is_supported_image_model,
     split_image_model,
 )
 from utils.image_tokens import count_image_content_tokens
 from utils.image_upscale import upscale_to_edge
 from utils.log import logger
+
+
+IMAGE_MODEL_NOT_FOUND_COOLDOWN_SECS = 10 * 60
+
+
+def is_image_model_not_found_error(error: Exception | str) -> bool:
+    """仅匹配图片对话接口返回的精确 Model not found 404。"""
+    if not isinstance(error, UpstreamHTTPError):
+        return False
+    if error.status_code != 404:
+        return False
+    if error.context != "/backend-api/f/conversation":
+        return False
+    body = error.body
+    if not isinstance(body, dict):
+        return False
+    return body.get("detail") == "Model not found"
 
 
 class ImageGenerationError(Exception):
@@ -1326,8 +1343,6 @@ def _generate_single_image(
     MAX_POLL_TIMEOUT_RETRIES = 4
     # 图生图上传上限：冻当前号后换下一个，最多再试 5 个不同号
     MAX_EDIT_UPLOAD_THROTTLE_RETRIES = 5
-    # 上游把生图会话拒绝成 Model not found 时，换号重试的次数，和轮询超时同一预算
-    MAX_MODEL_NOT_FOUND_RETRIES = MAX_POLL_TIMEOUT_RETRIES
 
     text_reply_retry_count = 0
     tls_retry_count = 0
@@ -1336,7 +1351,6 @@ def _generate_single_image(
     edit_upload_retry_count = 0
     model_not_found_retry_count = 0
     tried_upload_tokens: set[str] = set()
-    tried_model_not_found_tokens: set[str] = set()
     for_edits = bool(request.images)
     account_email = ""
 
@@ -1350,7 +1364,7 @@ def _generate_single_image(
                 plan_type=plan_type,
                 source_type="codex" if codex_model else None,
                 plan_types=("plus", "team", "pro") if codex_model and not plan_type else None,
-                excluded_tokens=tried_upload_tokens | tried_model_not_found_tokens,
+                excluded_tokens=tried_upload_tokens,
                 for_edits=for_edits,
             )
         except RuntimeError as exc:
@@ -1513,6 +1527,12 @@ def _generate_single_image(
                 "error": last_error,
                 "index": index,
             })
+            if not emitted_for_token and is_image_model_not_found_error(exc):
+                # 仅本地暂避账号，不修改额度、有效性或代理健康状态。
+                account_service.sideline_image_account(token, IMAGE_MODEL_NOT_FOUND_COOLDOWN_SECS)
+                model_not_found_retry_count += 1
+                if model_not_found_retry_count <= MAX_POLL_TIMEOUT_RETRIES:
+                    continue
             if not emitted_for_token and is_token_invalid_error(last_error):
                 refreshed_token = account_service.refresh_access_token(token, force=True, event="image_stream")
                 if refreshed_token and refreshed_token != token:
@@ -1550,26 +1570,6 @@ def _generate_single_image(
                     })
                     time.sleep(wait_secs)
                     continue
-            if not emitted_for_token and is_model_not_found(exc):
-                account_service.mark_model_not_found_cooldown(token)
-                tried_model_not_found_tokens.add(token)
-                model_not_found_retry_count += 1
-                if model_not_found_retry_count <= MAX_MODEL_NOT_FOUND_RETRIES:
-                    logger.warning({
-                        "event": "image_model_not_found_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "retry_count": model_not_found_retry_count,
-                        "index": index,
-                    })
-                    continue
-                logger.warning({
-                    "event": "image_model_not_found_exhausted_retries",
-                    "request_token": token,
-                    "account_email": account_email,
-                    "retry_count": model_not_found_retry_count,
-                    "index": index,
-                })
             if (
                 for_edits
                 and config.image_edit_upload_cooldown_enabled
