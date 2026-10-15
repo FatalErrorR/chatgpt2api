@@ -211,6 +211,38 @@ class UpstreamHTTPError(RuntimeError):
         super().__init__(f"{context} failed: status={status_code}, body={body_str}")
 
 
+def is_model_not_found(error: object) -> bool:
+    """True only for an image conversation 404 whose JSON detail is exactly Model not found."""
+    context = ""
+    status_code = 0
+    body: Any = None
+    if isinstance(error, UpstreamHTTPError):
+        context = str(error.context or "")
+        status_code = int(error.status_code or 0)
+        body = error.body
+    else:
+        text = str(error or "")
+        if "status=404" not in text or "/backend-api/f/conversation failed:" not in text:
+            return False
+        if "/backend-api/f/conversation/prepare failed:" in text:
+            return False
+        marker = "body="
+        body_text = text.split(marker, 1)[1] if marker in text else ""
+        try:
+            body = json.loads(body_text) if body_text else None
+        except (json.JSONDecodeError, ValueError):
+            return False
+        return isinstance(body, dict) and body.get("detail") == "Model not found"
+    if status_code != 404 or not context.endswith("/conversation"):
+        return False
+    if isinstance(body, str):
+        try:
+            body = json.loads(body) if body else None
+        except (json.JSONDecodeError, ValueError):
+            return False
+    return isinstance(body, dict) and body.get("detail") == "Model not found"
+
+
 def is_conversation_413(error: object) -> bool:
     """True only for POST /backend-api/f/conversation 413, not /prepare or /files."""
     if isinstance(error, UpstreamHTTPError):
@@ -223,10 +255,17 @@ def ensure_ok(response: requests.Response, context: str) -> None:
     if 200 <= response.status_code < 300:
         return
     body: Any = response.text
-    try:
-        body = response.json()
-    except Exception:
-        pass
+    if not body:
+        try:
+            raw = response.content
+            body = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+        except Exception:
+            body = response.text
+    if isinstance(body, str) and body:
+        try:
+            body = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            pass
     retry_after_header = response.headers.get("Retry-After") if hasattr(response, "headers") else None
     retry_after: int | None = None
     if retry_after_header is not None:

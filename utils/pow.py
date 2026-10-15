@@ -3,7 +3,8 @@ import json
 import random
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
 from typing import Any, Sequence
 
@@ -50,8 +51,11 @@ def parse_pow_resources(html_content: str) -> tuple[list[str], str]:
 
 
 def _legacy_parse_time() -> str:
-    now = datetime.now(timezone(timedelta(hours=-5)))
-    return now.strftime("%a %b %d %Y %H:%M:%S") + " GMT-0500 (Eastern Standard Time)"
+    """PoW 里的本地时间，和生图出口 America/Los_Angeles 一致。"""
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    offset = now.strftime("%z")
+    zone_name = "Pacific Daylight Time" if now.tzname() == "PDT" else "Pacific Standard Time"
+    return now.strftime("%a %b %d %Y %H:%M:%S") + f" GMT{offset} ({zone_name})"
 
 
 def build_pow_config(

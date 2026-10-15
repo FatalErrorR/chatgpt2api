@@ -255,6 +255,9 @@ class AccountService:
         normalized["edit_upload_blocked_until"] = str(
             normalized.get("edit_upload_blocked_until") or ""
         ).strip() or None
+        normalized["model_not_found_until"] = str(
+            normalized.get("model_not_found_until") or ""
+        ).strip() or None
         normalized["success"] = int(normalized.get("success") or 0)
         normalized["fail"] = int(normalized.get("fail") or 0)
         normalized["invalid_count"] = int(normalized.get("invalid_count") or 0)
@@ -1010,6 +1013,34 @@ class AccountService:
         )
         return str((account or {}).get("edit_upload_blocked_until") or until)
 
+    def _model_not_found_blocked_tokens(self) -> set[str]:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            return {
+                token
+                for item in self._accounts.values()
+                if (until := self._parse_time(item.get("model_not_found_until")))
+                and until > now
+                and (token := item.get("access_token") or "")
+            }
+
+    def mark_model_not_found_cooldown(self, access_token: str, seconds: int = 600) -> str | None:
+        """生图会话被上游以 Model not found 拒绝后，短时间不再选这个号。不改额度，也不封号。"""
+        if not access_token:
+            return None
+        until = (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(seconds)))).isoformat()
+        account = self.update_account(
+            access_token,
+            {"model_not_found_until": until},
+            quiet=True,
+        )
+        log_service.add(
+            LOG_TYPE_ACCOUNT,
+            "生图 Model not found 冷却",
+            {"token": anonymize_token(access_token), "until": until},
+        )
+        return str((account or {}).get("model_not_found_until") or until)
+
     def get_available_access_token(
             self,
             plan_type: str | None = None,
@@ -1025,6 +1056,7 @@ class AccountService:
         """
         max_attempts = 20  # 防止无限循环
         attempted_tokens: set[str] = set(excluded_tokens or set())
+        attempted_tokens.update(self._model_not_found_blocked_tokens())
         skip_edit_cooldown = bool(for_edits and config.image_edit_upload_cooldown_enabled)
         if skip_edit_cooldown:
             attempted_tokens.update(self._edit_upload_blocked_tokens())

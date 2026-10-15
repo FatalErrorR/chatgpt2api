@@ -596,6 +596,23 @@ class ConfigStore:
         ).strip().rstrip("/")
 
     @property
+    def sentinel_solver_url(self) -> str:
+        """内网 sentinel 求解服务。为空时退回本地 Turnstile 模拟。"""
+        return str(
+            os.getenv("CHATGPT2API_SENTINEL_SOLVER_URL")
+            or self.data.get("sentinel_solver_url")
+            or ""
+        ).strip().rstrip("/")
+
+    @property
+    def sentinel_solver_key(self) -> str:
+        return str(
+            os.getenv("CHATGPT2API_SENTINEL_SOLVER_KEY")
+            or self.data.get("sentinel_solver_key")
+            or ""
+        ).strip()
+
+    @property
     def app_version(self) -> str:
         try:
             value = VERSION_FILE.read_text(encoding="utf-8").strip()
@@ -623,6 +640,8 @@ class ConfigStore:
         data["image_upscale_target_edge"] = self.image_upscale_target_edge
         data["image_upscale_method"] = self.image_upscale_method
         data["image_edit_upload_cooldown_enabled"] = self.image_edit_upload_cooldown_enabled
+        data["sentinel_solver_url"] = self.sentinel_solver_url
+        data.pop("sentinel_solver_key", None)
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["auto_relogin_after_refresh"] = self.auto_relogin_after_refresh

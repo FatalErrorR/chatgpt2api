@@ -27,3 +27,18 @@ services:
       
       # 基础 URL (可选)
       # - CHATGPT2API_BASE_URL=https://your-domain.com
+
+      # 生图 Turnstile。求解服务只在内部网络，不要把 8080 映射到公网。
+      - CHATGPT2API_SENTINEL_SOLVER_URL=http://sentinel-solver:8080
+      - CHATGPT2API_SENTINEL_SOLVER_KEY=${SENTINEL_SOLVER_KEY:-}
+    depends_on:
+      - sentinel-solver
+
+  sentinel-solver:
+    build: ./sentinel_solver
+    container_name: chatgpt2api-sentinel-solver
+    restart: unless-stopped
+    shm_size: "1gb"
+    environment:
+      - SENTINEL_SOLVER_KEY=${SENTINEL_SOLVER_KEY:-}
+      - SENTINEL_SOLVER_TIMEZONE=America/Los_Angeles
