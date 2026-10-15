@@ -75,8 +75,7 @@ class ChatRequirements:
     raw_finalize: Optional[Dict[str, Any]] = None
 
 
-DEFAULT_IMPERSONATE = "chrome146"
-LEGACY_IMPERSONATES = {"chrome110"}
+DEFAULT_IMPERSONATE = "chrome131"
 DEFAULT_CLIENT_VERSION = "prod-a194cd50d4416d3c0b47c740f206b12ce60f5887"
 DEFAULT_CLIENT_BUILD_NUMBER = "6708908"
 DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js"
@@ -279,8 +278,6 @@ class OpenAIBackendAPI:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
         )
-        if fp.get("impersonate") in LEGACY_IMPERSONATES:
-            fp.pop("impersonate")
         fp.setdefault("impersonate", DEFAULT_IMPERSONATE)
         fp.setdefault("oai-device-id", new_uuid())
         fp.setdefault("oai-session-id", new_uuid())
