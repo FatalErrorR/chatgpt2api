@@ -11,8 +11,10 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from collections.abc import Callable
 from typing import Any, Dict, Iterator, Optional
 from urllib.parse import unquote, urlparse
@@ -88,6 +90,17 @@ EDITABLE_FILE_THINKING_EFFORT = "extended"
 EDITABLE_FILE_TIMEOUT_SECS = 1200.0
 EDITABLE_FILE_POLL_INTERVAL_SECS = 5.0
 EDITABLE_FILE_CLIENT_VERSION = "prod-bede35f9dcd856d080e012478f0c1031faa2588e"
+# 生图出口在加州。OpenAI 会把请求里的时区和出口 IP 时区对照，不一致就回 model not found。
+IMAGE_CLIENT_TIMEZONE = "America/Los_Angeles"
+
+
+def image_client_timezone(moment: datetime | None = None) -> tuple[str, int]:
+    """返回生图请求要用的时区名，以及 JS getTimezoneOffset() 的分钟数。"""
+    tz = ZoneInfo(IMAGE_CLIENT_TIMEZONE)
+    current = moment.astimezone(tz) if moment is not None else datetime.now(tz)
+    offset = current.utcoffset()
+    minutes = 0 if offset is None else -int(offset.total_seconds() // 60)
+    return IMAGE_CLIENT_TIMEZONE, minutes
 EDITABLE_FILE_CLIENT_BUILD_NUMBER = "6631702"
 EDITABLE_FILE_PSD_OUTPUT_DIR = "data/files/psd"
 EDITABLE_FILE_PPT_OUTPUT_DIR = "data/files/ppt"
@@ -867,14 +880,15 @@ class OpenAIBackendAPI:
         """为图片生成准备 conduit token。"""
         path = "/backend-api/f/conversation/prepare"
         upstream_model, thinking_effort = self._image_model_settings(model)
+        timezone_name, timezone_offset_min = image_client_timezone()
         payload = {
             "action": "next",
             "fork_from_shared_post": False,
             "parent_message_id": new_uuid(),
             "model": upstream_model,
             "client_prepare_state": "success",
-            "timezone_offset_min": -480,
-            "timezone": "Asia/Shanghai",
+            "timezone_offset_min": timezone_offset_min,
+            "timezone": timezone_name,
             "conversation_mode": {"kind": "primary_assistant"},
             "system_hints": ["picture_v2"],
             "partial_query": {
@@ -1002,6 +1016,7 @@ class OpenAIBackendAPI:
                 "width": item["width"],
                 "height": item["height"],
             } for item in references]
+        timezone_name, timezone_offset_min = image_client_timezone()
         payload = {
             "action": "next",
             "messages": [{
@@ -1014,8 +1029,8 @@ class OpenAIBackendAPI:
             "parent_message_id": new_uuid(),
             "model": upstream_model,
             "client_prepare_state": "sent",
-            "timezone_offset_min": -480,
-            "timezone": "Asia/Shanghai",
+            "timezone_offset_min": timezone_offset_min,
+            "timezone": timezone_name,
             "conversation_mode": {"kind": "primary_assistant"},
             "enable_message_followups": True,
             "system_hints": ["picture_v2"],
