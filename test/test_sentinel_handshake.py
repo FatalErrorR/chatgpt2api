@@ -164,7 +164,7 @@ class SentinelHandshakeTests(unittest.TestCase):
         self.addCleanup(api.close)
         for old in ("chrome110", "edge101", ""):
             api.account = {"impersonate": old}
-            self.assertEqual(api._build_fp()["impersonate"], "chrome146")
+            self.assertEqual(api._build_fp()["impersonate"], "chrome131")
         api.account = {"impersonate": "chrome145"}
         self.assertEqual(api._build_fp()["impersonate"], "chrome145")
 
