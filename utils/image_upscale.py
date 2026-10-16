@@ -108,14 +108,25 @@ def upscale_to_edge(data: bytes, target_edge: int, method: str = "lanczos") -> b
         if image.mode not in {"RGB", "RGBA", "L"}:
             image = image.convert("RGBA" if "A" in image.getbands() or image.mode == "P" else "RGB")
         size = (max(1, round(width * scale)), max(1, round(height * scale)))
+        started = time.monotonic()
         result = None
+        used = "lanczos"
         if method == "model":
             try:
                 result = _resize_with_model(image, size)
+                used = "model"
             except Exception as exc:
                 logger.warning({"event": "image_upscale_model_failed", "error": repr(exc)[:300]})
         if result is None:
             result = _resize_lanczos(image, size)
     output = io.BytesIO()
     result.save(output, format="PNG")
+    logger.info({
+        "event": "image_upscaled",
+        "method": used,
+        "requested_method": method,
+        "from": f"{width}x{height}",
+        "to": f"{size[0]}x{size[1]}",
+        "elapsed_secs": round(time.monotonic() - started, 2),
+    })
     return output.getvalue()

@@ -4,6 +4,7 @@ import copy
 from dataclasses import dataclass
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 import time
@@ -12,7 +13,9 @@ from services.storage.base import StorageBackend
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
-CONFIG_FILE = BASE_DIR / "config.json"
+DEFAULT_CONFIG_FILE = BASE_DIR / "config.json"
+# 容器部署时指到数据卷上，后台改的设置才不会随重启丢失
+CONFIG_FILE = Path(os.getenv("CHATGPT2API_CONFIG_FILE") or DEFAULT_CONFIG_FILE)
 VERSION_FILE = BASE_DIR / "VERSION"
 BACKUP_STATE_FILE = DATA_DIR / "backup_state.json"
 
@@ -326,8 +329,17 @@ def _read_json_object(path: Path, *, name: str) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
+def _ensure_config_file() -> None:
+    """配置文件放在别处且还不存在时，用镜像自带的 config.json 打底。"""
+    if CONFIG_FILE.exists() or CONFIG_FILE == DEFAULT_CONFIG_FILE or not DEFAULT_CONFIG_FILE.is_file():
+        return
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
+
+
 def _load_settings() -> LoadedSettings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_config_file()
     raw_config = _read_json_object(CONFIG_FILE, name="config.json")
     auth_key = _normalize_auth_key(os.getenv("CHATGPT2API_AUTH_KEY") or raw_config.get("auth-key"))
     if _is_invalid_auth_key(auth_key):
@@ -736,4 +748,5 @@ def save_backup_state(state: dict[str, object]) -> dict[str, object]:
     return normalized
 
 
+_ensure_config_file()
 config = ConfigStore(CONFIG_FILE)

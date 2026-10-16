@@ -58,6 +58,30 @@ class ConfigLoadingTests(unittest.TestCase):
                 else:
                     module.os.environ["CHATGPT2API_AUTH_KEY"] = old_env_auth_key
 
+    def test_ensure_config_file_seeds_once_from_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base_dir = Path(tmp_dir)
+            default_file = base_dir / "config.json"
+            target_file = base_dir / "data" / "config.json"
+            default_file.write_text(json.dumps({"auth-key": "baked"}), encoding="utf-8")
+
+            module = self.config_module
+            old_default = module.DEFAULT_CONFIG_FILE
+            old_config_file = module.CONFIG_FILE
+            try:
+                module.DEFAULT_CONFIG_FILE = default_file
+                module.CONFIG_FILE = target_file
+
+                module._ensure_config_file()
+                self.assertEqual(json.loads(target_file.read_text(encoding="utf-8")), {"auth-key": "baked"})
+
+                target_file.write_text(json.dumps({"auth-key": "saved", "image_upscale_enabled": True}), encoding="utf-8")
+                module._ensure_config_file()
+                self.assertTrue(json.loads(target_file.read_text(encoding="utf-8"))["image_upscale_enabled"])
+            finally:
+                module.DEFAULT_CONFIG_FILE = old_default
+                module.CONFIG_FILE = old_config_file
+
 
 if __name__ == "__main__":
     unittest.main()

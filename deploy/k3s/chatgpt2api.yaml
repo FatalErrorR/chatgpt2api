@@ -53,6 +53,9 @@ spec:
                   key: auth-key
             - name: CHATGPT2API_BASE_URL
               value: https://yurencc2a.zeabur.app
+            # 设置存到数据卷，后台改的配置（含图片放大开关）重启后保留
+            - name: CHATGPT2API_CONFIG_FILE
+              value: /app/data/config.json
             # 生图 Turnstile 由同一 Pod 里的 sentinel-solver 求解
             - name: CHATGPT2API_SENTINEL_SOLVER_URL
               value: http://127.0.0.1:8080
