@@ -24,7 +24,7 @@ from utils.helper import (
     split_image_model,
 )
 from utils.image_tokens import count_image_content_tokens
-from utils.image_upscale import upscale_to_edge
+from utils.image_upscale import requested_long_edge, upscale_to_edge
 from utils.log import logger
 
 
@@ -281,12 +281,20 @@ def count_text_tokens(text: str, model: str) -> int:
     return len(encoding_for_model(model).encode(text))
 
 
-def maybe_upscale_image(image_data: bytes) -> bytes:
-    """开启放大且长边不足时放大到目标尺寸；任何失败都返回原图。"""
+def maybe_upscale_image(image_data: bytes, size: str | None = None) -> bytes:
+    """开启放大且长边不足时放大；任何失败都返回原图。
+
+    请求里指定了尺寸时，目标不会超过请求的长边（要 1024 就不会被放大到 2048）；
+    size 为空或 auto 时按设置的目标长边放大。
+    """
     if not config.image_upscale_enabled:
         return image_data
+    target = config.image_upscale_target_edge
+    requested = requested_long_edge(size)
+    if requested:
+        target = min(target, requested)
     try:
-        return upscale_to_edge(image_data, config.image_upscale_target_edge, config.image_upscale_method)
+        return upscale_to_edge(image_data, target, config.image_upscale_method)
     except Exception as exc:
         logger.warning({"event": "image_upscale_failed", "error": repr(exc)[:300]})
         return image_data
@@ -299,6 +307,7 @@ def format_image_result(
     base_url: str | None = None,
     created: int | None = None,
     message: str = "",
+    size: str | None = None,
 ) -> dict[str, Any]:
     data: list[dict[str, Any]] = []
     for item in items:
@@ -307,7 +316,7 @@ def format_image_result(
             continue
         revised_prompt = str(item.get("revised_prompt") or prompt).strip() or prompt
         image_bytes = base64.b64decode(b64_json)
-        upscaled = maybe_upscale_image(image_bytes)
+        upscaled = maybe_upscale_image(image_bytes, size)
         if upscaled is not image_bytes:
             image_bytes = upscaled
             b64_json = base64.b64encode(image_bytes).decode("ascii")
@@ -1046,6 +1055,7 @@ def stream_image_outputs(
             request.response_format,
             request.base_url,
             int(time.time()),
+            size=request.size,
         )["data"]
         if data:
             yield ImageOutput(kind="result", model=request.model, index=index, total=total, data=data, conversation_id=conversation_id)
@@ -1143,6 +1153,7 @@ def stream_image_outputs(
                         request.response_format,
                         request.base_url,
                         int(time.time()),
+                        size=request.size,
                     )["data"]
                     if data:
                         yield ImageOutput(kind="result", model=request.model, index=index, total=total, data=data, conversation_id=conversation_id)
@@ -1255,6 +1266,7 @@ def stream_image_outputs(
                     request.response_format,
                     request.base_url,
                     int(time.time()),
+                    size=request.size,
                 )["data"]
                 if data:
                     yield ImageOutput(kind="result", model=request.model, index=index, total=total, data=data, conversation_id=conversation_id)
@@ -1316,6 +1328,7 @@ def stream_codex_image_outputs(
         request.response_format,
         request.base_url,
         int(time.time()),
+        size=request.size,
     )["data"]
     if data:
         yield ImageOutput(kind="result", model=request.model, index=index, total=total, data=data)

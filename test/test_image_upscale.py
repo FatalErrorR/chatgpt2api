@@ -5,10 +5,11 @@ import io
 import unittest
 from unittest import mock
 
+
 from PIL import Image
 
 from services.protocol import conversation
-from utils.image_upscale import upscale_to_edge
+from utils.image_upscale import requested_long_edge, upscale_to_edge
 
 
 def _png(size: tuple[int, int], mode: str = "RGB") -> bytes:
@@ -108,6 +109,53 @@ class FormatImageResultTests(unittest.TestCase):
         with mock.patch.object(type(conversation.config), "image_upscale_enabled", new_callable=mock.PropertyMock, return_value=True), \
                 mock.patch.object(conversation, "upscale_to_edge", side_effect=RuntimeError("boom")):
             self.assertIs(conversation.maybe_upscale_image(original), original)
+
+
+class RequestedSizeTests(unittest.TestCase):
+    """用户请求的尺寸优先：要 1024 就不能被放大到设置里的 2048。"""
+
+    def test_requested_long_edge_parsing(self):
+        self.assertEqual(requested_long_edge("1024x1024"), 1024)
+        self.assertEqual(requested_long_edge("1536x1024"), 1536)
+        self.assertEqual(requested_long_edge("1024X1536"), 1536)
+        self.assertEqual(requested_long_edge("2048 × 1152"), 2048)
+        self.assertEqual(requested_long_edge("2K"), 2048)
+        self.assertEqual(requested_long_edge("4k"), 4096)
+        for value in (None, "", "auto", "square", "16:9"):
+            self.assertIsNone(requested_long_edge(value), value)
+
+    def _upscale(self, size, source=(1024, 1024), target=2048):
+        data = _png(source)
+        with mock.patch.object(type(conversation.config), "image_upscale_enabled", new_callable=mock.PropertyMock, return_value=True), \
+                mock.patch.object(type(conversation.config), "image_upscale_target_edge", new_callable=mock.PropertyMock, return_value=target), \
+                mock.patch.object(type(conversation.config), "image_upscale_method", new_callable=mock.PropertyMock, return_value="lanczos"):
+            return data, conversation.maybe_upscale_image(data, size)
+
+    def test_1024_request_is_not_upscaled_to_2048(self):
+        data, out = self._upscale("1024x1024")
+        self.assertIs(out, data)
+
+    def test_smaller_output_is_only_raised_to_the_requested_edge(self):
+        _, out = self._upscale("1536x1024", source=(1024, 683))
+        self.assertEqual(_size(out)[0], 1536)
+
+    def test_larger_request_is_capped_by_configured_target(self):
+        _, out = self._upscale("4096x4096", source=(1024, 1024))
+        self.assertEqual(_size(out), (2048, 2048))
+
+    def test_auto_or_missing_size_uses_configured_target(self):
+        for size in (None, "auto", ""):
+            _, out = self._upscale(size)
+            self.assertEqual(_size(out), (2048, 2048), size)
+
+    def test_format_image_result_passes_size_through(self):
+        items = [{"b64_json": base64.b64encode(_png((1024, 1024))).decode("ascii")}]
+        with mock.patch.object(type(conversation.config), "image_upscale_enabled", new_callable=mock.PropertyMock, return_value=True), \
+                mock.patch.object(type(conversation.config), "image_upscale_target_edge", new_callable=mock.PropertyMock, return_value=2048):
+            small = conversation.format_image_result(items, "p", "b64_json", size="1024x1024")["data"][0]["b64_json"]
+            big = conversation.format_image_result(items, "p", "b64_json")["data"][0]["b64_json"]
+        self.assertEqual(_size(base64.b64decode(small)), (1024, 1024))
+        self.assertEqual(_size(base64.b64decode(big)), (2048, 2048))
 
 
 if __name__ == "__main__":

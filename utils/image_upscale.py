@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import os
 import threading
 import time
@@ -88,6 +89,24 @@ def _resize_with_model(image: Image.Image, size: tuple[int, int]) -> Image.Image
 def _resize_lanczos(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     resized = image.resize(size, Image.Resampling.LANCZOS)
     return resized.filter(ImageFilter.UnsharpMask(radius=1.2, percent=60, threshold=2))
+
+
+_SIZE_WXH = re.compile(r"(\d{2,5})\s*[x×*]\s*(\d{2,5})", re.IGNORECASE)
+_SIZE_K = re.compile(r"^\s*([1-8])\s*k\s*$", re.IGNORECASE)
+
+
+def requested_long_edge(size: object) -> int | None:
+    """解析请求里的 size（如 1024x1024、1536x1024、2K），返回长边像素；auto/空/无法识别返回 None。"""
+    text = str(size or "").strip()
+    if not text:
+        return None
+    match = _SIZE_WXH.search(text)
+    if match:
+        return max(int(match.group(1)), int(match.group(2)))
+    match = _SIZE_K.match(text)
+    if match:
+        return int(match.group(1)) * 1024
+    return None
 
 
 def upscale_to_edge(data: bytes, target_edge: int, method: str = "lanczos") -> bytes:
