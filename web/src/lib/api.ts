@@ -176,6 +176,7 @@ export type SettingsConfig = {
   image_req_fit_enabled?: boolean;
   image_edit_upload_cooldown_enabled?: boolean;
   image_upscale_enabled?: boolean;
+  image_exact_size_enabled?: boolean;
   image_upscale_target_edge?: number | string;
   image_upscale_method?: "lanczos" | "model";
   image_check_before_hit_enabled?: boolean;

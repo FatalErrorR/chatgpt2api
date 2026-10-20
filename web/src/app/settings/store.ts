@@ -177,6 +177,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     image_req_fit_enabled: Boolean(config.image_req_fit_enabled !== false),
     image_edit_upload_cooldown_enabled: Boolean(config.image_edit_upload_cooldown_enabled !== false),
     image_upscale_enabled: Boolean(config.image_upscale_enabled),
+    image_exact_size_enabled: Boolean(config.image_exact_size_enabled),
     image_upscale_target_edge: Number(config.image_upscale_target_edge || 2048),
     image_upscale_method: config.image_upscale_method === "model" ? "model" : "lanczos",
     image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
@@ -306,6 +307,7 @@ type SettingsStore = {
   setImageReqFitEnabled: (value: boolean) => void;
   setImageEditUploadCooldownEnabled: (value: boolean) => void;
   setImageUpscaleEnabled: (value: boolean) => void;
+  setImageExactSizeEnabled: (value: boolean) => void;
   setImageUpscaleTargetEdge: (value: string) => void;
   setImageUpscaleMethod: (value: "lanczos" | "model") => void;
   setImageCheckBeforeHitEnabled: (value: boolean) => void;
@@ -440,6 +442,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         image_req_fit_enabled: Boolean(config.image_req_fit_enabled !== false),
         image_edit_upload_cooldown_enabled: Boolean(config.image_edit_upload_cooldown_enabled !== false),
         image_upscale_enabled: Boolean(config.image_upscale_enabled),
+        image_exact_size_enabled: Boolean(config.image_exact_size_enabled),
         image_upscale_target_edge: Math.min(4096, Math.max(1024, Number(config.image_upscale_target_edge) || 2048)),
         image_upscale_method: config.image_upscale_method === "model" ? "model" : "lanczos",
         image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
@@ -570,6 +573,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setImageUpscaleEnabled: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_upscale_enabled: value } } : {});
+  },
+
+  setImageExactSizeEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_exact_size_enabled: value } } : {});
   },
 
   setImageUpscaleTargetEdge: (value) => {

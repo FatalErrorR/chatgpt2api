@@ -24,7 +24,7 @@ from utils.helper import (
     split_image_model,
 )
 from utils.image_tokens import count_image_content_tokens
-from utils.image_upscale import requested_long_edge, upscale_to_edge
+from utils.image_upscale import fit_to_size, requested_dimensions, requested_long_edge, upscale_to_edge
 from utils.log import logger
 
 
@@ -282,18 +282,25 @@ def count_text_tokens(text: str, model: str) -> int:
 
 
 def maybe_upscale_image(image_data: bytes, size: str | None = None) -> bytes:
-    """开启放大且长边不足时放大；任何失败都返回原图。
+    """按请求的尺寸处理返回的图；任何失败都返回原图。
 
-    请求里指定了尺寸时，目标不会超过请求的长边（要 1024 就不会被放大到 2048）；
-    size 为空或 auto 时按设置的目标长边放大。
+    开启 image_exact_size_enabled 且请求里明确写了 宽x高（如 1024x1024）：裁剪到该比例
+    并缩放到精确尺寸，过大缩小、过小放大（放大受 image_upscale_enabled 控制）。
+    其余情况（含 auto、2K 这类写法）：开启放大时按设置的目标长边放大。
     """
-    if not config.image_upscale_enabled:
-        return image_data
-    target = config.image_upscale_target_edge
-    requested = requested_long_edge(size)
-    if requested:
-        target = min(target, requested)
     try:
+        dimensions = requested_dimensions(size) if config.image_exact_size_enabled else None
+        if dimensions:
+            return fit_to_size(
+                image_data, *dimensions,
+                allow_upscale=config.image_upscale_enabled, method=config.image_upscale_method,
+            )
+        if not config.image_upscale_enabled:
+            return image_data
+        target = config.image_upscale_target_edge
+        requested = requested_long_edge(size)
+        if requested:
+            target = min(target, requested)
         return upscale_to_edge(image_data, target, config.image_upscale_method)
     except Exception as exc:
         logger.warning({"event": "image_upscale_failed", "error": repr(exc)[:300]})

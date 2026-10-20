@@ -31,6 +31,7 @@ export function ConfigCard() {
   const setImageReqFitEnabled = useSettingsStore((state) => state.setImageReqFitEnabled);
   const setImageEditUploadCooldownEnabled = useSettingsStore((state) => state.setImageEditUploadCooldownEnabled);
   const setImageUpscaleEnabled = useSettingsStore((state) => state.setImageUpscaleEnabled);
+  const setImageExactSizeEnabled = useSettingsStore((state) => state.setImageExactSizeEnabled);
   const setImageUpscaleTargetEdge = useSettingsStore((state) => state.setImageUpscaleTargetEdge);
   const setImageUpscaleMethod = useSettingsStore((state) => state.setImageUpscaleMethod);
   const setImageRemoveConversationAfterResult = useSettingsStore((state) => state.setImageRemoveConversationAfterResult);
@@ -272,6 +273,16 @@ export function ConfigCard() {
               <span className="text-sm text-stone-700">出图放大</span>
             </div>
             <p className="text-xs text-stone-500">出图后把长边不足的图等比放大到目标长边（Lanczos + 轻度锐化，输出 PNG），已达标的图不处理，失败时返回原图。默认关闭。</p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3">
+              <Checkbox
+                checked={Boolean(config?.image_exact_size_enabled)}
+                onCheckedChange={(checked) => setImageExactSizeEnabled(Boolean(checked))}
+              />
+              <span className="text-sm text-stone-700">按请求尺寸精确出图</span>
+            </div>
+            <p className="text-xs text-stone-500">请求里明确写了宽x高（如 1024x1024）时，把出图居中裁剪到该比例并缩放到精确尺寸，过大缩小、过小放大（放大需同时开启「出图放大」）。auto、2K 等写法不受影响，失败时返回原图。默认关闭。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-stone-700">出图放大目标长边</label>

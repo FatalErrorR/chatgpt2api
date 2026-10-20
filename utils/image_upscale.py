@@ -124,28 +124,91 @@ def upscale_to_edge(data: bytes, target_edge: int, method: str = "lanczos") -> b
         scale = target_edge / long_edge
         if scale > MAX_SCALE:
             return data
-        if image.mode not in {"RGB", "RGBA", "L"}:
-            image = image.convert("RGBA" if "A" in image.getbands() or image.mode == "P" else "RGB")
         size = (max(1, round(width * scale)), max(1, round(height * scale)))
-        started = time.monotonic()
-        result = None
-        used = "lanczos"
-        if method == "model":
-            try:
-                result = _resize_with_model(image, size)
-                used = "model"
-            except Exception as exc:
-                logger.warning({"event": "image_upscale_model_failed", "error": repr(exc)[:300]})
-        if result is None:
-            result = _resize_lanczos(image, size)
+        return _enlarge_to_png(_normalize_mode(image), size, method, (width, height))
+
+
+def _normalize_mode(image: Image.Image) -> Image.Image:
+    if image.mode in {"RGB", "RGBA", "L"}:
+        return image
+    return image.convert("RGBA" if "A" in image.getbands() or image.mode == "P" else "RGB")
+
+
+def _enlarge_to_png(image: Image.Image, size: tuple[int, int], method: str, source: tuple[int, int]) -> bytes:
+    started = time.monotonic()
+    result = None
+    used = "lanczos"
+    if method == "model":
+        try:
+            result = _resize_with_model(image, size)
+            used = "model"
+        except Exception as exc:
+            logger.warning({"event": "image_upscale_model_failed", "error": repr(exc)[:300]})
+    if result is None:
+        result = _resize_lanczos(image, size)
     output = io.BytesIO()
     result.save(output, format="PNG")
     logger.info({
         "event": "image_upscaled",
         "method": used,
         "requested_method": method,
-        "from": f"{width}x{height}",
+        "from": f"{source[0]}x{source[1]}",
         "to": f"{size[0]}x{size[1]}",
         "elapsed_secs": round(time.monotonic() - started, 2),
     })
+    return output.getvalue()
+
+
+# 精确适配只接受合理范围内的 宽x高，超出范围的请求仍走原来的按长边放大
+MIN_EXACT_EDGE = 64
+MAX_EXACT_EDGE = 4096
+# 实际比例和请求比例相差不超过 2% 时不裁剪，直接缩放到目标尺寸
+ASPECT_TOLERANCE = 0.02
+
+
+def requested_dimensions(size: object) -> tuple[int, int] | None:
+    """解析请求里明确写出的 宽x高（如 1024x1024）；auto/空/2K/超出范围返回 None。"""
+    match = _SIZE_WXH.search(str(size or ""))
+    if not match:
+        return None
+    width, height = int(match.group(1)), int(match.group(2))
+    if not all(MIN_EXACT_EDGE <= value <= MAX_EXACT_EDGE for value in (width, height)):
+        return None
+    return width, height
+
+
+def fit_to_size(data: bytes, width: int, height: int, *, allow_upscale: bool = True, method: str = "lanczos") -> bytes:
+    """把图片处理成请求的 宽x高，输出 PNG。
+
+    比例和请求不一致时先居中裁剪到请求比例；再缩放到精确尺寸（过大缩小，过小放大）。
+    放大被关闭或倍数超过 MAX_SCALE 时，只做裁剪不放大。尺寸已经精确匹配时原样返回。
+    """
+    with Image.open(io.BytesIO(data)) as image:
+        src_w, src_h = image.size
+        if src_w <= 0 or src_h <= 0 or (src_w, src_h) == (width, height):
+            return data
+        image = _normalize_mode(image)
+        wanted = width / height
+        if abs(src_w / src_h / wanted - 1) > ASPECT_TOLERANCE:
+            if src_w / src_h > wanted:
+                new_w, new_h = max(1, round(src_h * wanted)), src_h
+            else:
+                new_w, new_h = src_w, max(1, round(src_w / wanted))
+            left, top = (src_w - new_w) // 2, (src_h - new_h) // 2
+            image = image.crop((left, top, left + new_w, top + new_h))
+        cur_w, cur_h = image.size
+        scale = max(width / cur_w, height / cur_h)
+        if scale > 1 and allow_upscale and scale <= MAX_SCALE:
+            return _enlarge_to_png(image, (width, height), method, (src_w, src_h))
+        if scale > 1:
+            # 不能放大：只保留裁剪出的正确比例，没裁剪就原样返回
+            if (cur_w, cur_h) == (src_w, src_h):
+                return data
+            resized = image
+        else:
+            resized = image.resize((width, height), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        resized.save(output, format="PNG")
+    logger.info({"event": "image_fitted", "requested": f"{width}x{height}", "from": f"{src_w}x{src_h}",
+                 "to": f"{resized.width}x{resized.height}"})
     return output.getvalue()

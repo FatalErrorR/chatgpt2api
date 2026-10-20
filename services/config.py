@@ -477,6 +477,11 @@ class ConfigStore:
         return _normalize_bool(self.data.get("image_upscale_enabled", False), False)
 
     @property
+    def image_exact_size_enabled(self) -> bool:
+        """请求明确写了 宽x高 时，把出图裁剪并缩放到精确尺寸（默认关闭）。"""
+        return _normalize_bool(self.data.get("image_exact_size_enabled", False), False)
+
+    @property
     def image_upscale_target_edge(self) -> int:
         value = _normalize_positive_int(self.data.get("image_upscale_target_edge", 2048), 2048, minimum=1024)
         return min(value, 4096)
@@ -650,6 +655,7 @@ class ConfigStore:
         data["image_req_fit_enabled"] = self.image_req_fit_enabled
         data["image_req_fit_budget_bytes"] = self.image_req_fit_budget_bytes
         data["image_upscale_enabled"] = self.image_upscale_enabled
+        data["image_exact_size_enabled"] = self.image_exact_size_enabled
         data["image_upscale_target_edge"] = self.image_upscale_target_edge
         data["image_upscale_method"] = self.image_upscale_method
         data["image_edit_upload_cooldown_enabled"] = self.image_edit_upload_cooldown_enabled
