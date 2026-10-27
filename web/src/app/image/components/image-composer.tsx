@@ -452,7 +452,7 @@ export function ImageComposer({
                             {aspectOptions.map((option) => {
                               const active = option.ratio === imageRatio && option.tier === imageTier && option.width === imageWidth && option.height === imageHeight;
                               const Icon = option.icon;
-                              const disabled = !isCodexModel && (option.tier === "2k" || option.tier === "4k");
+                              const disabled = !isCodexModel && option.tier === "4k";
                               return (
                                 <button
                                   key={`${option.ratio}-${option.tier}-${option.label}`}
