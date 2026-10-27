@@ -29,6 +29,12 @@ from utils.log import logger
 
 
 IMAGE_MODEL_NOT_FOUND_COOLDOWN_SECS = 10 * 60
+IMAGE_FORBIDDEN_COOLDOWN_SECS = 10 * 60
+
+
+def is_upstream_forbidden_error(error: Exception | str) -> bool:
+    """上游 403，多为 Cloudflare 按出口 IP 下发的人机验证。"""
+    return isinstance(error, UpstreamHTTPError) and error.status_code == 403
 
 
 def is_image_model_not_found_error(error: Exception | str) -> bool:
@@ -1363,6 +1369,8 @@ def _generate_single_image(
     MAX_POLL_TIMEOUT_RETRIES = 4
     # 图生图上传上限：冻当前号后换下一个，最多再试 5 个不同号
     MAX_EDIT_UPLOAD_THROTTLE_RETRIES = 5
+    # 上游 403：冷却当前号，换其他出口的号重试
+    MAX_FORBIDDEN_RETRIES = 3
 
     text_reply_retry_count = 0
     tls_retry_count = 0
@@ -1370,7 +1378,10 @@ def _generate_single_image(
     poll_timeout_retry_count = 0
     edit_upload_retry_count = 0
     model_not_found_retry_count = 0
+    forbidden_retry_count = 0
     tried_upload_tokens: set[str] = set()
+    # 403 后本次请求暂避与该号同出口的账号（只影响本次请求）
+    avoided_tokens: set[str] = set()
     for_edits = bool(request.images)
     account_email = ""
 
@@ -1384,10 +1395,14 @@ def _generate_single_image(
                 plan_type=plan_type,
                 source_type="codex" if codex_model else None,
                 plan_types=("plus", "team", "pro") if codex_model and not plan_type else None,
-                excluded_tokens=tried_upload_tokens,
+                excluded_tokens=tried_upload_tokens | avoided_tokens,
                 for_edits=for_edits,
             )
         except RuntimeError as exc:
+            if avoided_tokens:
+                # 其他出口没有可用的号，退回同出口的号
+                avoided_tokens.clear()
+                continue
             raise ImageGenerationError(str(exc) or "image generation failed", account_email=account_email) from exc
 
         emitted_for_token = False
@@ -1560,6 +1575,21 @@ def _generate_single_image(
                     continue
                 account_service.remove_invalid_token(token, "image_stream", error=last_error)
                 continue
+            if is_upstream_forbidden_error(exc):
+                # 403 多为 Cloudflare 按出口 IP 验证：冷却该号；同出口的号多半也会被验证，本次先避开
+                account_service.sideline_image_account(token, IMAGE_FORBIDDEN_COOLDOWN_SECS)
+                forbidden_retry_count += 1
+                if not emitted_for_token and forbidden_retry_count <= MAX_FORBIDDEN_RETRIES:
+                    avoided_tokens |= account_service.same_proxy_tokens(token)
+                    logger.warning({
+                        "event": "image_forbidden_retry",
+                        "request_token": token,
+                        "account_email": account_email,
+                        "retry_count": forbidden_retry_count,
+                        "index": index,
+                        "error": last_error[:200],
+                    })
+                    continue
             # TLS/SSL 连接错误：自动重试
             if not emitted_for_token and is_tls_connection_error(last_error):
                 tls_retry_count += 1

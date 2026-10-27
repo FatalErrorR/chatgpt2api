@@ -1079,6 +1079,19 @@ class AccountService:
             self._image_unavailable_until[access_token] = time.monotonic() + seconds
             self._image_slot_condition.notify_all()
 
+    def same_proxy_tokens(self, access_token: str) -> set[str]:
+        """与该号走同一个单独配置的代理（同一出口 IP）的账号；没配代理时返回空集。"""
+        with self._lock:
+            account = self._accounts.get(self._resolve_access_token_locked(access_token)) or {}
+            proxy = account.get("proxy") or ""
+            if not proxy:
+                return set()
+            return {
+                token
+                for item in self._accounts.values()
+                if item.get("proxy") == proxy and (token := item.get("access_token") or "")
+            }
+
     def release_image_slot(self, access_token: str) -> None:
         if not access_token:
             return
