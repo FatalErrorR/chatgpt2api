@@ -1070,6 +1070,10 @@ function AccountsPageContent() {
                   {currentRows.map((account) => {
                     const status = statusMeta[account.status];
                     const StatusIcon = status.icon;
+                    // ponytail: native title; the table's overflow clips a custom popover
+                    const statusError = account.status === "异常"
+                      ? (account.last_refresh_error || account.last_token_refresh_error || "").trim()
+                      : "";
 
                     return (
                       <tr
@@ -1119,7 +1123,8 @@ function AccountsPageContent() {
                           <div className="space-y-1">
                             <Badge
                               variant={status.badge}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1"
+                              title={statusError || undefined}
+                              className={`inline-flex items-center gap-1 rounded-md px-2 py-1${statusError ? " cursor-help" : ""}`}
                             >
                               <StatusIcon className="size-3.5" />
                               {account.status}

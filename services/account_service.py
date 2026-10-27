@@ -539,8 +539,16 @@ class AccountService:
                     self.update_relogin_progress(progress_id, access_token, "成功")
             else:
                 # 登录失败
-                error_type = result.get("error", "")
-                if error_type == "password_verify_failed_403" and isinstance(result.get("detail"), dict):
+                error_type = str(result.get("error") or "")
+                detail = result.get("detail")
+                message = error_type
+                if isinstance(detail, dict):
+                    inner = detail.get("error")
+                    if isinstance(inner, dict):
+                        message = str(inner.get("message") or inner.get("code") or error_type)
+                    elif inner:
+                        message = str(inner)
+                if error_type == "password_verify_failed_403" and isinstance(detail, dict):
                     log_service.add(
                         LOG_TYPE_ACCOUNT,
                         "更新账号",
@@ -572,7 +580,7 @@ class AccountService:
                             self.update_relogin_progress(progress_id, access_token, "禁用")
                     else:
                         # 永久故障：将账号标记为异常（或自动移除）
-                        self.remove_invalid_token(access_token, f"{event}:password_relogin_failed", quiet=True)
+                        self.remove_invalid_token(access_token, f"{event}:password_relogin_failed", quiet=True, error=message)
                         if progress_id:
                             self.update_relogin_progress(progress_id, access_token, "异常", error_type)
                 else:
@@ -589,7 +597,7 @@ class AccountService:
                         },
                     )
                     # 永久故障：将账号标记为异常（或自动移除）
-                    self.remove_invalid_token(access_token, f"{event}:password_relogin_failed", quiet=True)
+                    self.remove_invalid_token(access_token, f"{event}:password_relogin_failed", quiet=True, error=message)
                     if progress_id:
                         self.update_relogin_progress(progress_id, access_token, "异常", error_type)
         except Exception as exc:
@@ -605,7 +613,7 @@ class AccountService:
                 },
             )
             # 将账号标记为异常（或自动移除）
-            self.remove_invalid_token(access_token, f"{event}:password_relogin_exception", quiet=True)
+            self.remove_invalid_token(access_token, f"{event}:password_relogin_exception", quiet=True, error=str(exc))
             if progress_id:
                 self.update_relogin_progress(progress_id, access_token, "异常", str(exc))
 
@@ -1216,16 +1224,21 @@ class AccountService:
             self._accounts[access_token] = account
             self._save_accounts()
 
-    def remove_invalid_token(self, access_token: str, event: str, quiet: bool = False) -> bool:
+    def remove_invalid_token(self, access_token: str, event: str, quiet: bool = False, error: str = "") -> bool:
+        updates: dict[str, object] = {"status": "异常", "quota": 0}
+        text = " ".join(str(error or "").split())[:400]
+        if text:
+            updates["last_refresh_error"] = text
+            updates["last_refresh_error_at"] = datetime.now(timezone.utc).isoformat()
         if not config.auto_remove_invalid_accounts:
-            self.update_account(access_token, {"status": "异常", "quota": 0}, quiet=quiet)
+            self.update_account(access_token, updates, quiet=quiet)
             return False
         removed = bool(self.delete_accounts([access_token])["removed"])
         if removed:
             log_service.add(LOG_TYPE_ACCOUNT, "自动移除异常账号",
                             {"source": event, "token": anonymize_token(access_token)})
         elif access_token:
-            self.update_account(access_token, {"status": "异常", "quota": 0}, quiet=quiet)
+            self.update_account(access_token, updates, quiet=quiet)
         return removed
 
     def get_account(self, access_token: str) -> dict | None:
