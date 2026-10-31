@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import itertools
+import os
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -27,6 +29,7 @@ class LogService:
     def __init__(self, path: Path):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
 
     @staticmethod
     def _legacy_id(raw_line: str, line_number: int) -> str:
@@ -68,18 +71,24 @@ class LogService:
             "summary": summary,
             "detail": detail or data,
         }
-        with self.path.open("a", encoding="utf-8") as file:
-            file.write(self._serialize_item(item) + "\n")
+        line = self._serialize_item(item) + "\n"
+        with self._lock:
+            with self.path.open("a", encoding="utf-8") as file:
+                file.write(line)
+            self._bump_daily_counts_locked(item)
 
     def list(self, type: str = "", start_date: str = "", end_date: str = "", limit: int = 200) -> list[dict[str, Any]]:
-        if not self.path.exists():
+        """Newest matching lines, read from the end of the file. Stops at `limit`."""
+        if not self.path.exists() or limit <= 0:
             return []
         items: list[dict[str, Any]] = []
-        lines = self.path.read_text(encoding="utf-8").splitlines()
-        for line_number in range(len(lines) - 1, -1, -1):
-            item = self._parse_line(lines[line_number], line_number)
+        for raw_line in self._reversed_lines():
+            item = self._parse_line(raw_line, 0)
             if item is None:
                 continue
+            day = str(item.get("time") or "")[:10]
+            if start_date and day and day < start_date:
+                break
             if not self._matches_filters(item, type=type, start_date=start_date, end_date=end_date):
                 continue
             items.append(item)
@@ -87,60 +96,131 @@ class LogService:
                 break
         return items
 
-    def image_output_counts(self, now: datetime | None = None) -> dict[str, dict[str, int]]:
-        """Count successful 文生图/图生图 images in Beijing-time windows.
+    def _reversed_lines(self, chunk_size: int = 256 * 1024) -> Iterator[str]:
+        with self.path.open("rb") as file:
+            file.seek(0, os.SEEK_END)
+            position = file.tell()
+            pending = b""
+            while position > 0:
+                size = min(chunk_size, position)
+                position -= size
+                file.seek(position)
+                pending = file.read(size) + pending
+                parts = pending.split(b"\n")
+                pending = parts[0]
+                for part in reversed(parts[1:]):
+                    if part:
+                        yield part.decode("utf-8", "replace")
+            if pending:
+                yield pending.decode("utf-8", "replace")
 
-        Log timestamps are server-local. ponytail: one pass over logs.jsonl;
-        switch to a daily rollup if this scan gets slow.
+    def _counts_path(self) -> Path:
+        return self.path.with_name("image_output_counts.json")
+
+    def image_output_counts(self, now: datetime | None = None) -> dict[str, dict[str, int]]:
+        """Successful 文生图/图生图 counts in Beijing-time windows.
+
+        Kept as daily totals beside the log. The 228MB log is scanned once to
+        build that file; later calls only add the new line.
         """
+        self._ensure_daily_counts()
+        days = self._read_daily_counts()
         cst = timezone(timedelta(hours=8))
         moment = now.astimezone(cst) if now is not None else datetime.now(cst)
-        start_today = moment.replace(hour=0, minute=0, second=0, microsecond=0)
-        windows: dict[str, tuple[datetime, datetime | None]] = {
-            "today": (start_today, None),
-            "yesterday": (start_today - timedelta(days=1), start_today),
-            "d7": (start_today - timedelta(days=6), None),
-            "d14": (start_today - timedelta(days=13), None),
-            "d30": (start_today - timedelta(days=29), None),
+        today = moment.date()
+        windows = {
+            "today": (today, today),
+            "yesterday": (today - timedelta(days=1), today - timedelta(days=1)),
+            "d7": (today - timedelta(days=6), today),
+            "d14": (today - timedelta(days=13), today),
+            "d30": (today - timedelta(days=29), today),
         }
         counts = {kind: {key: 0 for key in windows} for kind in ("edits", "generations")}
-        if not self.path.exists():
-            return counts
-        server_tz = datetime.now().astimezone().tzinfo or timezone.utc
-        earliest = windows["d30"][0]
-        endpoints = {
-            "/v1/images/edits": "edits",
-            "/v1/images/generations": "generations",
-        }
-        with self.path.open(encoding="utf-8") as file:
-            for raw_line in file:
-                if '"type":"call"' not in raw_line or "/v1/images/" not in raw_line:
-                    continue
-                try:
-                    item = json.loads(raw_line)
-                except Exception:
-                    continue
-                if not isinstance(item, dict) or item.get("type") != "call":
-                    continue
-                detail = item.get("detail")
-                if not isinstance(detail, dict) or detail.get("status") != "success":
-                    continue
-                kind = endpoints.get(str(detail.get("endpoint") or ""))
-                if kind is None:
-                    continue
-                urls = detail.get("urls")
-                image_count = len(urls) if isinstance(urls, list) else 0
-                if image_count <= 0:
-                    continue
-                occurred = _parse_server_local_time(item.get("time"), server_tz)
-                if occurred is None or occurred < earliest:
-                    continue
-                bucket = counts[kind]
-                for key, (start, end) in windows.items():
-                    if occurred >= start and (end is None or occurred < end):
-                        bucket[key] += image_count
+        for day_text, kinds in days.items():
+            try:
+                day = datetime.strptime(day_text, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if not isinstance(kinds, dict):
+                continue
+            for key, (start, end) in windows.items():
+                if start <= day <= end:
+                    for kind in ("edits", "generations"):
+                        counts[kind][key] += int(kinds.get(kind) or 0)
         return counts
 
+    def _ensure_daily_counts(self) -> None:
+        with self._lock:
+            if self._counts_path().exists():
+                return
+            self._write_daily_counts_locked(self._scan_daily_counts())
+
+    def _read_daily_counts(self) -> dict[str, dict[str, int]]:
+        try:
+            data = json.loads(self._counts_path().read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        days = data.get("days") if isinstance(data, dict) else None
+        return days if isinstance(days, dict) else {}
+
+    def _scan_daily_counts(self) -> dict[str, dict[str, int]]:
+        days: dict[str, dict[str, int]] = {}
+        if not self.path.exists():
+            return days
+        with self.path.open(encoding="utf-8") as file:
+            for raw_line in file:
+                counted = self._success_images(raw_line)
+                if counted is None:
+                    continue
+                day, kind, count = counted
+                bucket = days.setdefault(day, {"edits": 0, "generations": 0})
+                bucket[kind] += count
+        return days
+
+    def _bump_daily_counts_locked(self, item: dict[str, Any]) -> None:
+        path = self._counts_path()
+        if not path.exists():
+            return
+        counted = self._success_images(item)
+        if counted is None:
+            return
+        day, kind, count = counted
+        days = self._read_daily_counts()
+        bucket = days.setdefault(day, {"edits": 0, "generations": 0})
+        bucket[kind] = int(bucket.get(kind) or 0) + count
+        self._write_daily_counts_locked(days)
+
+    def _write_daily_counts_locked(self, days: dict[str, dict[str, int]]) -> None:
+        path = self._counts_path()
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps({"days": days}, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        os.replace(temporary, path)
+
+    @staticmethod
+    def _success_images(item: object) -> tuple[str, str, int] | None:
+        if isinstance(item, str):
+            if '"type":"call"' not in item or "/v1/images/" not in item:
+                return None
+            try:
+                item = json.loads(item)
+            except Exception:
+                return None
+        if not isinstance(item, dict) or item.get("type") != "call":
+            return None
+        detail = item.get("detail")
+        if not isinstance(detail, dict) or detail.get("status") != "success":
+            return None
+        kind = {"/v1/images/edits": "edits", "/v1/images/generations": "generations"}.get(
+            str(detail.get("endpoint") or "")
+        )
+        urls = detail.get("urls")
+        count = len(urls) if isinstance(urls, list) else 0
+        if kind is None or count <= 0:
+            return None
+        occurred = _parse_server_local_time(item.get("time"), datetime.now().astimezone().tzinfo or timezone.utc)
+        if occurred is None:
+            return None
+        return occurred.strftime("%Y-%m-%d"), kind, count
     def delete(self, ids: list[str]) -> dict[str, int]:
         target_ids = {str(item or "").strip() for item in ids if str(item or "").strip()}
         if not self.path.exists() or not target_ids:
