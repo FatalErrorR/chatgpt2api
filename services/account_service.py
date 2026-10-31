@@ -26,6 +26,22 @@ DEFAULT_EDIT_UPLOAD_COOLDOWN = timedelta(hours=5)
 MAX_EDIT_UPLOAD_COOLDOWN = timedelta(hours=24)
 
 
+def _image_probe_reason(error: object) -> str:
+    raw = " ".join(str(error or "").split())
+    low = raw.lower()
+    if "status=403" in raw or "enlarge-appear" in low or "bootstrap failed" in low:
+        return "Cloudflare 403"
+    if "内容政策" in raw or "content policy" in low:
+        return "内容政策"
+    if "超时" in raw or "timeout" in low:
+        return "生图超时"
+    if "quota" in low or "上限" in raw or "no available image quota" in low:
+        return "额度用完"
+    if "model not found" in low:
+        return "模型不存在"
+    return raw[:120] or "没有返回图片"
+
+
 def is_edit_upload_throttled(error: object) -> bool:
     text = str(error or "")
     if "文件上传上限" in text:
@@ -1823,6 +1839,52 @@ class AccountService:
                 # 有线程在运行，等线程结束后再完成
                 pass
         return result
+
+    def test_image_accounts(self, access_tokens: list[str], progress_id: str | None = None) -> dict[str, Any]:
+        """每个账号用自己的代理出一张小图。只报告结果，不改账号状态。"""
+        tokens = list(dict.fromkeys(token for token in access_tokens if token))
+        if progress_id:
+            self.init_relogin_progress(progress_id, len(tokens))
+
+        def one(token: str) -> tuple[str, str, str]:
+            account = self.get_account(token) or {}
+            email = str(account.get("email") or anonymize_token(token))
+            if not account:
+                return token, "跳过", f"{email}: 账号不存在"
+            from services.openai_backend_api import OpenAIBackendAPI
+            from services.protocol.conversation import ConversationRequest, stream_image_outputs
+
+            api = OpenAIBackendAPI(token)
+            try:
+                request = ConversationRequest(
+                    model="gpt-image-2.5-flare",
+                    prompt="a single red apple on a plain white background",
+                    n=1,
+                    size="1024x1024",
+                    quality="low",
+                    poll_timeout_secs=90,
+                )
+                for output in stream_image_outputs(api, request):
+                    if output.kind == "result" and getattr(output, "data", None):
+                        return token, "成功", ""
+                    if output.kind == "message" and str(getattr(output, "text", "") or "").strip():
+                        return token, "失败", f"{email}: {_image_probe_reason(output.text)}"
+                return token, "失败", f"{email}: 没有返回图片"
+            except Exception as exc:
+                return token, "失败", f"{email}: {_image_probe_reason(exc)}"
+            finally:
+                api.close()
+
+        if tokens:
+            with ThreadPoolExecutor(max_workers=min(3, len(tokens))) as pool:
+                futures = [pool.submit(one, token) for token in tokens]
+                for future in as_completed(futures):
+                    token, status, error = future.result()
+                    if progress_id:
+                        self.update_relogin_progress(progress_id, token, status, error or None)
+        elif progress_id:
+            self.finish_relogin_progress(progress_id)
+        return {"tested": len(tokens)}
 
     def build_export_items(self, access_tokens: list[str] | None = None) -> list[dict[str, str]]:
         target_tokens = set(token for token in (access_tokens or []) if token)

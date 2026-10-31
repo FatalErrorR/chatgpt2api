@@ -448,6 +448,17 @@ export async function fetchReLoginProgress(progressId: string) {
   return httpRequest<RefreshProgressResponse>(`/api/accounts/re-login/progress/${progressId}`);
 }
 
+export async function testAccountImages(accessTokens: string[]) {
+  return httpRequest<{ progress_id: string }>("/api/accounts/image-test", {
+    method: "POST",
+    body: { access_tokens: accessTokens },
+  });
+}
+
+export async function fetchImageTestProgress(progressId: string) {
+  return httpRequest<RefreshProgressResponse>(`/api/accounts/image-test/progress/${progressId}`);
+}
+
 export async function updateAccount(
   accessToken: string,
   updates: {

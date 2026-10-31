@@ -12,6 +12,7 @@ import {
   Copy,
   Download,
   Link2,
+  Image as ImageIcon,
   LoaderCircle,
   LogIn,
   Pencil,
@@ -47,8 +48,10 @@ import {
   fetchAccounts,
   fetchImageOutputCounts,
   fetchRefreshProgress,
+  fetchImageTestProgress,
   fetchReLoginProgress,
   reLoginAccounts,
+  testAccountImages,
   refreshAccounts,
   testProxy,
   updateAccount,
@@ -205,6 +208,7 @@ function AccountsPageContent() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isRelogining, setIsRelogining] = useState(false);
+  const [isTestingImages, setIsTestingImages] = useState(false);
   const [progress, setProgress] = useState<{
     visible: boolean;
     current: number;
@@ -539,6 +543,59 @@ function AccountsPageContent() {
         }
       }, 500);
     });
+  };
+
+  const handleTestImages = async (accessTokens: string[]) => {
+    if (accessTokens.length === 0) {
+      toast.error("请先选择要测试的账户");
+      return;
+    }
+    setIsTestingImages(true);
+    const total = accessTokens.length;
+    setProgress({ visible: true, current: 0, total, message: "正在测试生图...", email: "" });
+    try {
+      const { progress_id } = await testAccountImages(accessTokens);
+      const results = await new Promise<RefreshProgressResponse["results"]>((resolve, reject) => {
+        const pollTimer = setInterval(async () => {
+          try {
+            const p = await fetchImageTestProgress(progress_id);
+            const doneResults = p.results ?? [];
+            const last = [...doneResults].reverse().find((item) => item.error);
+            setProgress((prev) => ({
+              ...prev,
+              current: p.processed,
+              email: last?.error || `已处理 ${p.processed}/${p.total}`,
+              message: "正在测试生图...",
+            }));
+            if (p.done) {
+              clearInterval(pollTimer);
+              if (p.error) {
+                reject(new Error(p.error));
+                return;
+              }
+              resolve(doneResults);
+            }
+          } catch (err) {
+            clearInterval(pollTimer);
+            reject(err);
+          }
+        }, 500);
+      });
+      const failed = (results ?? []).filter((item) => item.status !== "成功");
+      const succeeded = (results ?? []).length - failed.length;
+      setProgress({ visible: true, current: total, total, message: "测试完成", email: "" });
+      setTimeout(() => setProgress({ visible: false, current: 0, total: 0, message: "", email: "" }), 800);
+      if (failed.length === 0) {
+        toast.success(`测试完成：${succeeded} 个成功`);
+      } else {
+        toast.error(`测试完成：成功 ${succeeded}，失败 ${failed.length}`);
+      }
+    } catch (error) {
+      setProgress({ visible: false, current: 0, total: 0, message: "", email: "" });
+      toast.error(error instanceof Error ? error.message : "测试生图失败");
+    } finally {
+      setIsTestingImages(false);
+    }
   };
 
   const handleReLogin = async (accessTokens: string[]) => {
@@ -1005,6 +1062,16 @@ function AccountsPageContent() {
                 >
                   {isRefreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                   刷新选中账号信息和额度
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-8 rounded-lg px-3 text-stone-500 hover:bg-stone-100"
+                  onClick={() => void handleTestImages(selectedTokens)}
+                  disabled={selectedTokens.length === 0 || isTestingImages}
+                  title="每个选中账号用自己的代理出一张测试图"
+                >
+                  {isTestingImages ? <LoaderCircle className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
+                  测试生图
                 </Button>
                 <Button
                   variant="ghost"

@@ -326,6 +326,32 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=404, detail={"error": "progress not found"})
         return progress
 
+    @router.post("/api/accounts/image-test")
+    async def test_image_accounts(body: AccountRefreshRequest, authorization: str | None = Header(default=None)):
+        """选中的账号各出一张测试图，返回进度 id。失败原因写入进度，不改账号状态。"""
+        require_admin(authorization)
+        access_tokens = [str(token or "").strip() for token in body.access_tokens if str(token or "").strip()]
+        if not access_tokens:
+            raise HTTPException(status_code=400, detail={"error": "access_tokens is required"})
+        progress_id = str(uuid.uuid4())
+
+        async def _do_test():
+            try:
+                await run_in_threadpool(account_service.test_image_accounts, access_tokens, progress_id)
+            except Exception as exc:
+                account_service.finish_relogin_progress(progress_id, error=str(exc))
+
+        asyncio.create_task(_do_test())
+        return {"progress_id": progress_id}
+
+    @router.get("/api/accounts/image-test/progress/{progress_id}")
+    async def get_image_test_progress(progress_id: str, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        progress = account_service.get_relogin_progress(progress_id)
+        if progress is None:
+            raise HTTPException(status_code=404, detail={"error": "progress not found"})
+        return progress
+
     @router.post("/api/accounts/export")
     async def export_accounts(body: AccountExportRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)

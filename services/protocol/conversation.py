@@ -363,6 +363,7 @@ class ConversationRequest:
     response_format: str = "b64_json"
     base_url: str | None = None
     message_as_error: bool = False
+    poll_timeout_secs: int | None = None
     progress_callback: Any = None  # Callable[[str], None] | None
 
 
@@ -1016,8 +1017,8 @@ def stream_image_outputs(
     # 当检测到文本回复（含 referenced_image_ids）时，使用更长的超时来轮询图片结果。
     # 因为上游可能将图片生成作为异步任务执行，SSE 流在工具完成前就断开了，
     # 导致对话文档中尚未写入图片工具的响应记录。
-    poll_timeout = config.image_poll_timeout_secs
-    if is_text_reply and conversation_id:
+    poll_timeout = request.poll_timeout_secs or config.image_poll_timeout_secs
+    if is_text_reply and conversation_id and not request.poll_timeout_secs:
         # 文本回复场景下图片可能仍在异步生成，使用更长超时（默认 120s → 额外 180s = 300s）
         poll_timeout = max(poll_timeout, 300)
         logger.info({

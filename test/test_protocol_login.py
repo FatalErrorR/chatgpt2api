@@ -301,5 +301,27 @@ class LoginFlowTests(unittest.TestCase):
         login.assert_called_once_with("a@example.com", "pw", RFC_SECRET, "http://1.2.3.4:8080")
 
 
+class ImageProbeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.accounts = AccountService(JSONStorageBackend(Path(self.tmp.name) / "accounts.json"))
+
+    def test_cloudflare_failure_is_labeled_and_status_stays(self) -> None:
+        self.accounts.add_account_items([{"access_token": "t", "email": "a@example.com", "status": "正常", "quota": 2}])
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("bootstrap failed: status=403 body enlarge-appear")
+
+        with mock.patch("services.openai_backend_api.OpenAIBackendAPI"), \
+                mock.patch("services.protocol.conversation.stream_image_outputs", side_effect=boom):
+            self.accounts.test_image_accounts(["t"], "p1")
+        progress = self.accounts.get_relogin_progress("p1")
+        self.assertTrue(progress["done"])
+        self.assertEqual(progress["results"][0]["status"], "失败")
+        self.assertIn("a@example.com: Cloudflare 403", progress["results"][0]["error"])
+        self.assertEqual(self.accounts.get_account("t")["status"], "正常")
+
+
 if __name__ == "__main__":
     unittest.main()
