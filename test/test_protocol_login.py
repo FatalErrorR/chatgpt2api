@@ -240,6 +240,14 @@ class LoginFlowTests(unittest.TestCase):
                 mock.patch("services.account_service.time.sleep"):
             return self.accounts._login_with_password("a@example.com", "pw", totp_secret)
 
+    def test_login_request_uses_the_given_proxy(self) -> None:
+        with mock.patch("curl_cffi.requests.Session", return_value=FakeSession({}, self.log)) as session_cls, \
+                mock.patch("utils.sentinel.build_sentinel_token", side_effect=RuntimeError("skip")), \
+                mock.patch.object(self.accounts, "_decode_jwt_payload", return_value={}), \
+                mock.patch("services.account_service.time.sleep"):
+            self.accounts._login_with_password("a@example.com", "pw", "", "socks5://user:pass@1.2.3.4:1080")
+        self.assertEqual(session_cls.call_args.kwargs["proxy"], "socks5h://user:pass@1.2.3.4:1080")
+
     def test_password_only_login_still_works(self) -> None:
         result = self._login(FakeResponse(200, {"continue_url": self.CALLBACK + "?code=abc"}))
         self.assertTrue(result["ok"], result)
@@ -284,12 +292,13 @@ class LoginFlowTests(unittest.TestCase):
 
     def test_relogin_passes_stored_totp_secret(self) -> None:
         self.accounts.add_account_items([{
-            "access_token": "t", "email": "a@example.com", "password": "pw", "totp_secret": RFC_SECRET, "status": "异常",
+            "access_token": "t", "email": "a@example.com", "password": "pw", "totp_secret": RFC_SECRET,
+            "status": "异常", "proxy": "http://1.2.3.4:8080",
         }])
         with mock.patch.object(self.accounts, "_login_with_password", return_value={"ok": False, "error": "x"}) as login, \
                 mock.patch.object(self.accounts, "remove_invalid_token"):
             self.accounts._password_re_login_thread("t", "a@example.com", "pw", "manual", None, RFC_SECRET)
-        login.assert_called_once_with("a@example.com", "pw", RFC_SECRET)
+        login.assert_called_once_with("a@example.com", "pw", RFC_SECRET, "http://1.2.3.4:8080")
 
 
 if __name__ == "__main__":

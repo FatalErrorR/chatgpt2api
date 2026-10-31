@@ -90,9 +90,10 @@ class ProtocolLoginService:
         self._lock = threading.Lock()
         self._progress: dict[str, dict[str, Any]] = {}
 
-    def _do_login(self, email: str, password: str, totp_secret: str) -> dict:
-        login = self._login or account_service._login_with_password
-        return login(email, password, totp_secret)
+    def _do_login(self, email: str, password: str, totp_secret: str, proxy: str = "") -> dict:
+        if self._login:
+            return self._login(email, password, totp_secret)
+        return account_service._login_with_password(email, password, totp_secret, proxy)
 
     # ── 进度 ──────────────────────────────────────────────
     def _purge_locked(self) -> None:
@@ -161,7 +162,7 @@ class ProtocolLoginService:
     def _login_one(self, progress_id: str, index: int, entry: dict[str, Any], proxy: str) -> None:
         self._set_item(progress_id, index, status="登录中")
         try:
-            result = self._do_login(entry["email"], entry["password"], entry["totp_secret"])
+            result = self._do_login(entry["email"], entry["password"], entry["totp_secret"], proxy)
             if not result.get("ok"):
                 self._set_item(progress_id, index, status="失败", error=describe_login_error(result))
                 return
