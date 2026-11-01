@@ -133,7 +133,7 @@ class SentinelHandshakeTests(unittest.TestCase):
         self.addCleanup(api.close)
         self.assertEqual(api.proxy_url, "http://user:pass@account-proxy:8118")
 
-    def test_prepare_finalize_uses_solver_ua_tokens_and_clears_only_restricted_cookie(self):
+    def test_prepare_finalize_uses_page_user_agent_and_local_turnstile(self):
         api = OpenAIBackendAPI("")
         self.addCleanup(api.close)
         api.session.cookies.set("oai-sc", "restricted", domain="chatgpt.com")
@@ -145,41 +145,44 @@ class SentinelHandshakeTests(unittest.TestCase):
         responses[1].json.return_value = {"token": "requirements"}
         with (
             mock.patch.object(api.session, "post", side_effect=responses) as post,
-            mock.patch.object(openai_backend_api, "solver_user_agent", return_value="solver-UA"),
             mock.patch.object(openai_backend_api, "build_legacy_requirements_token", return_value="p") as build,
             mock.patch.object(openai_backend_api, "build_proof_token", return_value="proof") as proof,
-            mock.patch.object(openai_backend_api, "solve_turnstile", return_value="turnstile") as solve,
+            mock.patch.object(openai_backend_api, "solve_turnstile_token", return_value="turnstile") as solve,
         ):
             result = api._get_chat_requirements()
-        self.assertEqual(build.call_args.args[0], "solver-UA")
-        self.assertEqual(proof.call_args.args[2], "solver-UA")
-        solve.assert_called_once_with("dx", "p", prepare, "")
+        self.assertEqual(build.call_args.args[0], api.user_agent)
+        self.assertEqual(proof.call_args.args[2], api.user_agent)
+        solve.assert_called_once_with("dx", "p")
         self.assertEqual(post.call_args_list[1].kwargs["json"], {
-            "prepare_token": "prepare", "proofofwork": "proof", "turnstile": "turnstile"})
+            "prepare_token": "prepare", "proof_token": "proof", "turnstile_token": "turnstile"})
         self.assertEqual(result.token, "requirements")
-        self.assertIsNone(api.session.cookies.get("oai-sc"))
+        self.assertEqual(api.session.cookies.get("oai-sc"), "restricted")
         self.assertEqual(api.session.cookies.get("keep"), "value")
 
-    def test_required_challenge_without_dx_still_fails_closed(self):
+    def test_turnstile_without_dx_is_sent_empty(self):
         api = OpenAIBackendAPI("")
         self.addCleanup(api.close)
-        response = mock.Mock(status_code=200)
-        response.json.return_value = {"turnstile": {"required": True}}
+        responses = [mock.Mock(status_code=200), mock.Mock(status_code=200)]
+        responses[0].json.return_value = {"prepare_token": "prepare", "turnstile": {"required": True}}
+        responses[1].json.return_value = {"token": "requirements"}
         with (
-            mock.patch.object(api.session, "post", return_value=response) as post,
-            mock.patch.object(openai_backend_api, "solver_user_agent", return_value=""),
-            mock.patch.object(openai_backend_api, "solve_turnstile", side_effect=sentinel_solver_client.SentinelSolverError("unconfigured")),
+            mock.patch.object(api.session, "post", side_effect=responses) as post,
+            mock.patch.object(openai_backend_api, "solve_turnstile_token") as solve,
         ):
-            with self.assertRaises(sentinel_solver_client.SentinelSolverError):
-                api._get_chat_requirements()
-        self.assertEqual(post.call_count, 1)
+            result = api._get_chat_requirements()
+        solve.assert_not_called()
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(result.token, "requirements")
 
-    def test_old_tls_profiles_are_replaced_and_custom_profile_is_preserved(self):
+    def test_stored_tls_profile_is_kept_and_empty_uses_chrome110(self):
         api = OpenAIBackendAPI("")
         self.addCleanup(api.close)
-        for old in ("chrome110", "edge101", ""):
-            api.account = {"impersonate": old}
-            self.assertEqual(api._build_fp()["impersonate"], "chrome146")
+        api.account = {"impersonate": "chrome110"}
+        self.assertEqual(api._build_fp()["impersonate"], "chrome110")
+        api.account = {"impersonate": "edge101"}
+        self.assertEqual(api._build_fp()["impersonate"], "edge101")
+        api.account = {}
+        self.assertEqual(api._build_fp()["impersonate"], "chrome110")
         api.account = {"impersonate": "chrome145"}
         self.assertEqual(api._build_fp()["impersonate"], "chrome145")
 

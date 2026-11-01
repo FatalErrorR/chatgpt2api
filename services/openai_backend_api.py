@@ -25,7 +25,6 @@ from PIL import Image
 from services.account_service import account_service
 from services.config import config
 from services.proxy_service import proxy_settings
-from services.sentinel_solver_client import solve_turnstile, solver_user_agent
 from utils.helper import (
     UpstreamHTTPError,
     codex_tool_model,
@@ -37,6 +36,7 @@ from utils.helper import (
 from utils.image_fit import fit_web_reference_images
 from utils.log import logger
 from utils.pow import build_legacy_requirements_token, build_proof_token, parse_pow_resources
+from utils.turnstile import solve_turnstile_token
 
 
 class InvalidAccessTokenError(RuntimeError):
@@ -78,24 +78,16 @@ class ChatRequirements:
 DEFAULT_CLIENT_VERSION = "prod-a194cd50d4416d3c0b47c740f206b12ce60f5887"
 DEFAULT_CLIENT_BUILD_NUMBER = "6708908"
 DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js"
-DEFAULT_IMPERSONATE = "chrome146"
-LEGACY_IMPERSONATES = {"chrome110", "edge101"}
-# 请求头中的浏览器身份必须与 TLS 指纹一致，不能混用 Edge。品牌列表（含 GREASE 项及顺序）
-# 取自 curl_cffi chrome146 自带的默认头；完整版本号取 Chrome 146 的稳定版。
-_FINGERPRINT_BROWSER_VERSION = DEFAULT_IMPERSONATE.removeprefix("chrome") or "146"
-_FINGERPRINT_FULL_VERSION = "146.0.7680.180"
+# 10 月 15 日之前的浏览器身份：TLS 用 chrome110，请求头用 Edge 143。
+DEFAULT_IMPERSONATE = "chrome110"
 FINGERPRINT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    f"(KHTML, like Gecko) Chrome/{_FINGERPRINT_BROWSER_VERSION}.0.0.0 Safari/537.36"
+    "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
 )
-FINGERPRINT_SEC_CH_UA = (
-    f'"Chromium";v="{_FINGERPRINT_BROWSER_VERSION}", "Not-A.Brand";v="24", '
-    f'"Google Chrome";v="{_FINGERPRINT_BROWSER_VERSION}"'
-)
-FINGERPRINT_FULL_VERSION = f'"{_FINGERPRINT_FULL_VERSION}"'
+FINGERPRINT_SEC_CH_UA = '"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"'
+FINGERPRINT_FULL_VERSION = '"143.0.3650.96"'
 FINGERPRINT_FULL_VERSION_LIST = (
-    f'"Chromium";v="{_FINGERPRINT_FULL_VERSION}", "Not-A.Brand";v="24.0.0.0", '
-    f'"Google Chrome";v="{_FINGERPRINT_FULL_VERSION}"'
+    '"Microsoft Edge";v="143.0.3650.96", "Chromium";v="143.0.7499.147", "Not A(Brand";v="24.0.0.0"'
 )
 CLIENT_CREATED_ROOT = "client-created-root"
 IMAGE_CREATION_MENTION = "@创建图像"
@@ -298,8 +290,6 @@ class OpenAIBackendAPI:
             if value:
                 fp[key] = value
         fp.setdefault("user-agent", FINGERPRINT_UA)
-        if fp.get("impersonate") in LEGACY_IMPERSONATES:
-            fp.pop("impersonate")
         fp.setdefault("impersonate", DEFAULT_IMPERSONATE)
         fp.setdefault("oai-device-id", new_uuid())
         fp.setdefault("oai-session-id", new_uuid())
@@ -470,10 +460,6 @@ class OpenAIBackendAPI:
             if cookie.name == "oai-sc":
                 jar.clear(cookie.domain, cookie.path, cookie.name)
 
-    def _sentinel_user_agent(self) -> str:
-        """requirements/proof 中的 UA 必须与求解 Turnstile 的页面一致。"""
-        return solver_user_agent() or self.user_agent
-
     def _build_requirements(self, data: Dict[str, Any], source_p: str = "") -> ChatRequirements:
         """把 sentinel 响应整理成后续对话需要的 token 集合。"""
         if (data.get("arkose") or {}).get("required"):
@@ -485,15 +471,15 @@ class OpenAIBackendAPI:
             proof_token = build_proof_token(
                 proof_info.get("seed", ""),
                 proof_info.get("difficulty", ""),
-                self._sentinel_user_agent(),
+                self.user_agent,
                 script_sources=self.pow_script_sources,
                 data_build=self.pow_data_build,
             )
 
         turnstile_token = ""
         turnstile_info = data.get("turnstile") or {}
-        if turnstile_info.get("required"):
-            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), source_p, data, self.proxy_url)
+        if turnstile_info.get("required") and turnstile_info.get("dx"):
+            turnstile_token = solve_turnstile_token(turnstile_info["dx"], source_p) or ""
 
         return ChatRequirements(
             token=data.get("token", ""),
@@ -2764,34 +2750,23 @@ class OpenAIBackendAPI:
                 pass
 
     def _bootstrap(self) -> None:
-        """预热首页，并提取 PoW 相关脚本引用。
-
-        首页请求不带 Authorization。带着登录态访问首页会被 Cloudflare 挑战。
-        """
-        authorization = self.session.headers.pop("Authorization", None)
-        try:
-            response = self.session.get(
-                self.base_url + "/",
-                headers=self._bootstrap_headers(),
-                timeout=30,
-            )
-        finally:
-            if authorization is not None:
-                self.session.headers["Authorization"] = authorization
+        """预热首页，并提取 PoW 相关脚本引用。"""
+        response = self.session.get(
+            self.base_url + "/",
+            headers=self._bootstrap_headers(),
+            timeout=30,
+        )
         ensure_ok(response, "bootstrap")
         self.pow_script_sources, self.pow_data_build = parse_pow_resources(response.text)
         if not self.pow_script_sources:
             self.pow_script_sources = [DEFAULT_POW_SCRIPT]
 
     def _get_chat_requirements(self) -> ChatRequirements:
-        """完成 prepare/finalize 握手；质量不足时对话会伪装返回 Model not found 404。"""
+        """获取当前模式对话所需的 sentinel token（prepare + finalize 两步流程）。"""
         base = "/backend-api/sentinel/chat-requirements" if self.access_token else (
             "/backend-anon/sentinel/chat-requirements"
         )
-        sentinel_user_agent = self._sentinel_user_agent()
-        p_token = build_legacy_requirements_token(
-            sentinel_user_agent, self.pow_script_sources, self.pow_data_build
-        )
+        p_token = build_legacy_requirements_token(self.user_agent, self.pow_script_sources, self.pow_data_build)
 
         prepare_path = base + "/prepare"
         response = self.session.post(
@@ -2812,16 +2787,15 @@ class OpenAIBackendAPI:
             proof_token = build_proof_token(
                 proof_info.get("seed", ""),
                 proof_info.get("difficulty", ""),
-                sentinel_user_agent,
+                self.user_agent,
                 script_sources=self.pow_script_sources,
                 data_build=self.pow_data_build,
             )
 
         turnstile_token = ""
         turnstile_info = prepare_data.get("turnstile") or {}
-        if turnstile_info.get("required"):
-            # 传入完整 prepare 响应，让求解器调用页面自带的 Turnstile 模块。
-            turnstile_token = solve_turnstile(turnstile_info.get("dx", ""), p_token, prepare_data, self.proxy_url)
+        if turnstile_info.get("required") and turnstile_info.get("dx"):
+            turnstile_token = solve_turnstile_token(turnstile_info["dx"], p_token) or ""
 
         finalize_path = base + "/finalize"
         response = self.session.post(
@@ -2829,14 +2803,13 @@ class OpenAIBackendAPI:
             headers=self._headers(finalize_path, {"Content-Type": "application/json"}),
             json={
                 "prepare_token": prepare_data.get("prepare_token", ""),
-                "proofofwork": proof_token,
-                "turnstile": turnstile_token,
+                "proof_token": proof_token,
+                "turnstile_token": turnstile_token,
             },
             timeout=30,
         )
         ensure_ok(response, "chat_requirements_finalize")
         data = response.json()
-        self._drop_restricted_cookies()
 
         token = data.get("token", "")
         if not token:

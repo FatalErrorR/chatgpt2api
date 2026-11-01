@@ -1,14 +1,7 @@
-"""The browser identity we advertise must describe the client the TLS profile emulates.
-
-This is a deterministic guard on purpose. The mismatch it catches (a chrome146 TLS
-fingerprint carrying Edge 143 headers) shows up upstream only as an intermittent
-Cloudflare challenge, which cannot be measured reliably request by request — so the
-invariant is asserted here instead.
-"""
+"""Restored pre-2026-10-15 browser identity: chrome110 TLS with Edge 143 headers."""
 
 from __future__ import annotations
 
-import re
 import unittest
 from unittest import mock
 
@@ -22,60 +15,19 @@ class FingerprintConsistencyTests(unittest.TestCase):
         self.addCleanup(self.api.close)
         self.headers = self.api.session.headers
 
-    def ua_version(self) -> str:
-        match = re.search(r"Chrome/(\d+)\.", self.headers["User-Agent"])
-        self.assertIsNotNone(match, "user agent must name a Chrome version")
-        return match.group(1)
-
-    def profile_version(self) -> str:
-        match = re.match(r"chrome(\d+)$", self.api.fp["impersonate"])
-        self.assertIsNotNone(match, f"unexpected impersonate profile {self.api.fp['impersonate']!r}")
-        return match.group(1)
-
-    def test_user_agent_version_matches_the_tls_profile(self):
-        self.assertEqual(self.ua_version(), self.profile_version())
-
-    def test_client_hint_versions_match_the_user_agent(self):
-        version = self.ua_version()
-        sec_ch_ua = self.headers["Sec-Ch-Ua"]
-        self.assertIn(f'"Chromium";v="{version}"', sec_ch_ua)
-        self.assertIn(f'"Google Chrome";v="{version}"', sec_ch_ua)
-        self.assertTrue(self.headers["Sec-Ch-Ua-Full-Version"].startswith(f'"{version}.'))
-        self.assertIn(f'"Chromium";v="{version}.', self.headers["Sec-Ch-Ua-Full-Version-List"])
-        self.assertIn(f'"Google Chrome";v="{version}.', self.headers["Sec-Ch-Ua-Full-Version-List"])
-
-    def test_brands_match_what_the_tls_profile_sends_by_default(self):
-        # curl_cffi chrome146 default header, GREASE brand and order included
-        self.assertEqual(
-            self.headers["Sec-Ch-Ua"],
-            '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
-        )
-
-    def test_the_identity_does_not_mix_browser_brands(self):
-        # The bug this guards: an Edge identity on top of a Chrome TLS profile.
-        for name in ("User-Agent", "Sec-Ch-Ua", "Sec-Ch-Ua-Full-Version-List"):
-            value = self.headers[name]
-            self.assertNotIn("Edg/", value)
-            self.assertNotIn("Microsoft Edge", value)
-            self.assertNotIn("Edge", value)
-        self.assertNotIn("Edg/", backend.FINGERPRINT_UA)
-        self.assertNotIn("Microsoft Edge", backend.FINGERPRINT_SEC_CH_UA)
-
-    def test_the_platform_reported_by_the_hints_matches_the_user_agent(self):
-        self.assertIn("Windows NT", self.headers["User-Agent"])
+    def test_default_identity_is_the_pre_chrome146_edge_profile(self):
+        self.assertEqual(self.api.fp["impersonate"], "chrome110")
+        self.assertIn("Edg/143.0.0.0", self.headers["User-Agent"])
+        self.assertIn("Microsoft Edge", self.headers["Sec-Ch-Ua"])
+        self.assertEqual(self.headers["Sec-Ch-Ua-Full-Version"], '"143.0.3650.96"')
         self.assertEqual(self.headers["Sec-Ch-Ua-Platform"], '"Windows"')
 
-    def test_legacy_profiles_are_replaced_rather_than_used(self):
-        for legacy in backend.LEGACY_IMPERSONATES:
-            self.assertNotEqual(self.api.fp["impersonate"], legacy)
-
-    def test_a_stored_legacy_fingerprint_is_upgraded(self):
-        # Accounts that carry an old fp must not keep an edge101 profile.
-        with self._cached_account({"fp": {"impersonate": "edge101"}}):
+    def test_a_stored_fingerprint_is_kept(self):
+        with self._cached_account({"fp": {"impersonate": "edge101", "user-agent": "custom-ua"}}):
             api = OpenAIBackendAPI("test-token")
             self.addCleanup(api.close)
-            self.assertEqual(api.fp["impersonate"], backend.DEFAULT_IMPERSONATE)
-            self.assertEqual(api.fp["user-agent"], backend.FINGERPRINT_UA)
+            self.assertEqual(api.fp["impersonate"], "edge101")
+            self.assertEqual(api.fp["user-agent"], "custom-ua")
 
     class _cached_account:  # noqa: N801 - small helper, used as a context manager
         def __init__(self, account: dict):
