@@ -17,6 +17,9 @@ class ImageGenerationTaskRequest(BaseModel):
     model: str = "gpt-image-2"
     size: str | None = None
     quality: str = "auto"
+    output_format: str = "png"
+    frame_count: int | None = None
+    frame_duration_ms: int | None = None
 
 
 class ResumePollRequest(BaseModel):
@@ -64,6 +67,9 @@ def create_router() -> APIRouter:
                 size=body.size,
                 quality=body.quality,
                 base_url=resolve_image_base_url(request),
+                output_format=body.output_format,
+                frame_count=body.frame_count,
+                frame_duration_ms=body.frame_duration_ms,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc

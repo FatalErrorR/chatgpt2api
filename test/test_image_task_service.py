@@ -145,5 +145,34 @@ class ImageTaskServiceTests(unittest.TestCase):
             self.assertTrue(all("已中断" in item.get("error", "") for item in result["items"]))
 
 
+    def test_gif_generation_payload_reaches_handler(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            seen: dict = {}
+
+            def handler(payload):
+                seen.update({key: value for key, value in payload.items() if key != "progress_callback"})
+                return {"data": [{"url": "http://example.test/a.gif"}]}
+
+            path = Path(tmp_dir) / "tasks.json"
+            service = self.make_service(path, handler)
+            service.submit_generation(
+                OWNER,
+                client_task_id="gif-task",
+                prompt="pulse",
+                model="gpt-image-2.6-flare",
+                size="1024x1024",
+                quality="low",
+                output_format="gif",
+                frame_count=4,
+                frame_duration_ms=200,
+            )
+            task = wait_for_task(service, OWNER, "gif-task", "success")
+            self.assertEqual(task["data"][0]["url"], "http://example.test/a.gif")
+            self.assertEqual(seen["output_format"], "gif")
+            self.assertEqual(seen["frame_count"], 4)
+            self.assertEqual(seen["frame_duration_ms"], 200)
+            self.assertEqual(seen["model"], "gpt-image-2.6-flare")
+
+
 if __name__ == "__main__":
     unittest.main()

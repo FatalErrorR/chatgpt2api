@@ -129,6 +129,9 @@ class ImageTaskService:
         size: str | None,
         quality: str = "auto",
         base_url: str = "",
+        output_format: str = "png",
+        frame_count: int | None = None,
+        frame_duration_ms: int | None = None,
     ) -> dict[str, Any]:
         payload = {
             "prompt": prompt,
@@ -139,6 +142,10 @@ class ImageTaskService:
             "response_format": "url",
             "base_url": base_url,
         }
+        if str(output_format or "").lower() == "gif":
+            payload["output_format"] = "gif"
+            payload["frame_count"] = frame_count
+            payload["frame_duration_ms"] = frame_duration_ms
         return self._submit(identity, client_task_id=client_task_id, mode="generate", payload=payload)
 
     def submit_edit(

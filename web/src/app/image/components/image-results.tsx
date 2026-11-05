@@ -31,6 +31,13 @@ type ImageResultsProps = {
 // Blob URL 缓存：避免 base64 超长字符串在 DOM 中，改用短小的 blob: URL
 const b64BlobUrlCache = new Map<string, string>();
 
+function storedImageMime(image: StoredImage) {
+  if (image.url?.toLowerCase().endsWith(".gif") || image.b64_json?.startsWith("R0lGOD")) {
+    return "image/gif";
+  }
+  return "image/png";
+}
+
 function getStoredImageSrc(image: StoredImage) {
   if (image.b64_json) {
     let url = b64BlobUrlCache.get(image.b64_json);
@@ -38,7 +45,7 @@ function getStoredImageSrc(image: StoredImage) {
       const binary = atob(image.b64_json);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: "image/png" });
+      const blob = new Blob([bytes], { type: storedImageMime(image) });
       url = URL.createObjectURL(blob);
       b64BlobUrlCache.set(image.b64_json, url);
     }
@@ -54,7 +61,7 @@ async function downloadStoredImage(image: StoredImage, index: number) {
       const binary = atob(image.b64_json);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      blob = new Blob([bytes], { type: "image/png" });
+      blob = new Blob([bytes], { type: storedImageMime(image) });
     } else if (image.url) {
       // 确保 URL 是绝对路径
       const url = image.url.startsWith("http") ? image.url : `${window.location.origin}${image.url}`;
@@ -77,7 +84,7 @@ async function downloadStoredImage(image: StoredImage, index: number) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `image-${index + 1}.png`;
+  a.download = `image-${index + 1}.${storedImageMime(image) === "image/gif" ? "gif" : "png"}`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
