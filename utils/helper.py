@@ -19,19 +19,29 @@ WEB_IMAGE_2_5_MODELS = {
     "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst",
 }
-WEB_IMAGE_MODELS = {"gpt-image-2"} | WEB_IMAGE_2_5_MODELS
+WEB_IMAGE_2_6_MODELS = {
+    "gpt-image-2.6-flare",
+    "gpt-image-2.6-sunburst",
+}
+WEB_IMAGE_MODELS = {"gpt-image-2"} | WEB_IMAGE_2_5_MODELS | WEB_IMAGE_2_6_MODELS
 CODEX_IMAGE_MODEL = "codex-gpt-image-2"
 CODEX_IMAGE_MODELS = {
     "codex-gpt-image-2",
     "codex-gpt-image-2.5",
     "codex-gpt-image-2.5-flare",
     "codex-gpt-image-2.5-sunburst",
+    "codex-gpt-image-2.6",
+    "codex-gpt-image-2.6-flare",
+    "codex-gpt-image-2.6-sunburst",
 }
 CODEX_TOOL_MODELS = {
     "codex-gpt-image-2": "gpt-image-2",
     "codex-gpt-image-2.5": "gpt-image-2.5-flare",
     "codex-gpt-image-2.5-flare": "gpt-image-2.5-flare",
     "codex-gpt-image-2.5-sunburst": "gpt-image-2.5-sunburst",
+    "codex-gpt-image-2.6": "gpt-image-2.6-flare",
+    "codex-gpt-image-2.6-flare": "gpt-image-2.6-flare",
+    "codex-gpt-image-2.6-sunburst": "gpt-image-2.6-sunburst",
 }
 IMAGE_MODEL_PLAN_TYPES = ("plus", "team", "pro")
 BASE_IMAGE_MODELS = WEB_IMAGE_MODELS | CODEX_IMAGE_MODELS
@@ -157,7 +167,7 @@ def resolve_image_upstream_model(model: object, default_upstream: str) -> str | 
         return None
     if base_model == "gpt-image-2":
         return str(default_upstream or "").strip() or "gpt-5-5"
-    if base_model in WEB_IMAGE_2_5_MODELS or base_model in CODEX_IMAGE_MODELS:
+    if base_model in WEB_IMAGE_2_5_MODELS or base_model in WEB_IMAGE_2_6_MODELS or base_model in CODEX_IMAGE_MODELS:
         return base_model
     return None
 
@@ -166,6 +176,26 @@ def codex_tool_model(model: object) -> str:
     """Map a public Codex image model to the image_generation tool model."""
     _, base_model = split_image_model(model)
     return CODEX_TOOL_MODELS.get(base_model or "", "gpt-image-2")
+
+
+def is_gif_bytes(data: bytes) -> bool:
+    return data.startswith((b"GIF87a", b"GIF89a"))
+
+
+def _gif_int(value: object, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def gif_frame_count(value: object) -> int:
+    return min(64, max(2, _gif_int(value, 9)))
+
+
+def gif_frame_duration_ms(value: object) -> int:
+    duration = min(2000, max(20, _gif_int(value, 200)))
+    return duration - (duration % 10)
 
 
 def is_image_chat_request(body: dict[str, object]) -> bool:

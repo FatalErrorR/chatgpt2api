@@ -29,6 +29,8 @@ from utils.helper import (
     UpstreamHTTPError,
     codex_tool_model,
     ensure_ok,
+    gif_frame_count,
+    gif_frame_duration_ms,
     iter_sse_payloads,
     new_uuid,
     resolve_image_upstream_model,
@@ -848,24 +850,34 @@ class OpenAIBackendAPI:
             size: str | None = None,
             quality: str = "auto",
             model: str = "",
+            output_format: str = "png",
+            frame_count: int | None = None,
+            frame_duration_ms: int | None = None,
     ) -> Iterator[Dict[str, Any]]:
         if not self.access_token:
             raise RuntimeError("access_token is required for codex image endpoints")
         self._ensure_codex_source_account()
         path = "/backend-api/codex/responses"
+        tool: Dict[str, Any] = {
+            "type": "image_generation",
+            "model": codex_tool_model(model),
+            "action": "edit" if images else "generate",
+            "size": str(size or "1024x1024"),
+            "quality": str(quality or "auto"),
+            "output_format": "png",
+        }
+        if str(output_format or "").lower() == "gif":
+            if images:
+                raise RuntimeError("GIF output is not supported for image edits")
+            tool["output_format"] = "gif"
+            tool["frame_count"] = gif_frame_count(frame_count)
+            tool["frame_duration_ms"] = gif_frame_duration_ms(frame_duration_ms)
         payload = {
             "model": CODEX_RESPONSES_MODEL,
             "instructions": CODEX_RESPONSES_INSTRUCTIONS,
             "store": False,
             "input": self._codex_image_input(prompt, images or []),
-            "tools": [{
-                "type": "image_generation",
-                "model": codex_tool_model(model),
-                "action": "edit" if images else "generate",
-                "size": str(size or "1024x1024"),
-                "quality": str(quality or "auto"),
-                "output_format": "png",
-            }],
+            "tools": [tool],
             "tool_choice": {"type": "image_generation"},
             "stream": True,
         }

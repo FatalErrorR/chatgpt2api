@@ -38,6 +38,8 @@ class ImageModelMappingTests(unittest.TestCase):
             "gpt-image-2.5-sunburst",
         )
         self.assertEqual(codex_tool_model("gpt-image-2.5-flare"), "gpt-image-2")
+        self.assertEqual(codex_tool_model("codex-gpt-image-2.6"), "gpt-image-2.6-flare")
+        self.assertEqual(codex_tool_model("codex-gpt-image-2.6-sunburst"), "gpt-image-2.6-sunburst")
 
     def test_new_image_models_are_supported(self) -> None:
         for model in (
@@ -47,6 +49,8 @@ class ImageModelMappingTests(unittest.TestCase):
             "codex-gpt-image-2.5",
             "codex-gpt-image-2.5-flare",
             "team-codex-gpt-image-2.5-sunburst",
+            "gpt-image-2.6-flare",
+            "gpt-image-2.6-sunburst",
         ):
             self.assertTrue(is_supported_image_model(model), model)
             self.assertIn(model, IMAGE_MODELS)

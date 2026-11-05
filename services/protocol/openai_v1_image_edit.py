@@ -49,6 +49,8 @@ def _composite_mask(
 
 
 def handle(body: dict[str, Any]) -> dict[str, Any] | Iterator[dict[str, Any]]:
+    if str(body.get("output_format") or "").lower() == "gif":
+        raise ImageGenerationError("GIF output is not supported for image edits")
     prompt = str(body.get("prompt") or "")
     images = body.get("images") or []
     masks = body.get("mask") or []

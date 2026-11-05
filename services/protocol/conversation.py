@@ -19,7 +19,10 @@ from utils.helper import (
     IMAGE_MODELS,
     UpstreamHTTPError,
     extract_image_from_message_content,
+    gif_frame_count,
+    gif_frame_duration_ms,
     is_codex_image_model,
+    is_gif_bytes,
     is_supported_image_model,
     split_image_model,
 )
@@ -239,12 +242,24 @@ def assistant_history_messages(messages: list[dict[str, Any]]) -> list[str]:
     return [str(item.get("content") or "") for item in messages if item.get("role") == "assistant" and item.get("content")]
 
 
-def build_image_prompt(prompt: str, size: str | None, quality: str = "auto") -> str:
+def build_image_prompt(
+    prompt: str,
+    size: str | None,
+    quality: str = "auto",
+    output_format: str = "png",
+    frame_count: object = None,
+    frame_duration_ms: object = None,
+) -> str:
     hints = []
     if size:
         hints.append(f"输出图片尺寸为 {size}。")
     if quality:
         hints.append(f"输出图片质量为 {quality}。")
+    # ponytail: web picture_v2 has no output_format; this sentence is the only GIF signal until a captured 2.6 payload exists
+    if str(output_format or "").lower() == "gif":
+        hints.append(
+            f"输出动画 GIF，{gif_frame_count(frame_count)} 帧，每帧 {gif_frame_duration_ms(frame_duration_ms)} 毫秒。"
+        )
     return f"{prompt.strip()}\n\n{''.join(hints)}" if hints else prompt
 
 
@@ -329,7 +344,7 @@ def format_image_result(
             continue
         revised_prompt = str(item.get("revised_prompt") or prompt).strip() or prompt
         image_bytes = base64.b64decode(b64_json)
-        upscaled = maybe_upscale_image(image_bytes, size)
+        upscaled = image_bytes if is_gif_bytes(image_bytes) else maybe_upscale_image(image_bytes, size)
         if upscaled is not image_bytes:
             image_bytes = upscaled
             b64_json = base64.b64encode(image_bytes).decode("ascii")
@@ -360,6 +375,9 @@ class ConversationRequest:
     n: int = 1
     size: str | None = None
     quality: str = "auto"
+    output_format: str = "png"
+    frame_count: int | None = None
+    frame_duration_ms: int | None = None
     response_format: str = "b64_json"
     base_url: str | None = None
     message_as_error: bool = False
@@ -746,13 +764,18 @@ def conversation_events(
     images: list[str] | None = None,
     size: str | None = None,
     quality: str = "auto",
+    output_format: str = "png",
+    frame_count: object = None,
+    frame_duration_ms: object = None,
     thinking_effort: str = "",
 ) -> Iterator[dict[str, Any]]:
     normalized = normalize_messages(messages or ([{"role": "user", "content": prompt}] if prompt else []))
     image_model = is_supported_image_model(model)
     history_text = "" if image_model else assistant_history_text(normalized)
     history_messages = [] if image_model else assistant_history_messages(normalized)
-    final_prompt = prompt_with_global_system(build_image_prompt(prompt, size, quality)) if image_model else prompt
+    final_prompt = prompt_with_global_system(build_image_prompt(
+        prompt, size, quality, output_format, frame_count, frame_duration_ms,
+    )) if image_model else prompt
     payloads = backend.stream_conversation(
         messages=normalized,
         model=model,
@@ -907,6 +930,9 @@ def stream_image_outputs(
             images=request.images or [],
             size=request.size,
             quality=request.quality,
+            output_format=request.output_format,
+            frame_count=request.frame_count,
+            frame_duration_ms=request.frame_duration_ms,
     ):
         last = event
         if event.get("type") == "conversation.delta":
@@ -1333,6 +1359,9 @@ def stream_codex_image_outputs(
         size=request.size,
         quality=request.quality,
         model=request.model,
+        output_format=request.output_format,
+        frame_count=request.frame_count,
+        frame_duration_ms=request.frame_duration_ms,
     )))
     if not images:
         raise ImageGenerationError("No image result found in response")
@@ -1657,6 +1686,8 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
     """并行生成多张图片，每张图片使用独立线程和账号，互不阻塞。"""
     if not is_supported_image_model(request.model):
         raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(IMAGE_MODELS)))
+    if str(request.output_format or "").lower() == "gif" and request.images:
+        raise ImageGenerationError("GIF output is not supported for image edits")
 
     if request.n <= 1:
         # 单张图片，直接执行（无需线程池开销）

@@ -18,6 +18,7 @@ def handle(body: dict[str, Any]) -> dict[str, Any] | Iterator[dict[str, Any]]:
     n = int(body.get("n") or 1)
     size = body.get("size")
     quality = str(body.get("quality") or "auto")
+    output_format = str(body.get("output_format") or "png")
     response_format = str(body.get("response_format") or "b64_json")
     base_url = str(body.get("base_url") or "") or None
     progress_callback = body.get("progress_callback")
@@ -27,6 +28,9 @@ def handle(body: dict[str, Any]) -> dict[str, Any] | Iterator[dict[str, Any]]:
         n=n,
         size=size,
         quality=quality,
+        output_format=output_format,
+        frame_count=body.get("frame_count"),
+        frame_duration_ms=body.get("frame_duration_ms"),
         response_format=response_format,
         base_url=base_url,
         message_as_error=True,
