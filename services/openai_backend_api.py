@@ -92,6 +92,7 @@ FINGERPRINT_FULL_VERSION_LIST = (
     '"Microsoft Edge";v="143.0.3650.96", "Chromium";v="143.0.7499.147", "Not A(Brand";v="24.0.0.0"'
 )
 CLIENT_CREATED_ROOT = "client-created-root"
+CLOUDFLARE_COOKIE_PREFIXES = ("__cf", "_cf", "cf_")
 IMAGE_CREATION_MENTION = "@创建图像"
 CODEX_RESPONSES_MODEL = "gpt-5.5"
 SEARCH_MODEL = "gpt-5-5"
@@ -334,13 +335,41 @@ class OpenAIBackendAPI:
             or "text/html" in content_type
         )
 
+    def _drop_cloudflare_cookies(self) -> None:
+        """清掉 Cloudflare 下发的 Cookie（__cf_bm / _cfuvid / cf_clearance 等），让下一次请求按新访客重新评估。
+
+        curl_cffi 每次请求都会按 cookie jar 重灌 libcurl 的 Cookie，所以清 jar 即可。
+        """
+        try:
+            jar = self.session.cookies.jar
+            for cookie in list(jar):
+                if cookie.name.startswith(CLOUDFLARE_COOKIE_PREFIXES):
+                    jar.clear(cookie.domain, cookie.path, cookie.name)
+        except Exception:
+            pass
+
     def _retry_cloudflare_challenge(self, request: Callable[[], requests.Response]) -> requests.Response:
-        """账号刷新遇到临时挑战时最多尝试三次，避免健康账号被误判为无额度。"""
+        """遇到临时 Cloudflare 挑战时最多尝试三次：每次重试前关掉旧响应、清掉 Cloudflare Cookie。
+
+        挑战在边缘拦截，请求没到上游，重试 POST 不会重复生图。
+        """
         response = request()
         for attempt in range(1, 3):
             if not self._is_cloudflare_challenge(response):
                 return response
-            time.sleep(1.5 * attempt)
+            try:
+                response.close()
+            except Exception:
+                pass
+            wait_secs = 1.5 * attempt
+            logger.warning({
+                "event": "cloudflare_challenge_retry",
+                "url": str(getattr(response, "url", "") or "")[:200],
+                "attempt": attempt,
+                "wait_secs": wait_secs,
+            })
+            self._drop_cloudflare_cookies()
+            time.sleep(wait_secs)
             response = request()
         return response
 
@@ -974,12 +1003,12 @@ class OpenAIBackendAPI:
             "client_prepare_dispatch": "debounced",
             "client_prepare_source": "composer_editor_state",
         }
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._image_headers(path, requirements, trace_id=trace_id),
             json=payload,
             timeout=60,
-        )
+        ))
         ensure_ok(response, path)
         return str(response.json().get("conduit_token") or ""), trace_id
 
@@ -1015,13 +1044,13 @@ class OpenAIBackendAPI:
         width, height = image.size
         mime_type = Image.MIME.get(image.format, "image/png")
         path = "/backend-api/files"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._headers(path, {"Content-Type": "application/json", "Accept": "application/json"}),
             json={"file_name": file_name, "file_size": len(data), "use_case": "multimodal", "width": width,
                   "height": height},
             timeout=60,
-        )
+        ))
         ensure_ok(response, path)
         upload_meta = response.json()
         response = self.session.put(
@@ -1041,12 +1070,12 @@ class OpenAIBackendAPI:
         )
         ensure_ok(response, "image_upload")
         path = f"/backend-api/files/{upload_meta['file_id']}/uploaded"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._headers(path, {"Content-Type": "application/json", "Accept": "application/json"}),
             data="{}",
             timeout=60,
-        )
+        ))
         ensure_ok(response, path)
         return {
             "file_id": upload_meta["file_id"],
@@ -1131,13 +1160,13 @@ class OpenAIBackendAPI:
             "client_prepare_state": "success",
         }
         path = "/backend-api/f/conversation"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._image_headers(path, requirements, conduit_token, "text/event-stream", trace_id=trace_id),
             json=payload,
             timeout=300,
             stream=True,
-        )
+        ))
         ensure_ok(response, path)
         return response
 
@@ -1359,7 +1388,7 @@ class OpenAIBackendAPI:
     def _upload_editable_base64_image(self, base64_image: str, index: int) -> Dict[str, Any]:
         data, file_name, mime_type, width, height = self._decode_editable_base64_image(base64_image, index)
         path = "/backend-api/files"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._headers(path, {"Accept": "*/*", "Content-Type": "application/json"}),
             json={
@@ -1372,7 +1401,7 @@ class OpenAIBackendAPI:
                 "library_persistence_mode": "opportunistic",
             },
             timeout=60,
-        )
+        ))
         ensure_ok(response, path)
         payload = response.json()
         upload_url = str(payload.get("upload_url") or "")
@@ -1396,12 +1425,12 @@ class OpenAIBackendAPI:
         )
         ensure_ok(response, "image_upload")
         path = f"/backend-api/files/{file_id}/uploaded"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._headers(path, {"Accept": "*/*", "Content-Type": "application/json"}),
             data="{}",
             timeout=60,
-        )
+        ))
         ensure_ok(response, path)
         return {
             "file_id": file_id,
@@ -1451,12 +1480,12 @@ class OpenAIBackendAPI:
         }
         if attachment_mime_types:
             payload["attachment_mime_types"] = attachment_mime_types
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._headers(path, {"Accept": "*/*", "Content-Type": "application/json", "X-Conduit-Token": "no-token"}),
             json=payload,
             timeout=60,
-        )
+        ))
         ensure_ok(response, path)
         conduit_token = str(response.json().get("conduit_token") or "")
         if not conduit_token:
@@ -1498,7 +1527,7 @@ class OpenAIBackendAPI:
         else:
             message["content"] = {"content_type": "text", "parts": [prompt]}
         path = "/backend-api/f/conversation"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._image_headers(path, requirements, conduit_token, "text/event-stream"),
             json={
@@ -1530,7 +1559,7 @@ class OpenAIBackendAPI:
             },
             timeout=300,
             stream=True,
-        )
+        ))
         ensure_ok(response, path)
         conversation_id = ""
         try:
@@ -1928,7 +1957,7 @@ class OpenAIBackendAPI:
 
     def _prepare_search_conversation(self, prompt: str, model: str) -> str:
         path = "/backend-api/f/conversation/prepare"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._headers(path, {"Accept": "*/*", "Content-Type": "application/json", "X-Conduit-Token": "no-token"}),
             json={
@@ -1947,7 +1976,7 @@ class OpenAIBackendAPI:
                 "client_contextual_info": {"app_name": "chatgpt.com"},
             },
             timeout=60,
-        )
+        ))
         ensure_ok(response, path)
         token = str(response.json().get("conduit_token") or "")
         if not token:
@@ -1957,7 +1986,7 @@ class OpenAIBackendAPI:
     def _run_search_conversation(self, prompt: str, conduit_token: str, model: str) -> str:
         requirements = self._get_chat_requirements()
         path = "/backend-api/f/conversation"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + path,
             headers=self._image_headers(path, requirements, conduit_token, "text/event-stream"),
             json={
@@ -1993,7 +2022,7 @@ class OpenAIBackendAPI:
             },
             timeout=300,
             stream=True,
-        )
+        ))
         ensure_ok(response, path)
         conversation_id = ""
         try:
@@ -2763,11 +2792,11 @@ class OpenAIBackendAPI:
 
     def _bootstrap(self) -> None:
         """预热首页，并提取 PoW 相关脚本引用。"""
-        response = self.session.get(
+        response = self._retry_cloudflare_challenge(lambda: self.session.get(
             self.base_url + "/",
             headers=self._bootstrap_headers(),
             timeout=30,
-        )
+        ))
         ensure_ok(response, "bootstrap")
         self.pow_script_sources, self.pow_data_build = parse_pow_resources(response.text)
         if not self.pow_script_sources:
@@ -2781,12 +2810,12 @@ class OpenAIBackendAPI:
         p_token = build_legacy_requirements_token(self.user_agent, self.pow_script_sources, self.pow_data_build)
 
         prepare_path = base + "/prepare"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + prepare_path,
             headers=self._headers(prepare_path, {"Content-Type": "application/json"}),
             json={"p": p_token},
             timeout=30,
-        )
+        ))
         ensure_ok(response, "chat_requirements_prepare")
         prepare_data = response.json()
 
@@ -2810,7 +2839,7 @@ class OpenAIBackendAPI:
             turnstile_token = solve_turnstile_token(turnstile_info["dx"], p_token) or ""
 
         finalize_path = base + "/finalize"
-        response = self.session.post(
+        response = self._retry_cloudflare_challenge(lambda: self.session.post(
             self.base_url + finalize_path,
             headers=self._headers(finalize_path, {"Content-Type": "application/json"}),
             json={
@@ -2819,7 +2848,7 @@ class OpenAIBackendAPI:
                 "turnstile_token": turnstile_token,
             },
             timeout=30,
-        )
+        ))
         ensure_ok(response, "chat_requirements_finalize")
         data = response.json()
 

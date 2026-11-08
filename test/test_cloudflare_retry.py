@@ -3,7 +3,7 @@ from unittest import mock
 
 from curl_cffi.requests import Headers
 
-from services.openai_backend_api import InvalidAccessTokenError, OpenAIBackendAPI
+from services.openai_backend_api import ChatRequirements, InvalidAccessTokenError, OpenAIBackendAPI
 
 
 class CloudflareRetryTests(unittest.TestCase):
@@ -94,6 +94,54 @@ class CloudflareRetryTests(unittest.TestCase):
                 self.api._get_me()
         self.assertEqual(request.call_count, 2)
         sleep.assert_called_once_with(1.5)
+
+    def test_retry_closes_challenge_and_drops_only_cloudflare_cookies(self):
+        cookies = self.api.session.cookies
+        for name in ("__cf_bm", "_cfuvid", "cf_clearance", "__Secure-next-auth.session-token", "oai-did"):
+            cookies.set(name, "v", domain=".chatgpt.com")
+        challenge = self.response(headers={"CF-Mitigated": "challenge"})
+        with (
+            mock.patch.object(self.api.session, "get", side_effect=[challenge, self.response(200)]),
+            mock.patch("services.openai_backend_api.time.sleep"),
+        ):
+            self.api._get_me()
+        challenge.close.assert_called_once()
+        self.assertEqual(sorted(cookie.name for cookie in cookies.jar), ["__Secure-next-auth.session-token", "oai-did"])
+
+    def test_image_chain_recovers_after_challenge(self):
+        requirements = ChatRequirements(token="t")
+        cases = [
+            ("bootstrap", "get", lambda: self.api._bootstrap()),
+            ("prepare", "post", lambda: self.api._prepare_image_conversation("p", requirements, "gpt-image-2")),
+            ("conversation", "post", lambda: self.api._start_image_generation("p", requirements, "c", "gpt-image-2")),
+        ]
+        for name, verb, call in cases:
+            ok = self.response(200, payload={"conduit_token": "c"})
+            ok.text = "<html></html>"
+            with (
+                self.subTest(name=name),
+                mock.patch.object(self.api.session, verb, side_effect=[
+                    self.response(headers={"CF-Mitigated": "challenge"}),
+                    ok,
+                ]) as request,
+                mock.patch("services.openai_backend_api.time.sleep") as sleep,
+            ):
+                call()
+                self.assertEqual(request.call_count, 2)
+                self.assertEqual(request.call_args_list[0], request.call_args_list[1])
+                sleep.assert_called_once_with(1.5)
+
+    def test_image_conversation_stream_is_retried_with_stream_flag(self):
+        with (
+            mock.patch.object(self.api.session, "post", side_effect=[
+                self.response(headers={"Content-Type": "text/html"}),
+                self.response(200),
+            ]) as request,
+            mock.patch("services.openai_backend_api.time.sleep"),
+        ):
+            self.api._start_image_generation("p", ChatRequirements(token="t"), "c", "gpt-image-2")
+        self.assertEqual(request.call_count, 2)
+        self.assertTrue(all(call.kwargs.get("stream") for call in request.call_args_list))
 
 
 if __name__ == "__main__":
