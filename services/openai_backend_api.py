@@ -24,6 +24,7 @@ from PIL import Image
 
 from services.account_service import account_service
 from services.config import config
+from services.proxy_list_service import proxy_list
 from services.proxy_service import proxy_settings
 from utils.helper import (
     UpstreamHTTPError,
@@ -353,12 +354,21 @@ class OpenAIBackendAPI:
     def _retry_cloudflare_challenge(self, request: Callable[[], requests.Response]) -> requests.Response:
         """遇到临时 Cloudflare 挑战时最多尝试三次：每次重试前关掉旧响应、清掉 Cloudflare Cookie。
 
-        挑战在边缘拦截，请求没到上游，重试 POST 不会重复生图。
+        挑战在边缘拦截，请求没到上游，重试 POST 不会重复生图。结果记到代理健康上：
+        拿到非挑战响应算代理正常，重试后仍被挑战或连接出错算一次失败。
         """
-        response = request()
-        for attempt in range(1, 3):
+        proxy_url = getattr(self, "proxy_url", "")
+        for attempt in range(1, 4):
+            try:
+                response = request()
+            except requests.RequestsError as exc:
+                proxy_list.record_failure(proxy_url, str(exc))
+                raise
             if not self._is_cloudflare_challenge(response):
+                proxy_list.record_success(proxy_url)
                 return response
+            if attempt == 3:
+                break
             try:
                 response.close()
             except Exception:
@@ -372,7 +382,7 @@ class OpenAIBackendAPI:
             })
             self._drop_cloudflare_cookies()
             time.sleep(wait_secs)
-            response = request()
+        proxy_list.record_failure(proxy_url, f"Cloudflare challenge (HTTP {response.status_code})")
         return response
 
     def _get_me(self) -> Dict[str, Any]:

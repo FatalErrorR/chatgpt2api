@@ -1098,6 +1098,16 @@ class AccountService:
             self._image_unavailable_until[access_token] = time.monotonic() + seconds
             self._image_slot_condition.notify_all()
 
+    def proxy_account_counts(self) -> dict[str, int]:
+        """每个单独配置的代理上挂了多少个账号。"""
+        counts: dict[str, int] = {}
+        with self._lock:
+            for item in self._accounts.values():
+                proxy = str(item.get("proxy") or "").strip()
+                if proxy:
+                    counts[proxy] = counts.get(proxy, 0) + 1
+        return counts
+
     def same_proxy_tokens(self, access_token: str) -> set[str]:
         """与该号走同一个单独配置的代理（同一出口 IP）的账号；没配代理时返回空集。"""
         with self._lock:

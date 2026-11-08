@@ -349,11 +349,59 @@ export async function fetchModels() {
   return httpRequest<ModelListResponse>("/v1/models");
 }
 
-export async function createAccounts(tokens: string[], accounts: AccountImportPayload[] = [], proxy = "") {
+/** 导入时写到账号上的代理：proxy 是单个代理；distribute_proxies 非空时把新账号平均分到这些代理。 */
+export type ImportProxyChoice = {
+  proxy: string;
+  distribute_proxies: string[];
+};
+
+const NO_IMPORT_PROXY: ImportProxyChoice = { proxy: "", distribute_proxies: [] };
+
+export async function createAccounts(
+  tokens: string[],
+  accounts: AccountImportPayload[] = [],
+  proxyChoice: ImportProxyChoice = NO_IMPORT_PROXY,
+) {
   return httpRequest<AccountMutationResponse>("/api/accounts", {
     method: "POST",
-    body: { tokens, accounts, proxy },
+    body: { tokens, accounts, ...proxyChoice },
   });
+}
+
+export type ProxyHealth = {
+  abnormal: boolean;
+  successes: number;
+  failures: number;
+  consecutive_failures: number;
+  last_error: string;
+  last_failure_at: number | null;
+  last_success_at: number | null;
+};
+
+export type ProxyEntry = {
+  url: string;
+  name: string;
+  masked_url: string;
+  account_count: number;
+  health: ProxyHealth;
+};
+
+type ProxyListResponse = { items: ProxyEntry[] };
+
+export async function fetchProxies() {
+  return httpRequest<ProxyListResponse>("/api/proxies");
+}
+
+export async function addProxy(url: string, name: string) {
+  return httpRequest<ProxyListResponse>("/api/proxies", { method: "POST", body: { url, name } });
+}
+
+export async function renameProxy(url: string, name: string) {
+  return httpRequest<ProxyListResponse>("/api/proxies/update", { method: "POST", body: { url, name } });
+}
+
+export async function deleteProxy(url: string) {
+  return httpRequest<ProxyListResponse>("/api/proxies/delete", { method: "POST", body: { url } });
 }
 
 export type OAuthLoginStartResponse = {
@@ -370,10 +418,14 @@ export async function startOAuthLogin(emailHint?: string) {
   });
 }
 
-export async function finishOAuthLogin(sessionId: string, callback: string, proxy = "") {
+export async function finishOAuthLogin(
+  sessionId: string,
+  callback: string,
+  proxyChoice: ImportProxyChoice = NO_IMPORT_PROXY,
+) {
   return httpRequest<AccountMutationResponse>("/api/accounts/oauth/finish", {
     method: "POST",
-    body: { session_id: sessionId, callback, proxy },
+    body: { session_id: sessionId, callback, ...proxyChoice },
   });
 }
 
@@ -395,14 +447,14 @@ export type ProtocolLoginProgress = {
   items: ProtocolLoginItem[];
 };
 
-export async function startProtocolLogin(text: string, proxy = "") {
+export async function startProtocolLogin(text: string, proxyChoice: ImportProxyChoice = NO_IMPORT_PROXY) {
   return httpRequest<{
     progress_id: string;
     total: number;
     invalid: ProtocolLoginProgress["invalid"];
   }>("/api/accounts/protocol-login", {
     method: "POST",
-    body: { text, proxy },
+    body: { text, ...proxyChoice },
   });
 }
 

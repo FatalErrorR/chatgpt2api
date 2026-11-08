@@ -47,6 +47,7 @@ import {
   deleteAccounts,
   fetchAccounts,
   fetchImageOutputCounts,
+  fetchProxies,
   fetchRefreshProgress,
   fetchImageTestProgress,
   fetchReLoginProgress,
@@ -59,12 +60,14 @@ import {
   type AccountRefreshResponse,
   type AccountStatus,
   type ImageOutputCounts,
+  type ProxyEntry,
   type RefreshProgressResponse,
 } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
-import { AccountImportDialog } from "./components/account-import-dialog";
+import { AccountImportDialog, proxyLabel } from "./components/account-import-dialog";
+import { ProxyManagerDialog } from "./components/proxy-manager-dialog";
 
 type StatusFilter = AccountStatus | "all" | "edit_cooldown";
 
@@ -196,6 +199,8 @@ function AccountsPageContent() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [proxyFilter, setProxyFilter] = useState("all");
+  const [proxies, setProxies] = useState<ProxyEntry[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("10");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -225,6 +230,16 @@ function AccountsPageContent() {
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [refreshSummary, setRefreshSummary] = useState<Record<string, number | string> | null>(null);
 
+  const loadProxies = async () => {
+    try {
+      const data = await fetchProxies();
+      setProxies(data.items);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "加载代理失败";
+      toast.error(message);
+    }
+  };
+
   const loadAccounts = async (silent = false) => {
     if (!silent) {
       setIsLoading(true);
@@ -232,6 +247,7 @@ function AccountsPageContent() {
     try {
       const data = await fetchAccounts();
       setAccounts(data.items);
+      void loadProxies();
       setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.access_token === id)));
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载账户失败";
@@ -275,9 +291,14 @@ function AccountsPageContent() {
       const statusMatched =
         statusFilter === "all" ||
         (statusFilter === "edit_cooldown" ? isEditUploadCooled(account) : account.status === statusFilter);
-      return searchMatched && typeMatched && statusMatched;
+      const accountProxy = (account.proxy || "").trim();
+      const proxyMatched =
+        proxyFilter === "all" || (proxyFilter === "none" ? !accountProxy : accountProxy === proxyFilter);
+      return searchMatched && typeMatched && statusMatched && proxyMatched;
     });
-  }, [accounts, query, statusFilter, typeFilter]);
+  }, [accounts, query, statusFilter, typeFilter, proxyFilter]);
+
+  const proxyByUrl = useMemo(() => new Map(proxies.map((proxy) => [proxy.url, proxy])), [proxies]);
 
   const pageCount = Math.max(1, Math.ceil(filteredAccounts.length / Number(pageSize)));
   const safePage = Math.min(page, pageCount);
@@ -762,6 +783,7 @@ function AccountsPageContent() {
       setAccounts(data.items);
       setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.access_token === id)));
       setEditingAccount(null);
+      void loadProxies();
       toast.success("账号信息已更新");
     } catch (error) {
       const message = error instanceof Error ? error.message : "更新账号失败";
@@ -810,15 +832,15 @@ function AccountsPageContent() {
           </Button>
           <AccountImportDialog
             disabled={isLoading || isRefreshing || isDeleting}
-            proxyOptions={Array.from(
-              new Set(accounts.map((account) => (account.proxy || "").trim()).filter(Boolean)),
-            )}
+            proxies={proxies}
             onImported={(items) => {
               setAccounts(items);
+              void loadProxies();
               setSelectedIds([]);
               setPage(1);
             }}
           />
+          <ProxyManagerDialog proxies={proxies} onChange={setProxies} />
           <Button
             variant="outline"
             className="h-10 rounded-xl border-stone-200 bg-white/80 px-4 text-stone-700 hover:bg-white"
@@ -1028,6 +1050,26 @@ function AccountsPageContent() {
                 ))}
               </SelectContent>
             </Select>
+            <Select
+              value={proxyFilter}
+              onValueChange={(value) => {
+                setProxyFilter(value);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white/85 lg:w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部代理</SelectItem>
+                <SelectItem value="none">未指定代理</SelectItem>
+                {proxies.map((proxy) => (
+                  <SelectItem key={proxy.url} value={proxy.url}>
+                    {proxy.name || proxy.masked_url}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -1203,6 +1245,23 @@ function AccountsPageContent() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="text-xs leading-5 text-stone-500">{account.email ?? "—"}</div>
+                          {(() => {
+                            const url = (account.proxy || "").trim();
+                            if (!url) return null;
+                            const proxy = proxyByUrl.get(url);
+                            return (
+                              <div
+                                className={cn(
+                                  "max-w-56 truncate text-[11px] leading-4",
+                                  proxy?.health.abnormal ? "text-rose-500" : "text-stone-400",
+                                )}
+                                title={proxy ? proxyLabel(proxy) : undefined}
+                              >
+                                代理：{proxy ? proxy.name || proxy.masked_url : "…"}
+                                {proxy?.health.abnormal ? "（异常）" : ""}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 text-xs leading-5 text-stone-500">
                           {(() => {

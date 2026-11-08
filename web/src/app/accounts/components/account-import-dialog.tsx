@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -46,8 +47,10 @@ import {
   startProtocolLogin,
   type Account,
   type AccountImportPayload,
+  type ImportProxyChoice,
   type OAuthLoginStartResponse,
   type ProtocolLoginProgress,
+  type ProxyEntry,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +58,7 @@ type ImportMethod = "menu" | "token" | "session" | "codex-auth" | "account-json"
 
 type AccountImportDialogProps = {
   disabled?: boolean;
-  proxyOptions?: string[];
+  proxies?: ProxyEntry[];
   onImported: (items: Account[]) => void;
 };
 
@@ -194,7 +197,11 @@ function MethodCard({
   );
 }
 
-export function AccountImportDialog({ disabled, proxyOptions = [], onImported }: AccountImportDialogProps) {
+export function proxyLabel(proxy: ProxyEntry) {
+  return proxy.name ? `${proxy.name}（${proxy.masked_url}）` : proxy.masked_url;
+}
+
+export function AccountImportDialog({ disabled, proxies = [], onImported }: AccountImportDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<ImportMethod>("menu");
@@ -210,6 +217,7 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
   const [oauthStarting, setOauthStarting] = useState(false);
   const [proxyChoice, setProxyChoice] = useState("none");
   const [newProxy, setNewProxy] = useState("");
+  const [distributeUrls, setDistributeUrls] = useState<string[]>([]);
   const [protocolInput, setProtocolInput] = useState("");
   const [protocolProgress, setProtocolProgress] = useState<ProtocolLoginProgress | null>(null);
   const [protocolRunning, setProtocolRunning] = useState(false);
@@ -238,15 +246,23 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
     setOauthStarting(false);
     setProxyChoice("none");
     setNewProxy("");
+    setDistributeUrls([]);
     protocolAbortRef.current = true;
     setProtocolInput("");
     setProtocolProgress(null);
     setProtocolRunning(false);
   };
 
-  const importProxy = () => {
+  const importProxy = (): ImportProxyChoice | null => {
     if (proxyChoice === "none") {
-      return "";
+      return { proxy: "", distribute_proxies: [] };
+    }
+    if (proxyChoice === "distribute") {
+      if (distributeUrls.length === 0) {
+        toast.error("平均分配至少要选一个代理");
+        return null;
+      }
+      return { proxy: "", distribute_proxies: distributeUrls };
     }
     if (proxyChoice === "new") {
       const url = newProxy.trim();
@@ -254,9 +270,21 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
         toast.error("请填写新代理地址");
         return null;
       }
-      return url;
+      return { proxy: url, distribute_proxies: [] };
     }
-    return proxyChoice;
+    return { proxy: proxyChoice, distribute_proxies: [] };
+  };
+
+  const handleProxyChoiceChange = (value: string) => {
+    setProxyChoice(value);
+    if (value === "distribute") {
+      // 默认勾选所有正常代理
+      setDistributeUrls(proxies.filter((proxy) => !proxy.health.abnormal).map((proxy) => proxy.url));
+    }
+  };
+
+  const toggleDistributeUrl = (url: string, checked: boolean) => {
+    setDistributeUrls((prev) => (checked ? [...prev, url] : prev.filter((item) => item !== url)));
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -1007,21 +1035,42 @@ export function AccountImportDialog({ disabled, proxyOptions = [], onImported }:
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-stone-700">导入代理</label>
-            <Select value={proxyChoice} onValueChange={setProxyChoice}>
+            <Select value={proxyChoice} onValueChange={handleProxyChoiceChange}>
               <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">不指定，走全局代理</SelectItem>
-                {proxyOptions.map((proxy) => (
-                  <SelectItem key={proxy} value={proxy}>
-                    {proxy}
+                {proxies.length > 1 ? <SelectItem value="distribute">平均分配到多个代理</SelectItem> : null}
+                {proxies.map((proxy) => (
+                  <SelectItem key={proxy.url} value={proxy.url}>
+                    {proxyLabel(proxy)}
+                    {proxy.health.abnormal ? "（异常）" : ""}
                   </SelectItem>
                 ))}
                 <SelectItem value="new">使用新代理</SelectItem>
               </SelectContent>
             </Select>
-            {proxyChoice === "new" ? (
+            {proxyChoice === "distribute" ? (
+              <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-3">
+                {proxies.map((proxy) => (
+                  <label key={proxy.url} className="flex items-center gap-2 text-sm text-stone-700">
+                    <Checkbox
+                      checked={distributeUrls.includes(proxy.url)}
+                      onCheckedChange={(checked) => toggleDistributeUrl(proxy.url, checked === true)}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{proxyLabel(proxy)}</span>
+                    <span className={cn("shrink-0 text-xs", proxy.health.abnormal ? "text-rose-500" : "text-stone-400")}>
+                      {proxy.health.abnormal ? "异常 · " : ""}
+                      {proxy.account_count} 个账号
+                    </span>
+                  </label>
+                ))}
+                <p className="text-xs text-stone-500">
+                  新账号依次分给账号数最少的代理；已在号池里的账号保留原代理。异常代理会被跳过。
+                </p>
+              </div>
+            ) : proxyChoice === "new" ? (
               <Input
                 value={newProxy}
                 onChange={(event) => setNewProxy(event.target.value)}
