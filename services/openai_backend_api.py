@@ -93,6 +93,8 @@ FINGERPRINT_FULL_VERSION_LIST = (
 )
 CLIENT_CREATED_ROOT = "client-created-root"
 CLOUDFLARE_COOKIE_PREFIXES = ("__cf", "_cf", "cf_")
+IMAGE_DOWNLOAD_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+IMAGE_DOWNLOAD_ATTEMPTS = 4
 IMAGE_CREATION_MENTION = "@创建图像"
 CODEX_RESPONSES_MODEL = "gpt-5.5"
 SEARCH_MODEL = "gpt-5-5"
@@ -2674,11 +2676,41 @@ class OpenAIBackendAPI:
     def download_image_bytes(self, urls: list[str]) -> list[bytes]:
         images = []
         for url in urls:
-            response = self.session.get(url, timeout=120)
-            ensure_ok(response, "image_download")
+            response = self._download_image(url)
             if response.content not in images:
                 images.append(response.content)
         return images
+
+    def _download_image(self, url: str) -> requests.Response:
+        """下载一张已生成的图片：存储端 503 ServerBusy、其他 5xx、429 或连接中断时按 1 / 2 / 4 秒退避重试，
+        有 Retry-After 时按它等（最多 10 秒）。图已生成、额度已扣，下载失败就白生成了。"""
+        host = urlparse(url).netloc
+        for attempt in range(1, IMAGE_DOWNLOAD_ATTEMPTS):
+            wait_secs = 2.0 ** (attempt - 1)
+            try:
+                response = self.session.get(url, timeout=120)
+            except Exception as exc:
+                reason = str(exc)[:200]
+            else:
+                if response.status_code not in IMAGE_DOWNLOAD_RETRY_STATUSES:
+                    ensure_ok(response, "image_download")
+                    return response
+                reason = f"HTTP {response.status_code}"
+                retry_after = str(response.headers.get("Retry-After") or "").strip()
+                if retry_after.isdigit():
+                    wait_secs = min(float(retry_after), 10.0)
+            # 链接带签名，日志只记域名
+            logger.warning({
+                "event": "image_download_retry",
+                "host": host,
+                "attempt": attempt,
+                "reason": reason,
+                "wait_secs": wait_secs,
+            })
+            time.sleep(wait_secs)
+        response = self.session.get(url, timeout=120)
+        ensure_ok(response, "image_download")
+        return response
 
     def stream_conversation(
             self,
