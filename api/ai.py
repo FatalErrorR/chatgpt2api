@@ -5,7 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.image_inputs import parse_image_edit_request, read_image_sources
+from api.image_inputs import has_json_image_reference, parse_image_edit_request, read_image_sources
 from api.support import require_identity, resolve_image_base_url
 from services.content_filter import check_request, request_shape, request_text
 from services.editable_file_task_service import editable_file_task_service
@@ -97,6 +97,8 @@ def create_router() -> APIRouter:
             request: Request,
             authorization: str | None = Header(default=None),
     ):
+        if await has_json_image_reference(request):
+            return await edit_images(request, authorization)
         identity = require_identity(authorization)
         payload = body.model_dump(mode="python")
         payload["base_url"] = resolve_image_base_url(request)

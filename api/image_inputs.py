@@ -159,6 +159,17 @@ def _json_image_sources(body: dict[str, Any]) -> list[ImageSource]:
     return sources
 
 
+async def has_json_image_reference(request: Request) -> bool:
+    """生图请求里是否带了参考图：有些客户端把参考图放进 generations 请求，需要转去 edits。"""
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+        return False
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return False
+    return isinstance(body, dict) and any(body.get(key) for key in ("images", "image", "image_url"))
+
+
 def _json_mask_sources(body: dict[str, Any]) -> list[ImageSource]:
     """读取 JSON mask 引用。"""
     mask = body.get("mask")
