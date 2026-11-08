@@ -397,6 +397,14 @@ class ConfigStore:
             return 5
 
     @property
+    def api_threadpool_tokens(self) -> int:
+        """AnyIO run_in_threadpool 全局线程数：默认只有 40，生图长任务一多就会占满并拖住所有接口。"""
+        try:
+            return max(40, min(2048, int(self.data.get("api_threadpool_tokens", 256))))
+        except (TypeError, ValueError):
+            return 256
+
+    @property
     def image_retention_days(self) -> int:
         try:
             return max(1, int(self.data.get("image_retention_days", 30)))
