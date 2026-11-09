@@ -160,12 +160,6 @@ function formatQuotaSummary(accounts: Account[]) {
   return formatCompact(availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0));
 }
 
-function maskToken(token?: string) {
-  if (!token) return "—";
-  if (token.length <= 18) return token;
-  return `${token.slice(0, 16)}...${token.slice(-8)}`;
-}
-
 function downloadTokens(accounts: Account[]) {
   const content = `${accounts.map((account) => account.access_token).join("\n")}\n`;
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -1160,17 +1154,18 @@ function AccountsPageContent() {
                         onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))}
                       />
                     </th>
-                    <th className="w-56 px-4 py-3">token</th>
-                    <th className="w-28 px-4 py-3">类型</th>
-                    <th className="w-24 px-4 py-3">来源</th>
-                    <th className="w-24 px-4 py-3">状态</th>
                     <th className="w-56 px-4 py-3">账号信息</th>
-                    <th className="w-32 px-4 py-3">创建时间</th>
+                    <th className="w-40 px-4 py-3">代理</th>
+                    <th className="w-24 px-4 py-3">类型</th>
+                    <th className="w-24 px-4 py-3">状态</th>
                     <th className="w-24 px-4 py-3">额度</th>
                     <th className="w-40 px-4 py-3">恢复时间</th>
+                    <th className="w-32 px-4 py-3">创建时间</th>
                     <th className="w-18 px-4 py-3">在途</th>
                     <th className="w-18 px-4 py-3">成功</th>
                     <th className="w-18 px-4 py-3">失败</th>
+                    <th className="w-24 px-4 py-3">来源</th>
+                    <th className="w-20 px-4 py-3">token</th>
                     <th className="w-24 px-4 py-3">操作</th>
                   </tr>
                 </thead>
@@ -1201,30 +1196,27 @@ function AccountsPageContent() {
                           />
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium tracking-tight text-stone-700">
-                              {maskToken(account.access_token)}
-                            </span>
-                            <button
-                              type="button"
-                              className="rounded-lg p-1 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
-                              onClick={() => {
-                                void navigator.clipboard.writeText(account.access_token);
-                                toast.success("token 已复制");
-                              }}
-                            >
-                              <Copy className="size-4" />
-                            </button>
-                          </div>
+                          <div className="text-xs leading-5 text-stone-600">{account.email ?? "—"}</div>
+                        </td>
+                        <td className="px-4 py-3 text-xs leading-5">
+                          {(() => {
+                            const url = (account.proxy || "").trim();
+                            if (!url) return <span className="text-stone-400">—</span>;
+                            const proxy = proxyForAccount(proxyByKey, account);
+                            return (
+                              <div
+                                className={cn("max-w-48 truncate", proxy?.health.abnormal ? "text-rose-500" : "text-stone-500")}
+                                title={proxy ? proxyLabel(proxy) : undefined}
+                              >
+                                {proxy ? proxy.name || proxy.masked_url : "…"}
+                                {proxy?.health.abnormal ? "（异常）" : ""}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3">
                           <Badge variant="secondary" className="rounded-md bg-stone-100 text-stone-700">
                             {displayAccountType(account)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="rounded-md border-stone-200 text-stone-600">
-                            {displayAccountSource(account)}
                           </Badge>
                         </td>
                         <td className="px-4 py-3">
@@ -1241,37 +1233,6 @@ function AccountsPageContent() {
                               <div className="text-[11px] font-medium text-amber-700">图生图冷却</div>
                             ) : null}
                           </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="text-xs leading-5 text-stone-500">{account.email ?? "—"}</div>
-                          {(() => {
-                            const url = (account.proxy || "").trim();
-                            if (!url) return null;
-                            const proxy = proxyForAccount(proxyByKey, account);
-                            return (
-                              <div
-                                className={cn(
-                                  "max-w-56 truncate text-[11px] leading-4",
-                                  proxy?.health.abnormal ? "text-rose-500" : "text-stone-400",
-                                )}
-                                title={proxy ? proxyLabel(proxy) : undefined}
-                              >
-                                代理：{proxy ? proxy.name || proxy.masked_url : "…"}
-                                {proxy?.health.abnormal ? "（异常）" : ""}
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-4 py-3 text-xs leading-5 text-stone-500">
-                          {(() => {
-                            const raw = (account as any).created_at;
-                            if (!raw) return "—";
-                            try {
-                              const d = new Date(raw + "Z");
-                              if (isNaN(d.getTime())) return String(raw).slice(0, 10);
-                              return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-                            } catch { return String(raw).slice(0, 10); }
-                          })()}
                         </td>
                         <td className="px-4 py-3">
                           <Badge variant="info" className="rounded-md">
@@ -1300,6 +1261,17 @@ function AccountsPageContent() {
                             );
                           })()}
                         </td>
+                        <td className="px-4 py-3 text-xs leading-5 text-stone-500">
+                          {(() => {
+                            const raw = (account as any).created_at;
+                            if (!raw) return "—";
+                            try {
+                              const d = new Date(raw + "Z");
+                              if (isNaN(d.getTime())) return String(raw).slice(0, 10);
+                              return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+                            } catch { return String(raw).slice(0, 10); }
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
                           {(() => {
                             const inflight = account.image_inflight ?? 0;
@@ -1323,6 +1295,24 @@ function AccountsPageContent() {
                         </td>
                         <td className="px-4 py-3 text-stone-500">{account.success}</td>
                         <td className="px-4 py-3 text-stone-500">{account.fail}</td>
+                        <td className="px-4 py-3">
+                          <Badge variant="outline" className="rounded-md border-stone-200 text-stone-600">
+                            {displayAccountSource(account)}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-2 py-1 text-xs text-stone-500 transition hover:bg-stone-100 hover:text-stone-700"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(account.access_token);
+                              toast.success("token 已复制");
+                            }}
+                          >
+                            <Copy className="size-3.5" />
+                            复制
+                          </button>
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1 text-stone-400">
                             <button
