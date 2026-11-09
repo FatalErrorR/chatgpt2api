@@ -40,6 +40,8 @@ export type Account = {
   last_refresh_error?: string | null;
   last_token_refresh_error?: string | null;
   proxy?: string | null;
+  /** 后端按代理清单同一规则算出的识别值，用来匹配代理名称、健康和筛选；proxy 本身不变 */
+  proxy_key?: string;
 };
 
 export type AccountImportPayload = {
@@ -380,6 +382,8 @@ export type ProxyHealth = {
 
 export type ProxyEntry = {
   url: string;
+  /** 同一代理不同写法（如 socks5:// 与 socks5h://）共用的识别值，与 Account.proxy_key 对应 */
+  key: string;
   name: string;
   masked_url: string;
   account_count: number;

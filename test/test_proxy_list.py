@@ -1,15 +1,24 @@
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from curl_cffi import requests
 from curl_cffi.requests import Headers
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import api.accounts as accounts_module
+import api.proxies as proxies_module
+import services.openai_backend_api as backend_module
+import services.protocol_login_service as protocol_login_module
+from services.account_service import AccountService
 from services.openai_backend_api import OpenAIBackendAPI
 from services.protocol_login_service import ProtocolLoginService
-from services.proxy_list_service import FAILURE_THRESHOLD, ProxyList, mask_proxy_url
+from services.proxy_list_service import FAILURE_THRESHOLD, ProxyList, mask_proxy_url, proxy_key
+from services.storage.json_storage import JSONStorageBackend
 
 A = "http://user:secret@1.1.1.1:8000"
 B = "http://2.2.2.2:8000"
@@ -49,8 +58,8 @@ class ProxyListTests(unittest.TestCase):
         self.proxies.rename(A, " 主力 ")
         self.assertEqual(self.proxies.list_entries({})[0]["name"], "主力")
         with self.assertRaisesRegex(ValueError, "2 个账号"):
-            self.proxies.delete(A, 2)
-        self.proxies.delete(A, 0)
+            self.proxies.delete(A, {A: 2})
+        self.proxies.delete(A, {B: 1})
         self.assertEqual(self.proxies.list_entries({}), [])
 
     def test_consecutive_failures_mark_abnormal_and_success_recovers(self):
@@ -63,18 +72,38 @@ class ProxyListTests(unittest.TestCase):
         health = self.proxies.list_entries({A: 1})[0]["health"]
         self.assertEqual((health["failures"], health["successes"], health["last_error"]), (FAILURE_THRESHOLD, 1, "boom"))
 
-    def test_distribute_fills_least_loaded_counting_existing_accounts(self):
-        self.assertEqual(self.proxies.distribute([A, B, C], 5, {A: 2, B: 0}), [B, C, B, C, A])
+    def test_reserve_fills_least_loaded_counting_existing_accounts(self):
+        self.assertEqual(self.proxies.reserve([A, B, C], 5, lambda: {A: 2, B: 0}), [B, C, B, C, A])
 
-    def test_distribute_skips_abnormal_unless_all_are_abnormal(self):
+    def test_reserve_skips_abnormal_unless_all_are_abnormal(self):
         self.fail_times(B)
-        self.assertEqual(self.proxies.distribute([A, B], 3, {}), [A, A, A])
+        self.assertEqual(self.proxies.reserve([A, B], 3, dict), [A, A, A])
+        self.proxies.release([A, A, A])
         self.fail_times(A)
-        self.assertEqual(self.proxies.distribute([A, B], 2, {}), [A, B])
+        self.assertEqual(self.proxies.reserve([A, B], 2, dict), [A, B])
 
-    def test_distribute_requires_a_candidate(self):
+    def test_reserve_requires_a_candidate(self):
         with self.assertRaises(ValueError):
-            self.proxies.distribute(["", " "], 1, {})
+            self.proxies.reserve(["", " "], 1, dict)
+
+    def test_reservations_count_until_released(self):
+        self.assertEqual(self.proxies.reserve([A, B], 2, dict), [A, B])
+        self.assertEqual(self.proxies.reserve([A, B], 2, dict), [A, B])
+        self.proxies.release([A, A])
+        self.assertEqual(self.proxies.reserve([A, B], 2, dict), [A, A])
+        self.proxies.release([A, A, B, B, B])  # 多释放不会变负数
+        self.assertEqual(self.proxies._reserved, {})
+
+    def test_spellings_of_one_proxy_share_entry_health_and_load(self):
+        self.proxies.add("socks5://3.3.3.3:1080")
+        with self.assertRaisesRegex(ValueError, "已经在清单里"):
+            self.proxies.add("SOCKS5H://3.3.3.3:1080/")
+        self.fail_times("socks5h://3.3.3.3:1080")
+        [item] = self.proxies.list_entries({"socks5://3.3.3.3:1080": 1, "socks5h://3.3.3.3:1080": 2})
+        self.assertEqual((item["url"], item["account_count"], item["health"]["abnormal"]), (C, 3, True))
+        with self.assertRaisesRegex(ValueError, "3 个账号"):
+            self.proxies.delete("socks5h://3.3.3.3:1080", {C: 1, "socks5h://3.3.3.3:1080": 2})
+        self.assertEqual(self.proxies.reserve(["1.1.1.1:8000", "http://1.1.1.1:8000"], 1, dict), ["1.1.1.1:8000"])
 
 
 class ProxyHealthHookTests(unittest.TestCase):
@@ -122,57 +151,274 @@ class ProxyHealthHookTests(unittest.TestCase):
 
 
 class ImportDistributionTests(unittest.TestCase):
+    """走公开 API 和完整协议登录流程；账号、代理清单都在临时目录，不连上游。"""
+
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
+        self.accounts = AccountService(JSONStorageBackend(Path(self.dir.name) / "accounts.json"))
         self.proxies = ProxyList(Path(self.dir.name) / "proxies.json")
-        accounts = [{"access_token": "old", "email": "old@example.com", "proxy": B}]
-        for target, attr, value in (
-            (accounts_module, "proxy_list", self.proxies),
-            ("services.protocol_login_service.proxy_list", None, self.proxies),
-        ):
-            patcher = mock.patch.object(target, attr, value) if attr else mock.patch(target, value)
+        modules = (accounts_module, proxies_module, protocol_login_module, backend_module)
+        patchers = [mock.patch.object(module, "account_service", self.accounts) for module in modules]
+        patchers += [mock.patch.object(module, "proxy_list", self.proxies) for module in modules]
+        patchers += [mock.patch.object(module, "require_admin", lambda *_: {"role": "admin"})
+                     for module in (accounts_module, proxies_module)]
+        patchers.append(mock.patch.object(self.accounts, "refresh_accounts", self.fake_refresh))
+        for patcher in patchers:
             patcher.start()
             self.addCleanup(patcher.stop)
-        service = mock.patch.multiple(
-            "services.account_service.account_service",
-            get_account=lambda token: accounts[0] if token == "old" else None,
-            proxy_account_counts=lambda: {B: 1},
-            list_accounts=lambda: accounts,
-        )
-        service.start()
-        self.addCleanup(service.stop)
+        app = FastAPI()
+        app.include_router(accounts_module.create_router())
+        app.include_router(proxies_module.create_router())
+        self.client = TestClient(app)
 
-    def test_token_import_distributes_only_new_tokens(self):
-        assigned = accounts_module._import_proxies(["old", "t1", "t2", "t3"], "", [A, B])
-        self.assertEqual(assigned, {"t1": A, "t2": A, "t3": B})
+    def fake_refresh(self, tokens):
+        return {"refreshed": 0, "errors": [], "items": self.accounts.list_accounts()}
 
-    def test_token_import_single_proxy_is_unchanged(self):
-        self.assertEqual(accounts_module._import_proxies(["old", "t1"], C, []), {"old": C, "t1": C})
-        self.assertEqual(accounts_module._import_proxies(["t1"], "", []), {})
+    def proxy_of(self, token):
+        return (self.accounts.get_account(token) or {}).get("proxy") or ""
 
-    def test_plain_tokens_without_proxy_never_write_an_empty_proxy(self):
+    def listed(self, url):
+        return next(item for item in self.client.get("/api/proxies").json()["items"] if item["url"] == url)
+
+    def import_accounts(self, **body):
+        response = self.client.post("/api/accounts", json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    # ── 1. 健康记录与清单、分配用同一个识别值 ──────────────
+    def test_socks5_proxy_health_matches_the_requests_and_abnormal_proxy_is_skipped(self):
+        self.accounts.add_account_items([{"access_token": "s0", "proxy": C}])
+        api = OpenAIBackendAPI("s0")
+        self.addCleanup(api.close)
+        self.assertEqual(api.proxy_url, "socks5h://3.3.3.3:1080")  # 实际请求用的是归一化后的地址
+        challenge = mock.Mock(status_code=403, headers=Headers({"Content-Type": "text/html"}))
         with (
-            mock.patch("services.account_service.account_service.add_accounts", return_value={}) as add_accounts,
-            mock.patch("services.account_service.account_service.add_account_items", return_value={}) as add_items,
+            mock.patch.object(api.session, "get", return_value=challenge),
+            mock.patch("services.openai_backend_api.time.sleep"),
         ):
-            accounts_module._add_plain_tokens(["old"], {})
-            accounts_module._add_plain_tokens(["old", "t1"], {"t1": A})
-        add_accounts.assert_called_once_with(["old"])
-        self.assertEqual(add_items.call_args.args[0], [
-            {"access_token": "old", "source_type": "web"},
-            {"access_token": "t1", "source_type": "web", "proxy": A},
+            for _ in range(FAILURE_THRESHOLD):
+                with self.assertRaises(RuntimeError):
+                    api._get_me()
+        health = self.listed(C)["health"]
+        self.assertEqual((health["abnormal"], health["failures"]), (True, FAILURE_THRESHOLD))
+        self.assertEqual(self.listed(C)["account_count"], 1)
+
+        self.import_accounts(tokens=["n1", "n2"], distribute_proxies=[C, B])
+        self.assertEqual((self.proxy_of("n1"), self.proxy_of("n2")), (B, B))
+        self.assertEqual(self.proxy_of("s0"), C)  # 账号上的原始写法不改
+
+        self.proxies.record_success(api.proxy_url)
+        self.assertFalse(self.listed(C)["health"]["abnormal"])
+
+    def test_a_proxy_written_two_ways_is_one_entry_with_combined_load(self):
+        self.accounts.add_account_items([
+            {"access_token": "x1", "proxy": C},
+            {"access_token": "x2", "proxy": "socks5h://3.3.3.3:1080"},
         ])
+        items = self.client.get("/api/proxies").json()["items"]
+        self.assertEqual([(item["url"], item["account_count"]) for item in items], [(C, 2)])
+        response = self.client.post("/api/proxies/delete", json={"url": "socks5h://3.3.3.3:1080"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("2 个账号", response.json()["detail"]["error"])
+        self.accounts.add_account_items([{"access_token": "b1", "proxy": B}])
+        self.import_accounts(tokens=["n1"], distribute_proxies=["socks5h://3.3.3.3:1080", B])
+        self.assertEqual(self.proxy_of("n1"), B)
 
-    def test_protocol_login_assigns_before_login_and_keeps_existing_email_proxy(self):
-        entries = [{"email": "OLD@example.com"}, {"email": "n1@example.com"}, {"email": "n2@example.com"}]
-        ProtocolLoginService._assign_proxies(entries, "", [A, B])
-        self.assertEqual([entry["proxy"] for entry in entries], [B, A, A])
+    # ── 2. 平均分配不动已存在账号的代理 ──────────────────
+    def test_distribute_keeps_existing_proxies_even_when_the_json_carries_one(self):
+        self.accounts.add_account_items([
+            {"access_token": "old", "proxy": "http://original:80"},
+            {"access_token": "old-direct"},
+        ])
+        imported = "http://imported:80"
+        result = self.import_accounts(
+            accounts=[
+                {"access_token": "old", "proxy": imported},
+                {"access_token": "old-direct", "proxy": imported},
+                {"access_token": "new", "proxy": imported},
+            ],
+            tokens=["old", "new-plain"],
+            distribute_proxies=[A, B],
+        )
+        self.assertEqual((result["added"], result["skipped"]), (2, 2))
+        self.assertEqual(self.proxy_of("old"), "http://original:80")
+        self.assertEqual(self.proxy_of("old-direct"), "")
+        self.assertEqual((self.proxy_of("new-plain"), self.proxy_of("new")), (A, B))  # tokens 排在 JSON 前
+        self.assertEqual(self.proxies._reserved, {})
 
-    def test_protocol_login_single_proxy_is_unchanged(self):
-        entries = [{"email": "old@example.com"}, {"email": "n1@example.com"}]
-        ProtocolLoginService._assign_proxies(entries, C, [])
-        self.assertEqual([entry["proxy"] for entry in entries], [C, C])
+    def test_without_distribute_the_json_and_body_proxy_behave_as_before(self):
+        self.accounts.add_account_items([{"access_token": "old", "proxy": "http://original:80"}])
+        self.import_accounts(accounts=[{"access_token": "old", "proxy": "http://imported:80"}])
+        self.assertEqual(self.proxy_of("old"), "http://imported:80")
+        self.import_accounts(accounts=[{"access_token": "old", "proxy": "http://imported:80"}], tokens=["t1"], proxy=B)
+        self.assertEqual((self.proxy_of("old"), self.proxy_of("t1")), (B, B))
+        self.import_accounts(tokens=["t2"])
+        self.assertEqual(self.proxy_of("t2"), "")
+
+    # ── 3. 协议登录跨批次预留 ─────────────────────────────
+    def login_service(self, login):
+        return ProtocolLoginService(login=login)
+
+    @staticmethod
+    def lines(prefix, count):
+        return "\n".join(f"{prefix}{i}@example.com----pw" for i in range(count))
+
+    def wait_done(self, service, *progress_ids):
+        for _ in range(200):
+            if all(service.get_progress(pid)["status"] == "done" for pid in progress_ids):
+                return
+            time.sleep(0.02)
+        self.fail("protocol login did not finish")
+
+    def test_overlapping_login_batches_count_each_others_pending_accounts(self):
+        self.accounts.add_account_items([{"access_token": f"a{i}", "proxy": A} for i in range(10)])
+        self.accounts.add_account_items([{"access_token": "kept", "email": "kept@example.com", "proxy": C}])
+        gate = threading.Event()
+
+        def login(email, password, totp_secret):
+            gate.wait(5)
+            return {"ok": True, "access_token": "tok-" + email, "email": email}
+
+        service = self.login_service(login)
+        first = service.start(self.lines("one", 10), distribute_proxies=[A, B])
+        second = service.start(self.lines("two", 10) + "\nkept@example.com----pw", distribute_proxies=[A, B])
+        self.assertEqual(self.proxies._reserved, {proxy_key(B): 15, proxy_key(A): 5})
+        gate.set()
+        self.wait_done(service, first["progress_id"], second["progress_id"])
+
+        assigned = {account["email"]: account.get("proxy") or "" for account in self.accounts.list_accounts() if account.get("email")}
+        self.assertEqual({assigned[f"one{i}@example.com"] for i in range(10)}, {B})
+        second_batch = [assigned[f"two{i}@example.com"] for i in range(10)]
+        self.assertEqual((second_batch.count(A), second_batch.count(B)), (5, 5))
+        self.assertEqual(assigned["kept@example.com"], C)  # 已在号池的邮箱沿用原代理，不占名额
+        counts = self.accounts.proxy_account_counts()
+        self.assertEqual((counts[A], counts[B], counts[C]), (15, 15, 1))
+        self.assertEqual(self.proxies._reserved, {})
+
+    def test_failed_logins_release_their_reservations(self):
+        def login(email, password, totp_secret, proxy=""):
+            if email.startswith("bad"):
+                return {"ok": False, "error": "wrong password"}
+            if email.startswith("boom"):
+                raise RuntimeError("upstream exploded")
+            return {"ok": True, "access_token": "tok-" + email, "email": email}
+
+        service = self.login_service(login)
+        text = "\n".join([self.lines("ok", 2), self.lines("bad", 2), self.lines("boom", 2)])
+        progress = service.start(text, distribute_proxies=[A, B], run_async=False)
+        self.assertEqual(service.get_progress(progress["progress_id"])["success"], 2)
+        self.assertEqual(self.proxies._reserved, {})
+        self.assertEqual(sum(self.accounts.proxy_account_counts().values()), 2)
+        # 失败的名额已释放，下一批按实际账号数分
+        self.assertEqual(self.proxies.reserve([A, B], 2, self.accounts.proxy_account_counts), [A, B])
+
+    def test_a_batch_that_dies_releases_every_reservation(self):
+        service = self.login_service(lambda *args, **kwargs: {"ok": True})
+        with mock.patch.object(protocol_login_module, "ThreadPoolExecutor", side_effect=RuntimeError("no threads")):
+            with self.assertRaises(RuntimeError):
+                service.start(self.lines("n", 4), distribute_proxies=[A, B], run_async=False)
+        self.assertEqual(self.proxies._reserved, {})
+        with mock.patch.object(protocol_login_module.threading.Thread, "start", side_effect=RuntimeError("no thread")):
+            with self.assertRaises(RuntimeError):
+                service.start(self.lines("m", 4), distribute_proxies=[A, B])
+        self.assertEqual(self.proxies._reserved, {})
+
+    def test_reservation_is_released_before_refresh_so_the_next_batch_sees_real_load(self):
+        self.accounts.add_account_items([{"access_token": f"a{i}", "proxy": A} for i in range(2)])
+        first_tokens = {"tok-f0@example.com", "tok-f1@example.com"}
+        saved = threading.Semaphore(0)
+        finish_refresh = threading.Event()
+        self.addCleanup(finish_refresh.set)
+
+        def refresh(tokens):
+            if set(tokens) & first_tokens:
+                saved.release()
+                finish_refresh.wait(5)  # 第一批：已入库，卡在刷新额度
+            return self.fake_refresh(tokens)
+
+        login = lambda email, password, totp: {"ok": True, "access_token": "tok-" + email, "email": email}
+        service = self.login_service(login)
+        with mock.patch.object(self.accounts, "refresh_accounts", refresh):
+            first = service.start(self.lines("f", 2), distribute_proxies=[A, B])
+            self.assertTrue(saved.acquire(timeout=5) and saved.acquire(timeout=5))
+            self.assertEqual(self.accounts.proxy_account_counts(), {A: 2, B: 2})
+            self.assertEqual(self.proxies._reserved, {})  # 已入库的不再同时占预留
+            service.start(self.lines("g", 2), distribute_proxies=[A, B], run_async=False)
+            finish_refresh.set()
+            self.wait_done(service, first["progress_id"])
+        self.assertEqual(self.accounts.proxy_account_counts(), {A: 3, B: 3})
+        self.assertEqual(self.proxies._reserved, {})
+
+    def test_refresh_failure_does_not_release_another_batchs_reservation(self):
+        hold_login = threading.Event()
+        self.addCleanup(hold_login.set)
+
+        def login(email, password, totp):
+            if email.startswith("wait"):
+                hold_login.wait(5)
+            return {"ok": True, "access_token": "tok-" + email, "email": email}
+
+        def refresh(tokens):
+            raise RuntimeError("quota refresh failed")
+
+        service = self.login_service(login)
+        with mock.patch.object(self.accounts, "refresh_accounts", refresh):
+            waiting = service.start(self.lines("wait", 2), distribute_proxies=[A, B])  # 预留 A、B 各一
+            self.assertEqual(self.proxies._reserved, {proxy_key(A): 1, proxy_key(B): 1})
+            done = service.start(self.lines("ok", 2), distribute_proxies=[A, B], run_async=False)
+            progress = service.get_progress(done["progress_id"])
+            self.assertEqual(progress["failed"], 2)  # 刷新失败记为失败，但账号已入库
+            self.assertEqual(self.accounts.proxy_account_counts(), {A: 1, B: 1})
+            self.assertEqual(self.proxies._reserved, {proxy_key(A): 1, proxy_key(B): 1})  # 另一批的预留原样保留
+            hold_login.set()
+            self.wait_done(service, waiting["progress_id"])
+        self.assertEqual(self.accounts.proxy_account_counts(), {A: 2, B: 2})
+        self.assertEqual(self.proxies._reserved, {})
+
+    # ── 代理别名：前端靠后端给的 key 匹配 ──────────────────
+    def test_accounts_and_proxy_list_expose_the_same_key_for_aliases(self):
+        socks5h = "socks5h://3.3.3.3:1080"
+        self.accounts.add_account_items([
+            {"access_token": "x1", "proxy": C},
+            {"access_token": "x2", "proxy": socks5h},
+            {"access_token": "d1"},
+        ])
+        [entry] = self.client.get("/api/proxies").json()["items"]
+        self.assertEqual((entry["url"], entry["key"], entry["account_count"]), (C, proxy_key(C), 2))
+
+        def keys(items):
+            return {item["access_token"]: (item.get("proxy") or "", item["proxy_key"]) for item in items}
+
+        expected = {"x1": (C, entry["key"]), "x2": (socks5h, entry["key"]), "d1": ("", "")}
+        self.assertEqual(keys(self.client.get("/api/accounts").json()["items"]), expected)  # 初次加载
+
+        imported = self.import_accounts(tokens=["n1"], distribute_proxies=[C])  # 导入完成
+        self.assertEqual(keys(imported["items"])["n1"], (C, entry["key"]))
+        self.assertEqual({k: v for k, v in keys(imported["items"]).items() if k != "n1"}, expected)
+
+        response = self.client.post("/api/accounts/update", json={"access_token": "d1", "proxy": socks5h})  # 修改账号
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["item"]["proxy_key"], entry["key"])
+        self.assertEqual(keys(response.json()["items"])["d1"], (socks5h, entry["key"]))
+        removed = self.client.request("DELETE", "/api/accounts", json={"tokens": ["n1"]})  # 删除后的列表也带 key
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(keys(removed.json()["items"])["x2"], (socks5h, entry["key"]))
+        self.assertEqual([item["account_count"] for item in self.client.get("/api/proxies").json()["items"]], [3])
+
+    def test_proxy_key_is_derived_and_never_stored(self):
+        self.import_accounts(accounts=[{"access_token": "j1", "proxy": C, "proxy_key": "bogus"}])
+        self.assertEqual(self.client.get("/api/accounts").json()["items"][0]["proxy_key"], proxy_key(C))
+        self.assertEqual(self.accounts.get_account("j1")["proxy"], C)  # 原始写法不改
+        stored = (Path(self.dir.name) / "accounts.json").read_text(encoding="utf-8")
+        self.assertNotIn("proxy_key", stored)
+        self.assertNotIn("bogus", stored)
+
+    def test_single_proxy_login_is_unchanged(self):
+        service = self.login_service(lambda email, password, totp: {"ok": True, "access_token": "tok-" + email, "email": email})
+        service.start(self.lines("n", 2), proxy=C, run_async=False)
+        self.assertEqual([self.proxy_of(f"tok-n{i}@example.com") for i in range(2)], [C, C])
+        self.assertEqual(self.proxies._reserved, {})
 
 
 if __name__ == "__main__":

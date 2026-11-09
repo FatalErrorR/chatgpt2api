@@ -6,6 +6,8 @@ import json
 import re
 import uuid
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Literal
 
@@ -134,16 +136,24 @@ class OAuthLoginFinishRequest(BaseModel):
     distribute_proxies: list[str] = Field(default_factory=list)
 
 
-def _import_proxies(tokens: list[str], proxy: str, distribute_proxies: list[str]) -> dict[str, str]:
-    """每个导入 token 要写的代理。平均分配只分给新账号，已存在的账号不在结果里，保留原代理。"""
+@contextmanager
+def _import_proxies(tokens: list[str], proxy: str, distribute_proxies: list[str]) -> Iterator[dict[str, str]]:
+    """每个导入 token 要写的代理。平均分配只分给新账号，已存在的账号不在结果里，保留原代理。
+
+    平均分配的名额在清单里预留到入库结束，并发的导入和协议登录不会挤到同一个代理。
+    """
     if not distribute_proxies:
-        return {token: proxy.strip() for token in tokens} if proxy.strip() else {}
+        yield {token: proxy.strip() for token in tokens} if proxy.strip() else {}
+        return
     new_tokens = [token for token in tokens if account_service.get_account(token) is None]
     try:
-        assigned = proxy_list.distribute(distribute_proxies, len(new_tokens), account_service.proxy_account_counts())
+        assigned = proxy_list.reserve(distribute_proxies, len(new_tokens), account_service.proxy_account_counts)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-    return dict(zip(new_tokens, assigned))
+    try:
+        yield dict(zip(new_tokens, assigned))
+    finally:
+        proxy_list.release(assigned)
 
 
 def _add_plain_tokens(tokens: list[str], proxy_for: dict[str, str]) -> dict:
@@ -255,20 +265,23 @@ def create_router() -> APIRouter:
         tokens = _unique_tokens([*body.tokens, *payload_tokens])
         if not tokens:
             raise HTTPException(status_code=400, detail={"error": "tokens is required"})
-        proxy_for = _import_proxies(tokens, body.proxy, body.distribute_proxies)
-        if account_payloads:
-            for item, token in zip(account_payloads, payload_tokens):
-                if proxy_for.get(token):
-                    item["proxy"] = proxy_for[token]
-            result = account_service.add_account_items(account_payloads)
-            payload_token_set = set(_unique_tokens(payload_tokens))
-            extra_tokens = [token for token in tokens if token not in payload_token_set]
-            if extra_tokens:
-                extra_result = _add_plain_tokens(extra_tokens, proxy_for)
-                result["added"] = int(result.get("added") or 0) + int(extra_result.get("added") or 0)
-                result["skipped"] = int(result.get("skipped") or 0) + int(extra_result.get("skipped") or 0)
-        else:
-            result = _add_plain_tokens(tokens, proxy_for)
+        with _import_proxies(tokens, body.proxy, body.distribute_proxies) as proxy_for:
+            if account_payloads:
+                for item, token in zip(account_payloads, payload_tokens):
+                    if proxy_for.get(token):
+                        item["proxy"] = proxy_for[token]
+                    elif body.distribute_proxies:
+                        # 平均分配时已存在的账号保留原代理（包括原来没配），不用 JSON 里自带的
+                        item.pop("proxy", None)
+                result = account_service.add_account_items(account_payloads)
+                payload_token_set = set(_unique_tokens(payload_tokens))
+                extra_tokens = [token for token in tokens if token not in payload_token_set]
+                if extra_tokens:
+                    extra_result = _add_plain_tokens(extra_tokens, proxy_for)
+                    result["added"] = int(result.get("added") or 0) + int(extra_result.get("added") or 0)
+                    result["skipped"] = int(result.get("skipped") or 0) + int(extra_result.get("skipped") or 0)
+            else:
+                result = _add_plain_tokens(tokens, proxy_for)
         refresh_result = account_service.refresh_accounts(tokens)
         return {
             **result,
@@ -407,7 +420,9 @@ def create_router() -> APIRouter:
         account = account_service.update_account(access_token, updates)
         if account is None:
             raise HTTPException(status_code=404, detail={"error": "account not found"})
-        return {"item": account, "items": account_service.list_accounts()}
+        items = account_service.list_accounts()
+        item = next((view for view in items if view.get("access_token") == account.get("access_token")), account)
+        return {"item": item, "items": items}
 
     @router.post("/api/accounts/protocol-login")
     async def protocol_login(body: ProtocolLoginRequest, authorization: str | None = Header(default=None)):
@@ -468,10 +483,10 @@ def create_router() -> APIRouter:
             "id_token": tokens["id_token"],
             "source_type": "oauth_login",
         }
-        proxy = _import_proxies([tokens["access_token"]], body.proxy, body.distribute_proxies).get(tokens["access_token"], "")
-        if proxy:
-            payload["proxy"] = proxy
-        add_result = await run_in_threadpool(account_service.add_account_items, [payload])
+        with _import_proxies([tokens["access_token"]], body.proxy, body.distribute_proxies) as proxy_for:
+            if proxy_for.get(tokens["access_token"]):
+                payload["proxy"] = proxy_for[tokens["access_token"]]
+            add_result = await run_in_threadpool(account_service.add_account_items, [payload])
         refresh_result = await run_in_threadpool(
             account_service.refresh_accounts, [tokens["access_token"]]
         )

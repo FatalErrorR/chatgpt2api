@@ -47,9 +47,8 @@ def create_router() -> APIRouter:
     @router.post("/api/proxies/delete")
     async def delete_proxy(body: ProxyEntryRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        counts = account_service.proxy_account_counts()
         try:
-            proxy_list.delete(body.url, counts.get(body.url.strip(), 0))
+            proxy_list.delete(body.url, account_service.proxy_account_counts())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return await run_in_threadpool(_list)

@@ -63,6 +63,7 @@ import {
   type ProxyEntry,
   type RefreshProgressResponse,
 } from "@/lib/api";
+import { accountMatchesProxyFilter, proxyForAccount } from "@/lib/proxy-match";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
@@ -291,14 +292,12 @@ function AccountsPageContent() {
       const statusMatched =
         statusFilter === "all" ||
         (statusFilter === "edit_cooldown" ? isEditUploadCooled(account) : account.status === statusFilter);
-      const accountProxy = (account.proxy || "").trim();
-      const proxyMatched =
-        proxyFilter === "all" || (proxyFilter === "none" ? !accountProxy : accountProxy === proxyFilter);
+      const proxyMatched = accountMatchesProxyFilter(account, proxyFilter);
       return searchMatched && typeMatched && statusMatched && proxyMatched;
     });
   }, [accounts, query, statusFilter, typeFilter, proxyFilter]);
 
-  const proxyByUrl = useMemo(() => new Map(proxies.map((proxy) => [proxy.url, proxy])), [proxies]);
+  const proxyByKey = useMemo(() => new Map(proxies.map((proxy) => [proxy.key, proxy])), [proxies]);
 
   const pageCount = Math.max(1, Math.ceil(filteredAccounts.length / Number(pageSize)));
   const safePage = Math.min(page, pageCount);
@@ -1064,7 +1063,7 @@ function AccountsPageContent() {
                 <SelectItem value="all">全部代理</SelectItem>
                 <SelectItem value="none">未指定代理</SelectItem>
                 {proxies.map((proxy) => (
-                  <SelectItem key={proxy.url} value={proxy.url}>
+                  <SelectItem key={proxy.key} value={proxy.key}>
                     {proxy.name || proxy.masked_url}
                   </SelectItem>
                 ))}
@@ -1248,7 +1247,7 @@ function AccountsPageContent() {
                           {(() => {
                             const url = (account.proxy || "").trim();
                             if (!url) return null;
-                            const proxy = proxyByUrl.get(url);
+                            const proxy = proxyForAccount(proxyByKey, account);
                             return (
                               <div
                                 className={cn(

@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from services.config import config
+from services.proxy_list_service import proxy_key
 from services.log_service import (
     LOG_TYPE_ACCOUNT,
     log_service,
@@ -251,6 +252,7 @@ class AccountService:
             return None
         normalized = dict(item)
         normalized.pop("accessToken", None)
+        normalized.pop("proxy_key", None)  # 返回给前端的派生字段，不落盘
         normalized["access_token"] = access_token
         if str(normalized.get("type") or "").strip().lower() == "codex":
             normalized["export_type"] = "codex"
@@ -1298,13 +1300,20 @@ class AccountService:
         若某账号该值持续 > 0，说明其并发槽位泄漏、已被静默排除出调度，可借此在 UI 上诊断。
         """
         with self._lock:
-            result = []
-            for item in self._accounts.values():
-                account = dict(item)
-                token = account.get("access_token") or ""
-                account["image_inflight"] = int(self._image_inflight.get(token, 0))
-                result.append(account)
-            return result
+            return self._account_views_locked()
+
+    def _account_views_locked(self) -> list[dict]:
+        """返回给前端的账号副本：附加 image_inflight，以及 proxy_key（与代理清单的 key 同一规则，
+        前端按它匹配代理名称、健康和筛选；proxy 字符串本身不变）。"""
+        result = []
+        for item in self._accounts.values():
+            account = dict(item)
+            token = account.get("access_token") or ""
+            account["image_inflight"] = int(self._image_inflight.get(token, 0))
+            proxy = str(account.get("proxy") or "").strip()
+            account["proxy_key"] = proxy_key(proxy) if proxy else ""
+            result.append(account)
+        return result
 
     def list_limited_tokens(self) -> list[str]:
         with self._lock:
@@ -1406,7 +1415,7 @@ class AccountService:
                 if account is not None:
                     self._accounts[access_token] = account
             self._save_accounts()
-            items = [dict(item) for item in self._accounts.values()]
+            items = self._account_views_locked()
             log_service.add(LOG_TYPE_ACCOUNT, f"新增 {added} 个账号，跳过 {skipped} 个",
                             {"added": added, "skipped": skipped})
         return {"added": added, "skipped": skipped, "items": items}
@@ -1432,7 +1441,7 @@ class AccountService:
                     self._index = 0
                 self._save_accounts()
                 log_service.add(LOG_TYPE_ACCOUNT, f"删除 {removed} 个账号", {"removed": removed})
-            items = [dict(item) for item in self._accounts.values()]
+            items = self._account_views_locked()
         return {"removed": removed, "items": items}
 
     def update_account(self, access_token: str, updates: dict, quiet: bool = False) -> dict | None:

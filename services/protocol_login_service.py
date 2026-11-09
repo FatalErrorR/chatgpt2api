@@ -129,6 +129,13 @@ class ProtocolLoginService:
         if len(entries) > MAX_BATCH:
             raise ValueError(f"一次最多 {MAX_BATCH} 个账号")
         self._assign_proxies(entries, proxy.strip(), distribute_proxies or [])
+        try:
+            return self._start(entries, invalid, run_async)
+        except BaseException:
+            self._release_reservations(entries)
+            raise
+
+    def _start(self, entries: list[dict[str, Any]], invalid: list[dict[str, Any]], run_async: bool) -> dict[str, Any]:
         progress_id = str(uuid.uuid4())
         with self._lock:
             self._progress[progress_id] = {
@@ -154,7 +161,8 @@ class ProtocolLoginService:
     def _assign_proxies(entries: list[dict[str, Any]], proxy: str, distribute_proxies: list[str]) -> None:
         """登录前就定好每个账号的代理（并发登录，不能边登边分），登录和之后的请求走同一个出口。
 
-        平均分配只分给新邮箱；已在号池里的邮箱沿用原代理。
+        平均分配只分给新邮箱；已在号池里的邮箱沿用原代理。新邮箱的名额在清单里预留，
+        入库或失败后释放（见 _release_reservations），其它批次分配时会算上。
         """
         if not distribute_proxies:
             for entry in entries:
@@ -165,11 +173,17 @@ class ProtocolLoginService:
             for account in account_service.list_accounts()
         }
         new_entries = [entry for entry in entries if entry["email"].strip().lower() not in existing]
-        assigned = proxy_list.distribute(distribute_proxies, len(new_entries), account_service.proxy_account_counts())
+        assigned = proxy_list.reserve(distribute_proxies, len(new_entries), account_service.proxy_account_counts)
         for entry, url in zip(new_entries, assigned):
             entry["proxy"] = url
+            entry["reserved"] = True
         for entry in entries:
             entry.setdefault("proxy", existing.get(entry["email"].strip().lower(), ""))
+
+    @staticmethod
+    def _release_reservations(entries: list[dict[str, Any]]) -> None:
+        """释放还占着的预留名额；每个账号只释放一次（每个 entry 同一时间只有一个线程在处理）。"""
+        proxy_list.release([entry["proxy"] for entry in entries if entry.pop("reserved", False)])
 
     def _run(self, progress_id: str, entries: list[dict[str, Any]]) -> None:
         try:
@@ -178,6 +192,7 @@ class ProtocolLoginService:
                 for future in futures:
                     future.result()
         finally:
+            self._release_reservations(entries)  # 批次异常结束时兜底
             with self._lock:
                 progress = self._progress.get(progress_id)
                 if progress is not None:
@@ -195,6 +210,9 @@ class ProtocolLoginService:
             self._set_item(progress_id, index, status="成功", error="", token=anonymize_token(token))
         except Exception as exc:  # 单个账号失败不影响其它账号
             self._set_item(progress_id, index, status="失败", error=f"{type(exc).__name__}: {str(exc)[:120]}")
+        finally:
+            # 登录或入库失败时释放；成功时 _save_account 已在入库后释放，这里不会重复
+            self._release_reservations([entry])
 
     @staticmethod
     def _save_account(entry: dict[str, Any], result: dict[str, Any], proxy: str) -> str:
@@ -226,6 +244,8 @@ class ProtocolLoginService:
         else:
             token = result["access_token"]
             account_service.add_account_items([{**token_data, **extra}])
+        # 入库后、刷新额度前释放：刷新要等上游，期间别的批次不能把它既算已入库又算预留
+        ProtocolLoginService._release_reservations([entry])
         account_service.refresh_accounts([token])
         return token
 
