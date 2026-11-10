@@ -85,6 +85,16 @@ bun install
 bun run dev
 ```
 
+运行测试：
+
+```bash
+uv run python -m unittest discover -s test -t .   # 单元测试，需要真实上游的集成测试默认跳过
+cd web && npx tsc --noEmit -p . && node --test test/*.test.ts
+```
+
+集成测试需要先在 `localhost:8000` 启动服务并准备 `assets/image.png`，再加上 `CHATGPT2API_INTEGRATION=1` 运行。每次 push 和 PR 会由
+GitHub Actions 的 `Test` 工作流自动跑上面这些检查。
+
 后续更新新版本：
 
 ```bash
@@ -122,6 +132,11 @@ environment:
 - `GET /v1/models` 返回 `gpt-image-2`、`gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`codex-gpt-image-2`、
   `codex-gpt-image-2.5*`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini`
 - 支持通过 `n` 返回多张生成结果
+- 支持 GPT Image 2.6（`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst`、`codex-gpt-image-2.6*`）。Codex 链路生成时传
+  `output_format: "gif"` 可输出 GIF 动图，可选 `frame_count`、`frame_duration_ms`（图片编辑不支持 GIF）；网页链路上游返回的 GIF 会原样保留
+- `/v1/images/generations` 请求里带了参考图（`images` / `image` / `image_url`）时，自动按图片编辑处理
+- 非 Codex 模型支持 `2K` 尺寸；可在设置里开启图片放大（`image_upscale_enabled`，Lanczos 或 ONNX 模型，目标长边
+  `image_upscale_target_edge`），以及按请求尺寸精确输出（`image_exact_size_enabled`）
 - 支持生成可编辑 PPT 文件
 - 支持生成可编辑 PSD 文件
 - 支持 Codex 中的画图接口逆向，仅 `Plus` / `Team` / `Pro` 订阅可用，模型别名为 `codex-gpt-image-2` 与 `codex-gpt-image-2.5*`，如有需要可自行在其他场景映射回
@@ -131,7 +146,8 @@ environment:
 
 - 内置在线画图工作台，支持生成、图片编辑与多图组图编辑
 - 支持 `gpt-image-2`、`gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`codex-gpt-image-2`、`codex-gpt-image-2.5*`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini` 模型选择
-- 编辑模式支持参考图上传
+- 编辑模式支持参考图上传，参考图过大时会自动压缩到上游可接受的大小
+- 选择 GIF 模型时可设置帧数和帧间隔
 - 前端支持多图生成交互
 - 本地保存图片会话历史，支持回看、删除和清空
 - 支持服务端缓存图片URL
@@ -147,7 +163,13 @@ environment:
 - 支持密码重新登录恢复异常账号，刷新后可自动重登
 - 支持网页端配置全局 HTTP / HTTPS / SOCKS5 / SOCKS5H 代理
 - 支持 WARP / FlareSolverr 稳定代理运行时
-- 支持搜索、筛选、批量刷新、导出、手动编辑和清理账号
+- 支持搜索、筛选、批量刷新、导出、手动编辑和清理账号；异常账号会显示具体原因，可对选中账号逐个测试生图
+- 支持批量协议登录：每行 `邮箱----密码----TOTP密钥`（TOTP 可省略），登录走账号自己的代理
+- 代理管理：账号页「代理」可给代理起名字、查看健康状况（连续 3 次被 Cloudflare 挑战或连接失败标记异常，重启后清零），
+  按代理筛选账号；导入时可选「平均分配到多个代理」，新账号依次分给账号数最少的代理，跳过异常代理
+- 上游稳定性：Cloudflare 挑战页自动重试（清掉 Cloudflare Cookie 后最多 3 次）；生图遇到 403 时冷却该账号并换其它出口重试；
+  图生图上传达上限的账号自动冷却；已生成图片下载失败时退避重试
+- `api_threadpool_tokens`（默认 256）控制接口线程池大小，避免大量生图长任务拖住其它接口
 - 支持四种导入方式：本地 CPA JSON 文件导入、远程 CPA 服务器导入、`sub2api` 服务器导入、`access_token` 导入
 - 支持在设置页配置 `sub2api` 服务器，筛选并批量导入其中的 OpenAI OAuth 账号
 
