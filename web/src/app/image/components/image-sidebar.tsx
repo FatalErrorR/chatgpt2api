@@ -42,6 +42,8 @@ export function ImageSidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
+  // Enter/Esc 已经结束这次编辑：输入框卸载时还会触发一次 blur，那次不能再提交（否则 Esc 也会保存）
+  const editDoneRef = useRef(false);
 
   useEffect(() => {
     if (editingId && editInputRef.current) {
@@ -52,11 +54,14 @@ export function ImageSidebar({
 
   const startRename = useCallback((conversation: ImageConversation, e: React.MouseEvent) => {
     e.stopPropagation();
+    editDoneRef.current = false;
     setEditingId(conversation.id);
     setEditingTitle(conversation.title);
   }, []);
 
   const commitRename = useCallback(() => {
+    if (editDoneRef.current) return;
+    editDoneRef.current = true;
     const trimmed = editingTitle.trim();
     if (editingId && trimmed) {
       void onRenameConversation(editingId, trimmed);
@@ -66,6 +71,7 @@ export function ImageSidebar({
   }, [editingId, editingTitle, onRenameConversation]);
 
   const cancelRename = useCallback(() => {
+    editDoneRef.current = true;
     setEditingId(null);
     setEditingTitle("");
   }, []);

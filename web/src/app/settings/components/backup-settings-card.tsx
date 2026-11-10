@@ -296,7 +296,7 @@ export function BackupSettingsCard() {
             {isRunningBackup || backupState?.running ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
             立即备份
           </Button>
-          <Button className="h-9 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800" onClick={() => void saveConfig()} disabled={isSavingConfig}>
+          <Button className="h-9 rounded-xl bg-ink px-4 text-page hover:bg-ink/85" onClick={() => void saveConfig()} disabled={isSavingConfig}>
             {isSavingConfig ? <LoaderCircle className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
             保存配置
           </Button>

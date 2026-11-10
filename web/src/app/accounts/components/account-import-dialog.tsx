@@ -801,7 +801,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
           {!oauthSession ? (
             <Button
               type="button"
-              className="h-10 rounded-xl bg-stone-950 text-white hover:bg-stone-800"
+              className="h-10 rounded-xl bg-ink text-page hover:bg-ink/85"
               onClick={() => void handleStartOAuth()}
               disabled={oauthStarting}
             >
@@ -887,7 +887,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             </div>
             <Button
               type="button"
-              className="mt-4 rounded-xl bg-stone-950 text-white hover:bg-stone-800"
+              className="mt-4 rounded-xl bg-ink text-page hover:bg-ink/85"
               onClick={() => accountJsonInputRef.current?.click()}
               disabled={isSubmitting}
             >
@@ -1085,7 +1085,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             </Button>
             {method === "token" ? (
               <Button
-                className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
                 onClick={() => void handleImportTokenText()}
                 disabled={footerDisabled}
               >
@@ -1095,7 +1095,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             ) : null}
             {method === "session" ? (
               <Button
-                className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
                 onClick={() => void handleImportSessionJson()}
                 disabled={footerDisabled}
               >
@@ -1105,7 +1105,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             ) : null}
             {method === "codex-auth" ? (
               <Button
-                className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
                 onClick={() => void handleImportCodexAuthJson()}
                 disabled={footerDisabled}
               >
@@ -1116,7 +1116,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             {method === "oauth" ? (
               <Button
                 className={cn(
-                  "h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800",
+                  "h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85",
                   !oauthSession ? "hidden" : "",
                 )}
                 onClick={() => void handleFinishOAuth()}
@@ -1128,7 +1128,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             ) : null}
             {method === "protocol" ? (
               <Button
-                className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
                 onClick={() => void handleStartProtocolLogin()}
                 disabled={footerDisabled || protocolRunning || !protocolInput.trim()}
               >
@@ -1139,7 +1139,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             {method === "account-json" ? (
               <Button
                 className={cn(
-                  "h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800",
+                  "h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85",
                   !pendingAccountJsonImport ? "hidden" : "",
                 )}
                 onClick={() => setConfirmOpen(true)}
@@ -1175,7 +1175,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
               返回
             </Button>
             <Button
-              className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+              className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
               onClick={() =>
                 void submitTokens(
                   pendingAccountJsonImport?.tokens ?? [],

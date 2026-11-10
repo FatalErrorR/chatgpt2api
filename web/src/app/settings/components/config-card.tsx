@@ -562,7 +562,7 @@ export function ConfigCard() {
 
         <div className="flex justify-end">
           <Button
-            className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+            className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
             onClick={() => void saveConfig()}
             disabled={isSavingConfig}
           >

@@ -70,7 +70,7 @@ export function ThirdPartyAppsCard() {
         </div>
 
         <div className="flex justify-end">
-          <Button className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800" onClick={() => void saveConfig()} disabled={isSavingConfig}>
+          <Button className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85" onClick={() => void saveConfig()} disabled={isSavingConfig}>
             {isSavingConfig ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
             保存
           </Button>

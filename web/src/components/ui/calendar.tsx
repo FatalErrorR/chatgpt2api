@@ -29,7 +29,7 @@ function Calendar({
         day: "size-9 p-0 text-center",
         day_button: "size-9 rounded-lg text-sm transition hover:bg-stone-100",
         today: "font-semibold text-stone-950",
-        selected: "[&_button]:bg-stone-950 [&_button]:text-white [&_button]:hover:bg-stone-800",
+        selected: "[&_button]:bg-ink [&_button]:text-page [&_button]:hover:bg-ink/85",
         outside: "text-stone-300",
         disabled: "text-stone-300 opacity-50",
         ...classNames,

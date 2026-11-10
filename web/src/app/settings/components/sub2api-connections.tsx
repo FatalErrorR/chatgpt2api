@@ -399,7 +399,7 @@ export function Sub2APIConnections() {
             <div className="flex items-center gap-2">
               {servers.length > 0 ? <Badge className="rounded-md px-2.5 py-1">{servers.length} 个连接</Badge> : null}
               <Button
-                className="h-9 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800"
+                className="h-9 rounded-xl bg-ink px-4 text-page hover:bg-ink/85"
                 onClick={openAddDialog}
               >
                 <Plus className="size-4" />
@@ -515,7 +515,7 @@ export function Sub2APIConnections() {
                               </div>
                               <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-200">
                                 <div
-                                  className="h-full rounded-full bg-stone-900 transition-all"
+                                  className="h-full rounded-full bg-ink transition-all"
                                   style={{ width: `${progress}%` }}
                                 />
                               </div>
@@ -717,7 +717,7 @@ export function Sub2APIConnections() {
               取消
             </Button>
             <Button
-              className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+              className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
               onClick={() => void handleSave()}
               disabled={isSaving}
             >
@@ -871,7 +871,7 @@ export function Sub2APIConnections() {
               取消
             </Button>
             <Button
-              className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+              className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
               onClick={() => void handleStartImport()}
               disabled={isStartingImport || selectedIds.length === 0}
             >

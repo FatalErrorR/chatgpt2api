@@ -987,11 +987,19 @@ function AccountsPageContent() {
               />
             </div>
             {/* 窄屏没有筛选栏，用下拉代替 */}
-            <div className="flex gap-2 lg:hidden">
+            <div className="flex flex-wrap gap-2 lg:hidden">
               <Select value={statusFilter} onValueChange={(value) => setFilter(() => setStatusFilter(value as StatusFilter))}>
                 <SelectTrigger className="h-[34px] w-[120px] rounded-[7px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {accountStatusOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={typeFilter} onValueChange={(value) => setFilter(() => setTypeFilter(value))}>
+                <SelectTrigger className="h-[34px] w-[110px] rounded-[7px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {accountTypeOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                   ))}
                 </SelectContent>

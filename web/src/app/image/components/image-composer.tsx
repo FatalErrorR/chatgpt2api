@@ -311,7 +311,7 @@ export function ImageComposer({
             />
             {isDraggingImage ? (
               <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[16px] border-2 border-dashed border-clay bg-surface/90 text-sm font-medium text-ink backdrop-blur-[1px]">
-                <div className="flex items-center gap-2 rounded-full bg-stone-950 px-4 py-2 text-white shadow-lg">
+                <div className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-page shadow-lg">
                   <ImagePlus className="size-4" />
                   <span>松开以上传参考图</span>
                 </div>

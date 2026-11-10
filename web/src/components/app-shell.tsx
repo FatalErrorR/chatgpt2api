@@ -26,7 +26,7 @@ import webConfig from "@/constants/common-env";
 import { fetchThirdPartyApps, type ThirdPartyAppsSettings } from "@/lib/api";
 import { getValidatedAuthSession } from "@/lib/auth-session";
 import { cn } from "@/lib/utils";
-import { clearStoredAuthSession, type StoredAuthSession } from "@/store/auth";
+import { clearStoredAuthSession, getStoredAuthSession, type StoredAuthSession } from "@/store/auth";
 
 type NavItem = { href: string; label: string; icon: ComponentType<{ className?: string }> };
 
@@ -130,8 +130,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (active) setSession(null);
         return;
       }
-      const storedSession = await getValidatedAuthSession();
-      if (active) setSession(storedSession);
+      // 先用本地会话定下布局（读本地存储，很快），再联网校验；否则校验期间按未登录渲染，
+      // 没有 64px 侧栏，校验通过后侧栏出现、内容整体右移
+      const storedSession = await getStoredAuthSession();
+      if (active) setSession((current) => (current === undefined ? storedSession : current));
+      const validatedSession = await getValidatedAuthSession();
+      if (active) setSession(validatedSession);
     };
     void load();
     return () => {
@@ -139,8 +143,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [pathname]);
 
+  // 本地会话和校验后的会话是两个对象，按 key 触发，避免重复请求
+  const sessionKey = session?.key ?? "";
   useEffect(() => {
-    if (!session) {
+    if (!sessionKey) {
       setThirdPartyApps(null);
       return;
     }
@@ -160,12 +166,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       active = false;
       window.removeEventListener("third-party-apps-updated", reload);
     };
-  }, [session]);
+  }, [sessionKey]);
 
   const handleLogout = async () => {
     await clearStoredAuthSession();
     router.replace("/login");
   };
+
+  // 还没读到本地会话：先不渲染，等布局确定（只有首屏的几毫秒）
+  if (session === undefined && pathname !== "/login") {
+    return null;
+  }
 
   if (pathname === "/login" || !session) {
     return <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-8">{children}</div>;

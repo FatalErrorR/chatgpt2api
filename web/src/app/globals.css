@@ -325,9 +325,10 @@
   color: var(--ink) !important;
 }
 
+/* 去掉旧页面的投影；inset 阴影是新页面画的选中框和状态左边线，必须保留 */
 .dark .shadow-sm,
 .dark .shadow-xs,
-.dark [class*="shadow-"] {
+.dark [class*="shadow-"]:not([class*="shadow-[inset"]) {
   box-shadow: none !important;
 }
 

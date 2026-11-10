@@ -33,7 +33,7 @@ export function CPAPoolsCard() {
           </div>
           <div className="flex items-center gap-2">
             {pools.length > 0 ? <Badge className="rounded-md px-2.5 py-1">{pools.length} 个连接</Badge> : null}
-            <Button className="h-9 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800" onClick={openAddDialog}>
+            <Button className="h-9 rounded-xl bg-ink px-4 text-page hover:bg-ink/85" onClick={openAddDialog}>
               <Plus className="size-4" />
               添加连接
             </Button>
@@ -137,7 +137,7 @@ export function CPAPoolsCard() {
                           </Badge>
                         </div>
                         <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-200">
-                          <div className="h-full rounded-full bg-stone-900 transition-all" style={{ width: `${progress}%` }} />
+                          <div className="h-full rounded-full bg-ink transition-all" style={{ width: `${progress}%` }} />
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-xs text-stone-500">
                           <span>新增 {importJob.added}</span>
