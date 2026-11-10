@@ -1,14 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ComponentProps } from "react";
 import {
-  Ban,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CircleAlert,
-  CircleOff,
   Copy,
   Download,
   Link2,
@@ -19,14 +14,14 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { RowMenu } from "@/components/row-menu";
+import { StatusDot, type StatusTone } from "@/components/ui/status-dot";
 import {
   Dialog,
   DialogContent,
@@ -84,35 +79,12 @@ const accountStatusOptions: { label: string; value: StatusFilter }[] = [
   { label: "图生图冷却中", value: "edit_cooldown" },
 ];
 
-const imageCountWindows = [
-  ["today", "今日"],
-  ["yesterday", "昨日"],
-  ["d7", "7天"],
-  ["d14", "14天"],
-  ["d30", "30天"],
-] as const;
-
-const statusMeta: Record<
-  AccountStatus,
-  {
-    icon: typeof CheckCircle2;
-    badge: ComponentProps<typeof Badge>["variant"];
-  }
-> = {
-  正常: { icon: CheckCircle2, badge: "success" },
-  限流: { icon: CircleAlert, badge: "warning" },
-  异常: { icon: CircleOff, badge: "danger" },
-  禁用: { icon: Ban, badge: "secondary" },
+const STATUS_TONE: Record<AccountStatus, StatusTone> = {
+  正常: "ok",
+  限流: "warn",
+  异常: "bad",
+  禁用: "off",
 };
-
-const metricCards = [
-  { key: "total", label: "账户总数", color: "text-stone-900", icon: UserRound },
-  { key: "active", label: "正常账户", color: "text-emerald-600", icon: CheckCircle2 },
-  { key: "limited", label: "限流账户", color: "text-orange-500", icon: CircleAlert },
-  { key: "abnormal", label: "异常账户", color: "text-rose-500", icon: CircleOff },
-  { key: "disabled", label: "禁用账户", color: "text-stone-500", icon: Ban },
-  { key: "quota", label: "剩余额度", color: "text-blue-500", icon: RefreshCw },
-] as const;
 
 function formatCompact(value: number) {
   if (value >= 1000) {
@@ -139,14 +111,21 @@ function formatRestoreAt(value?: string | null) {
   const totalHours = Math.ceil(diffMs / (1000 * 60 * 60));
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
-  const relative = diffMs > 0 ? `剩余 ${days}d ${hours}h` : "已到恢复时间";
+  const relative =
+    diffMs <= 0 ? "已到恢复时间" : days > 0 ? `剩余 ${days} 天${hours ? ` ${hours} 小时` : ""}` : `剩余 ${Math.max(1, hours)} 小时`;
 
   const pad = (num: number) => String(num).padStart(2, "0");
-  const absolute = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  const absolute = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
   return { absolute, relative };
+}
+
+function formatCreatedAt(raw?: string | null) {
+  if (!raw) return "—";
+  const date = new Date(`${raw}Z`);
+  if (Number.isNaN(date.getTime())) return String(raw).slice(0, 10);
+  const pad = (num: number) => String(num).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function isEditUploadCooled(account: { edit_upload_blocked_until?: string | null }) {
@@ -802,6 +781,40 @@ function AccountsPageContent() {
     }
   };
 
+  // 筛选栏各项的数量（基于全部账号，不受当前筛选影响）
+  const facetCounts = useMemo(() => {
+    const status: Record<string, number> = { all: accounts.length, 正常: 0, 限流: 0, 异常: 0, 禁用: 0, edit_cooldown: 0 };
+    const types = new Map<string, number>();
+    const proxyKeys = new Map<string, number>();
+    let noProxy = 0;
+    let inflight = 0;
+    for (const account of accounts) {
+      status[account.status] = (status[account.status] ?? 0) + 1;
+      if (isEditUploadCooled(account)) status.edit_cooldown += 1;
+      const type = displayAccountType(account);
+      types.set(type, (types.get(type) ?? 0) + 1);
+      if ((account.proxy || "").trim() && account.proxy_key) {
+        proxyKeys.set(account.proxy_key, (proxyKeys.get(account.proxy_key) ?? 0) + 1);
+      } else {
+        noProxy += 1;
+      }
+      inflight += account.image_inflight ?? 0;
+    }
+    return { status, types, proxyKeys, noProxy, inflight };
+  }, [accounts]);
+
+  const todaySuccess = imageCounts ? (imageCounts.edits.today || 0) + (imageCounts.generations.today || 0) : null;
+
+  // 删除前确认：写清删几个、影响什么
+  const [pendingDelete, setPendingDelete] = useState<{ tokens: string[]; title: string } | null>(null);
+  const confirmDelete = (tokens: string[], title: string) => {
+    if (tokens.length === 0) {
+      toast.error("请先选择要删除的账户");
+      return;
+    }
+    setPendingDelete({ tokens, title });
+  };
+
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
       setSelectedIds((prev) => Array.from(new Set([...prev, ...currentRows.map((item) => item.access_token)])));
@@ -810,34 +823,50 @@ function AccountsPageContent() {
     setSelectedIds((prev) => prev.filter((id) => !currentRows.some((row) => row.access_token === id)));
   };
 
-  return (
-    <>
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-1">
-          <div className="text-xs font-semibold tracking-[0.18em] text-stone-500 uppercase">
-            Account Pool
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">号池管理</h1>
-        </div>
+  const setFilter = (apply: () => void) => {
+    apply();
+    setPage(1);
+  };
 
+  const facetButton = (active: boolean) =>
+    cn(
+      "flex w-full items-center justify-between gap-2 rounded-[7px] px-[9px] py-1.5 text-left text-[13px] transition",
+      active ? "bg-surface text-ink shadow-[inset_0_0_0_1px_var(--line)]" : "text-ink-2 hover:bg-surface-hover hover:text-ink",
+    );
+  const facetCount = "text-xs text-ink-3 tabular-nums";
+  const pendingAccounts = pendingDelete
+    ? accounts.filter((item) => pendingDelete.tokens.includes(item.access_token))
+    : [];
+
+  return (
+    <section className="space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-[30px] font-medium text-ink">号池</h1>
+          <div className="mt-1.5 flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-ink-2">
+            <span>
+              可用额度 <b className="font-medium text-ink tabular-nums">{(refreshSummary ?? summary).quota}</b>
+            </span>
+            <span>
+              今日成功 <b className="font-medium text-ink tabular-nums">{todaySuccess ?? "—"}</b> 张
+            </span>
+            <span title="正在生成、尚未结束的图片数">
+              在途 <b className="font-medium text-ink tabular-nums">{facetCounts.inflight}</b>
+            </span>
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl border-stone-200 bg-white/80 px-4 text-stone-700 hover:bg-white"
-            onClick={() => void loadAccounts()}
-            disabled={isLoading || isRefreshing || isDeleting}
-          >
+          <Button variant="ghost" size="icon" onClick={() => void loadAccounts()} disabled={isLoading || isRefreshing || isDeleting} title="重新加载列表">
             <RefreshCw className={cn("size-4", isLoading ? "animate-spin" : "")} />
-            刷新
           </Button>
+          <ProxyManagerDialog proxies={proxies} onChange={setProxies} />
           <Button
             variant="outline"
-            className="h-10 rounded-xl border-stone-200 bg-white/80 px-4 text-stone-700 hover:bg-white"
             onClick={() => void handleRefreshAccounts(accounts.map((item) => item.access_token))}
             disabled={isLoading || isRefreshing || isDeleting || accounts.length === 0}
           >
             <RefreshCw className={cn("size-4", isRefreshing ? "animate-spin" : "")} />
-            一键刷新所有账号信息和额度
+            刷新全部额度
           </Button>
           <AccountImportDialog
             disabled={isLoading || isRefreshing || isDeleting}
@@ -849,625 +878,454 @@ function AccountsPageContent() {
               setPage(1);
             }}
           />
-          <ProxyManagerDialog proxies={proxies} onChange={setProxies} />
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl border-stone-200 bg-white/80 px-4 text-stone-700 hover:bg-white"
-            onClick={() => downloadTokens(accounts)}
-            disabled={accounts.length === 0}
-          >
-            <Download className="size-4" />
-            导出全部 Token
-          </Button>
+          <RowMenu
+            label="更多"
+            items={[
+              { label: "导出全部 Token", icon: Download, onSelect: () => downloadTokens(accounts), disabled: accounts.length === 0 },
+              {
+                label: `移除全部异常账号（${abnormalTokens.length}）`,
+                icon: Trash2,
+                danger: true,
+                disabled: abnormalTokens.length === 0 || isDeleting,
+                onSelect: () => confirmDelete(abnormalTokens, `移除 ${abnormalTokens.length} 个异常账号？`),
+              },
+            ]}
+          />
         </div>
-      </section>
+      </div>
 
-      {/* 进度条 */}
-      {progress.visible && (
-        <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white/90 shadow-sm">
-          <div className="px-4 py-3">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-stone-600">
-                {progress.message}
-                {progress.email && <span className="ml-1 font-medium text-stone-700">{progress.email}</span>}
-              </span>
-              <span className="font-medium text-stone-700">
-                {progress.current}/{progress.total}
-              </span>
-            </div>
-            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-stone-100">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all duration-300 ease-out"
-                style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
+      {progress.visible ? (
+        <div className="rounded-[10px] border border-line bg-surface px-4 py-3">
+          <div className="flex items-center justify-between text-[13px]">
+            <span className="text-ink-2">
+              {progress.message}
+              {progress.email ? <span className="ml-1 text-ink">{progress.email}</span> : null}
+            </span>
+            <span className="font-mono text-xs text-ink tabular-nums">
+              {progress.current}/{progress.total}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sunken">
+            <div
+              className="h-full rounded-full bg-ink transition-all duration-300 ease-out"
+              style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-[22px] lg:grid-cols-[210px_minmax(0,1fr)]">
+        {/* 左侧筛选栏：状态 / 类型 / 代理，带数量，可以组合 */}
+        <aside className="hidden content-start gap-[18px] lg:grid">
+          <div>
+            <h4 className="mb-1.5 text-xs font-medium tracking-[0.04em] text-ink-3">状态</h4>
+            {(
+              [
+                ["all", "全部", null],
+                ["正常", "正常", "ok"],
+                ["限流", "限流", "warn"],
+                ["异常", "异常", "bad"],
+                ["禁用", "禁用", "off"],
+                ["edit_cooldown", "图生图冷却", "warn"],
+              ] as const
+            ).map(([value, label, tone]) => (
+              <button key={value} type="button" className={facetButton(statusFilter === value)} onClick={() => setFilter(() => setStatusFilter(value))}>
+                {tone ? <StatusDot tone={tone}>{label}</StatusDot> : <span>{label}</span>}
+                <span className={facetCount}>{facetCounts.status[value] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+          <div>
+            <h4 className="mb-1.5 text-xs font-medium tracking-[0.04em] text-ink-3">类型</h4>
+            <button type="button" className={facetButton(typeFilter === "all")} onClick={() => setFilter(() => setTypeFilter("all"))}>
+              <span>全部</span>
+              <span className={facetCount}>{accounts.length}</span>
+            </button>
+            {Array.from(facetCounts.types.entries()).map(([type, count]) => (
+              <button key={type} type="button" className={facetButton(typeFilter === type)} onClick={() => setFilter(() => setTypeFilter(type))}>
+                <span>{type}</span>
+                <span className={facetCount}>{count}</span>
+              </button>
+            ))}
+          </div>
+          <div>
+            <h4 className="mb-1.5 text-xs font-medium tracking-[0.04em] text-ink-3">代理</h4>
+            <button type="button" className={facetButton(proxyFilter === "all")} onClick={() => setFilter(() => setProxyFilter("all"))}>
+              <span>全部</span>
+              <span className={facetCount}>{accounts.length}</span>
+            </button>
+            {proxies.map((proxy) => (
+              <button
+                key={proxy.key}
+                type="button"
+                className={facetButton(proxyFilter === proxy.key)}
+                onClick={() => setFilter(() => setProxyFilter(proxy.key))}
+                title={proxyLabel(proxy)}
+              >
+                <StatusDot tone={proxy.health.abnormal ? "bad" : proxy.health.successes > 0 ? "ok" : "off"} className="min-w-0">
+                  <span className="truncate">{proxy.name || proxy.masked_url}</span>
+                </StatusDot>
+                <span className={facetCount}>{facetCounts.proxyKeys.get(proxy.key) ?? 0}</span>
+              </button>
+            ))}
+            <button type="button" className={facetButton(proxyFilter === "none")} onClick={() => setFilter(() => setProxyFilter("none"))}>
+              <StatusDot tone="off">未指定</StatusDot>
+              <span className={facetCount}>{facetCounts.noProxy}</span>
+            </button>
+          </div>
+        </aside>
+
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
+              <Input
+                value={query}
+                onChange={(event) => setFilter(() => setQuery(event.target.value))}
+                placeholder="搜索邮箱"
+                className="h-[34px] rounded-[7px] border-line-strong bg-surface pl-9"
               />
+            </div>
+            {/* 窄屏没有筛选栏，用下拉代替 */}
+            <div className="flex gap-2 lg:hidden">
+              <Select value={statusFilter} onValueChange={(value) => setFilter(() => setStatusFilter(value as StatusFilter))}>
+                <SelectTrigger className="h-[34px] w-[120px] rounded-[7px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {accountStatusOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={proxyFilter} onValueChange={(value) => setFilter(() => setProxyFilter(value))}>
+                <SelectTrigger className="h-[34px] w-[120px] rounded-[7px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部代理</SelectItem>
+                  <SelectItem value="none">未指定代理</SelectItem>
+                  {proxies.map((proxy) => (
+                    <SelectItem key={proxy.key} value={proxy.key}>{proxy.name || proxy.masked_url}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Select value={pageSize} onValueChange={(value) => setFilter(() => setPageSize(value))}>
+              <SelectTrigger className="h-[34px] w-[96px] rounded-[7px] text-xs text-ink-2"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">每页 10</SelectItem>
+                <SelectItem value="20">每页 20</SelectItem>
+                <SelectItem value="50">每页 50</SelectItem>
+                <SelectItem value="100">每页 100</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {selectedIds.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-[10px] bg-ink py-2 pr-2.5 pl-4 text-[13px] text-page">
+              <span>已选 {selectedIds.length} 个账号</span>
+              <span className="flex-1" />
+              {(
+                [
+                  ["刷新额度", RefreshCw, isRefreshing, () => void handleRefreshAccounts(selectedTokens)],
+                  ["测试生图", ImageIcon, isTestingImages, () => void handleTestImages(selectedTokens)],
+                  ["尝试恢复", LogIn, isRelogining, () => void handleReLogin(selectedTokens)],
+                  ["导出", Download, false, () => downloadTokens(accounts.filter((item) => selectedTokens.includes(item.access_token)))],
+                ] as const
+              ).map(([label, Icon, busy, action]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={action}
+                  disabled={busy}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/20 px-2.5 text-xs transition hover:bg-white/10 disabled:opacity-50"
+                >
+                  {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Icon className="size-3.5" />}
+                  {label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => confirmDelete(selectedTokens, `删除 ${selectedTokens.length} 个账号？`)}
+                disabled={isDeleting}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/20 px-2.5 text-xs text-[#F0B3A0] transition hover:bg-white/10 disabled:opacity-50"
+              >
+                <Trash2 className="size-3.5" />
+                删除
+              </button>
+              <button type="button" onClick={() => setSelectedIds([])} className="h-7 rounded-md px-2.5 text-xs transition hover:bg-white/10">
+                取消
+              </button>
+            </div>
+          ) : null}
+
+          <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
+            {isLoading && accounts.length === 0 ? (
+              <div className="space-y-3 p-5">
+                {[80, 95, 60, 88, 72].map((width) => (
+                  <div key={width} className="h-3 rounded-md bg-sunken" style={{ width: `${width}%` }} />
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-[13px]">
+                  <thead className="border-b border-line text-xs text-ink-3">
+                    <tr>
+                      <th className="w-10 py-2.5 pr-1 pl-3.5 font-normal">
+                        <Checkbox checked={allCurrentSelected} onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))} />
+                      </th>
+                      <th className="px-2.5 py-2.5 font-normal">账号</th>
+                      <th className="px-2.5 py-2.5 font-normal">代理</th>
+                      <th className="px-2.5 py-2.5 font-normal">状态</th>
+                      <th className="px-2.5 py-2.5 text-right font-normal">额度</th>
+                      <th className="px-2.5 py-2.5 font-normal">恢复时间</th>
+                      <th className="px-2.5 py-2.5 text-right font-normal">成功 / 失败</th>
+                      <th className="w-20 px-2.5 py-2.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentRows.map((account) => {
+                      const statusError =
+                        account.status === "异常" ? (account.last_refresh_error || account.last_token_refresh_error || "").trim() : "";
+                      const cooled = isEditUploadCooled(account);
+                      const cooldown = cooled ? formatRestoreAt(account.edit_upload_blocked_until) : null;
+                      const restore = formatRestoreAt(account.restore_at);
+                      const url = (account.proxy || "").trim();
+                      const proxy = url ? proxyForAccount(proxyByKey, account) : undefined;
+                      const inflight = account.image_inflight ?? 0;
+                      const busy = isRefreshing || refreshingTokens.has(account.access_token);
+                      return (
+                        <tr key={account.access_token} className="border-b border-line transition-colors last:border-b-0 hover:bg-surface-hover">
+                          <td className="py-3 pr-1 pl-3.5">
+                            <Checkbox
+                              checked={selectedIds.includes(account.access_token)}
+                              onCheckedChange={(checked) =>
+                                setSelectedIds((prev) =>
+                                  checked ? Array.from(new Set([...prev, account.access_token])) : prev.filter((item) => item !== account.access_token),
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="max-w-[280px] px-2.5 py-3">
+                            <div className="truncate text-ink" title={account.email ?? undefined}>{account.email ?? "—"}</div>
+                            {statusError ? (
+                              <div className="truncate text-xs text-bad" title={statusError}>{statusError}</div>
+                            ) : cooldown ? (
+                              <div className="truncate text-xs text-warn">图生图冷却 · {cooldown.relative.replace("剩余 ", "还剩 ")}</div>
+                            ) : (
+                              <div className="truncate text-xs text-ink-3">
+                                {displayAccountType(account)} · {displayAccountSource(account)} · {formatCreatedAt(account.created_at)}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-3 whitespace-nowrap">
+                            {!url ? (
+                              <span className="text-ink-3">—</span>
+                            ) : (
+                              <span className={cn("block max-w-[150px] truncate", proxy?.health.abnormal ? "text-bad" : "text-ink-2")} title={proxy ? proxyLabel(proxy) : undefined}>
+                                {proxy ? proxy.name || proxy.masked_url : "…"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-3">
+                            <StatusDot tone={STATUS_TONE[account.status]} title={statusError || undefined}>
+                              {account.status}
+                            </StatusDot>
+                          </td>
+                          <td className="px-2.5 py-3 text-right tabular-nums text-ink">{formatQuota(account)}</td>
+                          <td className="px-2.5 py-3 whitespace-nowrap">
+                            {restore.relative ? (
+                              <>
+                                <div className="text-ink">{restore.relative}</div>
+                                <div className="text-xs text-ink-3">{restore.absolute}</div>
+                              </>
+                            ) : (
+                              <span className="text-ink-3">—</span>
+                            )}
+                          </td>
+                          <td className="px-2.5 py-3 text-right font-mono text-xs whitespace-nowrap text-ink-2 tabular-nums">
+                            {inflight > 0 ? (
+                              <span className="mr-2 text-warn" title="正在生成的图片数；号池空闲时仍大于 0 说明并发槽位泄漏">
+                                在途 {inflight}
+                              </span>
+                            ) : null}
+                            {account.success} / {account.fail}
+                          </td>
+                          <td className="px-2.5 py-3">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <button
+                                type="button"
+                                title="复制 token"
+                                className="grid size-8 place-items-center rounded-[7px] text-ink-3 transition hover:bg-surface-hover hover:text-ink"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(account.access_token);
+                                  toast.success("已复制 token");
+                                }}
+                              >
+                                <Copy className="size-4" />
+                              </button>
+                              <RowMenu
+                                items={[
+                                  { label: "编辑", icon: Pencil, onSelect: () => openEditDialog(account), disabled: isUpdating },
+                                  { label: busy ? "刷新中…" : "刷新额度", icon: RefreshCw, onSelect: () => void handleRefreshAccounts([account.access_token]), disabled: busy },
+                                  { label: "删除", icon: Trash2, danger: true, onSelect: () => confirmDelete([account.access_token], "删除这个账号？"), disabled: isDeleting },
+                                ]}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!isLoading && currentRows.length === 0 ? (
+                  <div className="px-6 py-14 text-center text-[13px] text-ink-3">
+                    {accounts.length === 0 ? (
+                      <>
+                        <div className="mb-1 font-serif text-[17px] text-ink">还没有账号</div>
+                        导入账号后会显示在这里
+                      </>
+                    ) : (
+                      <>
+                        <div className="mb-1 font-serif text-[17px] text-ink">没有匹配的账号</div>
+                        调整筛选条件或搜索关键字后重试
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-3.5 py-2.5 text-xs text-ink-3">
+              <span>
+                {filteredAccounts.length === accounts.length ? `全部 ${accounts.length} 个` : `筛选后 ${filteredAccounts.length} 个，共 ${accounts.length} 个`}
+              </span>
+              <div className="flex items-center gap-1">
+                <button type="button" className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-hover disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>
+                  <ChevronLeft className="size-4" />
+                </button>
+                {paginationItems.map((item, index) =>
+                  item === "..." ? (
+                    <span key={`ellipsis-${index}`} className="px-1">…</span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => setPage(item)}
+                      className={cn("grid h-7 min-w-7 place-items-center rounded-md px-1.5 font-medium tabular-nums", item === safePage ? "bg-ink text-page" : "text-ink-2 hover:bg-surface-hover")}
+                    >
+                      {item}
+                    </button>
+                  ),
+                )}
+                <button type="button" className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-hover disabled:opacity-40" disabled={safePage >= pageCount} onClick={() => setPage((prev) => Math.min(pageCount, prev + 1))}>
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       <Dialog open={Boolean(editingAccount)} onOpenChange={(open) => (!open ? setEditingAccount(null) : null)}>
-        <DialogContent showCloseButton={false} className="rounded-2xl p-6">
-          <DialogHeader className="gap-2">
-            <DialogTitle>编辑账户</DialogTitle>
-            <DialogDescription className="text-sm leading-6">
-              手动修改账号状态和专属代理。
-            </DialogDescription>
+        <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[520px]">
+          <DialogHeader className="gap-1">
+            <DialogTitle className="font-serif text-[22px] font-medium">编辑账号</DialogTitle>
+            <DialogDescription className="truncate font-mono text-xs text-ink-2">{editingAccount?.email || "—"}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-stone-700">状态</label>
+            <label className="grid gap-1.5 text-[13px] text-ink-2">
+              状态
               <Select value={editStatus} onValueChange={(value) => setEditStatus(value as AccountStatus)}>
-                <SelectTrigger className="h-11 rounded-xl border-stone-200 bg-white">
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger className="h-[38px] rounded-[7px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {accountStatusOptions
                     .filter((option) => option.value !== "all" && option.value !== "edit_cooldown")
                     .map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                     ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-stone-700">账号代理</label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Select value={editProxyChoice} onValueChange={setEditProxyChoice}>
-                  <SelectTrigger className="h-11 w-full min-w-0 flex-1 rounded-xl border-stone-200 bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_PROXY}>不指定，走全局代理</SelectItem>
-                    {proxies.map((proxy) => (
-                      <SelectItem key={proxy.key} value={proxy.key}>
-                        {proxyLabel(proxy)} · {proxy.account_count} 个账号
-                        {proxy.health.abnormal ? "（异常）" : ""}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={NEW_PROXY}>使用新代理</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="outline"
-                  className="h-11 rounded-xl border-stone-200 bg-white px-4 text-stone-700 sm:w-24"
-                  onClick={() => void handleTestAccountProxy()}
-                  disabled={isTestingProxy}
-                >
-                  {isTestingProxy ? <LoaderCircle className="size-4 animate-spin" /> : <Link2 className="size-4" />}
-                  测试
-                </Button>
-              </div>
+            </label>
+            <div className="grid gap-1.5 text-[13px] text-ink-2">
+              代理
+              <Select value={editProxyChoice} onValueChange={setEditProxyChoice}>
+                <SelectTrigger className="h-[38px] w-full min-w-0 rounded-[7px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_PROXY}>不指定，走全局代理</SelectItem>
+                  {proxies.map((proxy) => (
+                    <SelectItem key={proxy.key} value={proxy.key}>
+                      {proxyLabel(proxy)} · {proxy.account_count} 个账号
+                      {proxy.health.abnormal ? "（异常）" : ""}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={NEW_PROXY}>使用新代理</SelectItem>
+                </SelectContent>
+              </Select>
               {editProxyChoice === NEW_PROXY ? (
-                <Input
-                  value={editProxy}
-                  onChange={(event) => setEditProxy(event.target.value)}
-                  placeholder="http://user:pass@host:port"
-                  className="h-11 rounded-xl border-stone-200 bg-white"
-                />
+                <Input value={editProxy} onChange={(event) => setEditProxy(event.target.value)} placeholder="http://user:pass@host:port" className="h-[38px] rounded-[7px]" />
               ) : null}
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate text-xs text-ink-3">
+                {editingAccount?.status === "异常" && (editingAccount.last_refresh_error || editingAccount.last_token_refresh_error)
+                  ? `异常原因：${editingAccount.last_refresh_error || editingAccount.last_token_refresh_error}`
+                  : "测试会经所选代理访问 chatgpt.com"}
+              </span>
+              <Button variant="outline" size="sm" onClick={() => void handleTestAccountProxy()} disabled={isTestingProxy}>
+                {isTestingProxy ? <LoaderCircle className="size-4 animate-spin" /> : <Link2 className="size-4" />}
+                测试代理
+              </Button>
+            </div>
           </div>
-          <DialogFooter className="pt-2">
+          <DialogFooter className="pt-2 sm:justify-between">
             <Button
-              variant="secondary"
-              className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
-              onClick={() => setEditingAccount(null)}
+              variant="outline"
+              className="text-bad"
+              onClick={() => {
+                if (editingAccount) {
+                  const token = editingAccount.access_token;
+                  setEditingAccount(null);
+                  confirmDelete([token], "删除这个账号？");
+                }
+              }}
               disabled={isUpdating}
             >
-              取消
+              删除账号
             </Button>
-            <Button
-              className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
-              onClick={() => void handleUpdateAccount()}
-              disabled={isUpdating}
-            >
-              {isUpdating ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              保存修改
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setEditingAccount(null)} disabled={isUpdating}>取消</Button>
+              <Button onClick={() => void handleUpdateAccount()} disabled={isUpdating}>
+                {isUpdating ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                保存
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <section className="space-y-3">
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-          {metricCards.map((item) => {
-            const Icon = item.icon;
-            const value = (refreshSummary ?? summary)[item.key];
-            return (
-              <Card key={item.key} className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
-                <CardContent className="p-4">
-                  <div className="mb-4 flex items-start justify-between">
-                    <span className="text-xs font-medium text-stone-400">{item.label}</span>
-                    <Icon className="size-4 text-stone-400" />
-                  </div>
-                  <div className={cn("text-[1.75rem] font-semibold tracking-tight", item.color)}>
-                    <span className={typeof value === "number" ? "" : "text-[1.1rem]"}>
-                      {typeof value === "number" ? formatCompact(value) : value}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-        <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
-          <CardContent className="grid gap-4 p-4 sm:grid-cols-2">
-            {(
-              [
-                ["edits", "图生图"],
-                ["generations", "文生图"],
-              ] as const
-            ).map(([key, label]) => (
-              <div key={key} className="space-y-2">
-                <div className="text-sm font-medium text-stone-700">{label}</div>
-                <div className="grid grid-cols-5 gap-2">
-                  {imageCountWindows.map(([windowKey, windowLabel]) => (
-                    <div key={windowKey} className="rounded-xl bg-stone-50 px-2 py-2 text-center">
-                      <div className="text-[11px] text-stone-400">{windowLabel}</div>
-                      <div className="text-lg font-semibold tracking-tight text-stone-900">
-                        {imageCounts ? formatCompact(imageCounts[key][windowKey] || 0) : "—"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => (!open ? setPendingDelete(null) : null)}
+        title={pendingDelete?.title ?? ""}
+        description="账号和它们的 token 会从号池移除，无法恢复。已生成的图片不受影响。"
+        confirmLabel="删除"
+        danger
+        busy={isDeleting}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          void handleDeleteTokens(pendingDelete.tokens).finally(() => setPendingDelete(null));
+        }}
+      >
+        {pendingAccounts.length > 0 ? (
+          <div className="max-h-40 overflow-y-auto rounded-[7px] bg-sunken px-3 py-2 font-mono text-xs leading-6 text-ink-2">
+            {pendingAccounts.slice(0, 20).map((item) => (
+              <div key={item.access_token} className="truncate">{item.email || item.access_token.slice(0, 16)}</div>
             ))}
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold tracking-tight">账户列表</h2>
-            <Badge variant="secondary" className="rounded-lg bg-stone-200 px-2 py-0.5 text-stone-700">
-              {filteredAccounts.length}
-            </Badge>
+            {pendingAccounts.length > 20 ? <div>…另外 {pendingAccounts.length - 20} 个</div> : null}
           </div>
-
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-            <div className="relative min-w-[260px]">
-              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-stone-400" />
-              <Input
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setPage(1);
-                }}
-                placeholder="搜索邮箱"
-                className="h-10 rounded-xl border-stone-200 bg-white/85 pl-10"
-              />
-            </div>
-            <Select
-              value={typeFilter}
-              onValueChange={(value) => {
-                setTypeFilter(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white/85 lg:w-[150px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {accountTypeOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => {
-                setStatusFilter(value as StatusFilter);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white/85 lg:w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {accountStatusOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={proxyFilter}
-              onValueChange={(value) => {
-                setProxyFilter(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white/85 lg:w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部代理</SelectItem>
-                <SelectItem value="none">未指定代理</SelectItem>
-                {proxies.map((proxy) => (
-                  <SelectItem key={proxy.key} value={proxy.key}>
-                    {proxy.name || proxy.masked_url}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {isLoading && accounts.length === 0 ? (
-          <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
-            <CardContent className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-              <div className="rounded-xl bg-stone-100 p-3 text-stone-500">
-                <LoaderCircle className="size-5 animate-spin" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-stone-700">正在加载账户</p>
-                <p className="text-sm text-stone-500">从后端同步账号列表和状态。</p>
-              </div>
-            </CardContent>
-          </Card>
         ) : null}
-
-        <Card
-          className={cn(
-            "overflow-hidden rounded-2xl border-white/80 bg-white/90 shadow-sm",
-            isLoading && accounts.length === 0 ? "hidden" : "",
-          )}
-        >
-          <CardContent className="space-y-0 p-0">
-            <div className="flex flex-col gap-3 border-b border-stone-100 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500">
-                <Button
-                  variant="ghost"
-                  className="h-8 rounded-lg px-3 text-stone-500 hover:bg-stone-100"
-                  onClick={() => void handleRefreshAccounts(selectedTokens)}
-                  disabled={selectedTokens.length === 0 || isRefreshing}
-                >
-                  {isRefreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                  刷新选中账号信息和额度
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-8 rounded-lg px-3 text-stone-500 hover:bg-stone-100"
-                  onClick={() => void handleTestImages(selectedTokens)}
-                  disabled={selectedTokens.length === 0 || isTestingImages}
-                  title="每个选中账号用自己的代理出一张测试图"
-                >
-                  {isTestingImages ? <LoaderCircle className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
-                  测试生图
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-8 rounded-lg px-3 text-amber-600 hover:bg-amber-50 hover:text-amber-700"
-                  onClick={() => void handleReLogin(selectedTokens)}
-                  disabled={selectedTokens.length === 0 || isRelogining}
-                  title="尝试密码登录恢复账号"
-                >
-                  {isRelogining ? <LoaderCircle className="size-4 animate-spin" /> : <LogIn className="size-4" />}
-                  尝试恢复异常账号
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-8 rounded-lg px-3 text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-                  onClick={() => void handleDeleteTokens(abnormalTokens)}
-                  disabled={abnormalTokens.length === 0 || isDeleting}
-                >
-                  {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                  移除异常账号
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-8 rounded-lg px-3 text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-                  onClick={() => void handleDeleteTokens(selectedTokens)}
-                  disabled={selectedTokens.length === 0 || isDeleting}
-                >
-                  {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                  删除所选
-                </Button>
-                {selectedIds.length > 0 ? (
-                  <span className="rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-600">
-                    已选择 {selectedIds.length} 项
-                  </span>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] text-left">
-                <thead className="border-b border-stone-100 text-[11px] text-stone-400 uppercase tracking-[0.18em]">
-                  <tr>
-                    <th className="w-12 px-4 py-3">
-                      <Checkbox
-                        checked={allCurrentSelected}
-                        onCheckedChange={(checked) => toggleSelectAll(Boolean(checked))}
-                      />
-                    </th>
-                    <th className="w-56 px-4 py-3">账号信息</th>
-                    <th className="w-40 px-4 py-3">代理</th>
-                    <th className="w-24 px-4 py-3">类型</th>
-                    <th className="w-24 px-4 py-3">状态</th>
-                    <th className="w-24 px-4 py-3">额度</th>
-                    <th className="w-40 px-4 py-3">恢复时间</th>
-                    <th className="w-32 px-4 py-3">创建时间</th>
-                    <th className="w-18 px-4 py-3">在途</th>
-                    <th className="w-18 px-4 py-3">成功</th>
-                    <th className="w-18 px-4 py-3">失败</th>
-                    <th className="w-24 px-4 py-3">来源</th>
-                    <th className="w-20 px-4 py-3">token</th>
-                    <th className="w-24 px-4 py-3">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentRows.map((account) => {
-                    const status = statusMeta[account.status];
-                    const StatusIcon = status.icon;
-                    // ponytail: native title; the table's overflow clips a custom popover
-                    const statusError = account.status === "异常"
-                      ? (account.last_refresh_error || account.last_token_refresh_error || "").trim()
-                      : "";
-
-                    return (
-                      <tr
-                        key={account.access_token}
-                        className="border-b border-stone-100/80 text-sm text-stone-600 transition-colors hover:bg-stone-50/70"
-                      >
-                        <td className="px-4 py-3">
-                          <Checkbox
-                            checked={selectedIds.includes(account.access_token)}
-                            onCheckedChange={(checked) => {
-                              setSelectedIds((prev) =>
-                                checked
-                                  ? Array.from(new Set([...prev, account.access_token]))
-                                  : prev.filter((item) => item !== account.access_token),
-                              );
-                            }}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="text-xs leading-5 text-stone-600">{account.email ?? "—"}</div>
-                        </td>
-                        <td className="px-4 py-3 text-xs leading-5">
-                          {(() => {
-                            const url = (account.proxy || "").trim();
-                            if (!url) return <span className="text-stone-400">—</span>;
-                            const proxy = proxyForAccount(proxyByKey, account);
-                            return (
-                              <div
-                                className={cn("max-w-48 truncate", proxy?.health.abnormal ? "text-rose-500" : "text-stone-500")}
-                                title={proxy ? proxyLabel(proxy) : undefined}
-                              >
-                                {proxy ? proxy.name || proxy.masked_url : "…"}
-                                {proxy?.health.abnormal ? "（异常）" : ""}
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="secondary" className="rounded-md bg-stone-100 text-stone-700">
-                            {displayAccountType(account)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="space-y-1">
-                            <Badge
-                              variant={status.badge}
-                              title={statusError || undefined}
-                              className={`inline-flex items-center gap-1 rounded-md px-2 py-1${statusError ? " cursor-help" : ""}`}
-                            >
-                              <StatusIcon className="size-3.5" />
-                              {account.status}
-                            </Badge>
-                            {isEditUploadCooled(account) ? (
-                              <div className="text-[11px] font-medium text-amber-700">图生图冷却</div>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="info" className="rounded-md">
-                            {formatQuota(account)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-xs leading-5 text-stone-500">
-                          {(() => {
-                            const restore = formatRestoreAt(account.restore_at);
-                            const cooldown = isEditUploadCooled(account)
-                              ? formatRestoreAt(account.edit_upload_blocked_until)
-                              : null;
-                            return (
-                              <div className="space-y-1">
-                                <div className="space-y-0.5">
-                                  {restore.relative ? <div className="font-medium text-stone-700">{restore.relative}</div> : null}
-                                  <div>{restore.absolute}</div>
-                                </div>
-                                {cooldown ? (
-                                  <div className="space-y-0.5 border-t border-stone-100 pt-1">
-                                    <div className="font-medium text-amber-700">图生图冷却 {cooldown.relative}</div>
-                                    <div>{cooldown.absolute}</div>
-                                  </div>
-                                ) : null}
-                              </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-4 py-3 text-xs leading-5 text-stone-500">
-                          {(() => {
-                            const raw = (account as any).created_at;
-                            if (!raw) return "—";
-                            try {
-                              const d = new Date(raw + "Z");
-                              if (isNaN(d.getTime())) return String(raw).slice(0, 10);
-                              return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-                            } catch { return String(raw).slice(0, 10); }
-                          })()}
-                        </td>
-                        <td className="px-4 py-3">
-                          {(() => {
-                            const inflight = account.image_inflight ?? 0;
-                            return (
-                              <span
-                                className={
-                                  inflight > 0
-                                    ? "font-semibold text-amber-600"
-                                    : "text-stone-400"
-                                }
-                                title={
-                                  inflight > 0
-                                    ? "当前正在生成的图片数。号池空闲时此值持续 > 0，说明并发槽位泄漏、该账号已被静默排除出调度"
-                                    : "当前无在途生图任务"
-                                }
-                              >
-                                {inflight}
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-4 py-3 text-stone-500">{account.success}</td>
-                        <td className="px-4 py-3 text-stone-500">{account.fail}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="rounded-md border-stone-200 text-stone-600">
-                            {displayAccountSource(account)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-2 py-1 text-xs text-stone-500 transition hover:bg-stone-100 hover:text-stone-700"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(account.access_token);
-                              toast.success("token 已复制");
-                            }}
-                          >
-                            <Copy className="size-3.5" />
-                            复制
-                          </button>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1 text-stone-400">
-                            <button
-                              type="button"
-                              className="rounded-lg p-2 transition hover:bg-stone-100 hover:text-stone-700"
-                              onClick={() => openEditDialog(account)}
-                              disabled={isUpdating}
-                            >
-                              <Pencil className="size-4" />
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-lg p-2 transition hover:bg-stone-100 hover:text-stone-700"
-                              onClick={() => void handleRefreshAccounts([account.access_token])}
-                              disabled={isRefreshing || refreshingTokens.has(account.access_token)}
-                            >
-                              <RefreshCw className={cn("size-4", (isRefreshing || refreshingTokens.has(account.access_token)) ? "animate-spin" : "")} />
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-lg p-2 transition hover:bg-rose-50 hover:text-rose-500"
-                              onClick={() => void handleDeleteTokens([account.access_token])}
-                              disabled={isDeleting}
-                            >
-                              <Trash2 className="size-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {!isLoading && currentRows.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-                  <div className="rounded-xl bg-stone-100 p-3 text-stone-500">
-                    <Search className="size-5" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-stone-700">没有匹配的账户</p>
-                    <p className="text-sm text-stone-500">调整筛选条件或搜索关键字后重试。</p>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="border-t border-stone-100 px-4 py-4">
-              <div className="flex items-center justify-center gap-3 overflow-x-auto whitespace-nowrap">
-                <div className="shrink-0 text-sm text-stone-500">
-                显示第 {filteredAccounts.length === 0 ? 0 : startIndex + 1} -{" "}
-                {Math.min(startIndex + Number(pageSize), filteredAccounts.length)} 条，共{" "}
-                {filteredAccounts.length} 条
-                </div>
-
-                <span className="shrink-0 text-sm leading-none text-stone-500">
-                  {safePage} / {pageCount} 页
-                </span>
-                <Select
-                  value={pageSize}
-                  onValueChange={(value) => {
-                    setPageSize(value);
-                    setPage(1);
-                  }}
-                >
-                  <SelectTrigger className="h-10 w-[108px] shrink-0 rounded-lg border-stone-200 bg-white text-sm leading-none">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="10">10 / 页</SelectItem>
-                    <SelectItem value="20">20 / 页</SelectItem>
-                    <SelectItem value="50">50 / 页</SelectItem>
-                    <SelectItem value="100">100 / 页</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="size-10 shrink-0 rounded-lg border-stone-200 bg-white"
-                  disabled={safePage <= 1}
-                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                >
-                  <ChevronLeft className="size-4" />
-                </Button>
-                {paginationItems.map((item, index) =>
-                  item === "..." ? (
-                    <span key={`ellipsis-${index}`} className="px-1 text-sm text-stone-400">
-                      ...
-                    </span>
-                  ) : (
-                    <Button
-                      key={item}
-                      variant={item === safePage ? "default" : "outline"}
-                      className={cn(
-                        "h-10 min-w-10 shrink-0 rounded-lg px-3",
-                        item === safePage
-                          ? "bg-stone-950 text-white hover:bg-stone-800"
-                          : "border-stone-200 bg-white text-stone-700",
-                      )}
-                      onClick={() => setPage(item)}
-                    >
-                      {item}
-                    </Button>
-                  ),
-                )}
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="size-10 shrink-0 rounded-lg border-stone-200 bg-white"
-                  disabled={safePage >= pageCount}
-                  onClick={() => setPage((prev) => Math.min(pageCount, prev + 1))}
-                >
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-    </>
+      </ConfirmDialog>
+    </section>
   );
 }
+
 
 export default function AccountsPage() {
   const { isCheckingAuth, session } = useAuthGuard(["admin"]);

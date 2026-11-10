@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
+  ChevronRight,
   Copy,
   ExternalLink,
   FileJson,
@@ -170,30 +171,42 @@ function MethodCard({
   description,
   icon: Icon,
   onClick,
+  recommended = false,
 }: {
   title: string;
   description: string;
   icon: typeof KeyRound;
   onClick: () => void;
+  recommended?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="w-full rounded-2xl border border-stone-200 bg-white p-0 text-left transition hover:border-stone-300 hover:bg-stone-50"
+      className={cn(
+        "grid w-full grid-cols-[20px_1fr_auto] items-center gap-3 rounded-[7px] border px-3.5 py-2.5 text-left transition",
+        recommended ? "border-clay bg-clay-soft hover:bg-clay-soft/80" : "border-line bg-surface hover:bg-surface-hover",
+      )}
     >
-      <Card className="rounded-2xl border-0 bg-transparent shadow-none">
-        <CardContent className="flex items-start gap-4 p-4">
-          <div className="rounded-xl bg-stone-100 p-3 text-stone-700">
-            <Icon className="size-5" />
-          </div>
-          <div className="space-y-1">
-            <div className="text-sm font-semibold text-stone-900">{title}</div>
-            <div className="text-sm leading-6 text-stone-500">{description}</div>
-          </div>
-        </CardContent>
-      </Card>
+      <Icon className="size-4 text-ink-2" />
+      <span className="min-w-0">
+        <span className="block text-[13px] font-medium text-ink">
+          {title}
+          {recommended ? <span className="ml-2 text-xs font-normal text-clay-hover">推荐</span> : null}
+        </span>
+        <span className="block text-xs leading-5 text-ink-3">{description}</span>
+      </span>
+      <ChevronRight className="size-4 text-ink-3" />
     </button>
+  );
+}
+
+function MethodGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="pt-1 text-[11px] tracking-[0.06em] text-ink-3">{label}</div>
+      {children}
+    </div>
   );
 }
 
@@ -924,64 +937,38 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
       );
     }
 
+    const toSettings = () => {
+      setOpen(false);
+      resetState();
+      router.push("/settings");
+    };
     return (
       <div className="space-y-3">
-        <MethodCard
-          title="OAuth 登录已有账号（带自动刷新）"
-          description="用浏览器登录自己的 ChatGPT 账号，回填 callback URL 即可拿到 refresh_token，后台会自动续期。"
-          icon={LogIn}
-          onClick={() => setMethod("oauth")}
-        />
-        <MethodCard
-          title="批量协议登录（邮箱----密码----TOTP密钥）"
-          description="粘贴账号列表，后台直接走协议登录，支持二步验证；成功后自动入池并续期。"
-          icon={ShieldCheck}
-          onClick={() => setMethod("protocol")}
-        />
-        <MethodCard
-          title="导入 Access Token"
-          description="支持直接粘贴，一行一个；也支持从 TXT 文件读取，一行一个。"
-          icon={KeyRound}
-          onClick={() => setMethod("token")}
-        />
-        <MethodCard
-          title="导入 Session JSON"
-          description="从 chatgpt.com 的 session 接口复制完整 JSON，自动提取 accessToken。"
-          icon={FileJson}
-          onClick={() => setMethod("session")}
-        />
-        <MethodCard
-          title="导入 Codex 认证 JSON"
-          description="粘贴 Codex 认证 JSON，导入后账号来源标记为 codex。"
-          icon={FileJson}
-          onClick={() => setMethod("codex-auth")}
-        />
-        <MethodCard
-          title="导入账号 JSON 文件"
-          description="支持本项目导出的单账号 JSON 或全部账号数组，也兼容 CPA JSON 文件。"
-          icon={Files}
-          onClick={() => setMethod("account-json")}
-        />
-        <MethodCard
-          title="从远程 CPA 服务器导入"
-          description="前往设置页面配置远程 CPA 服务器后再执行导入。"
-          icon={Files}
-          onClick={() => {
-            setOpen(false);
-            resetState();
-            router.push("/settings");
-          }}
-        />
-        <MethodCard
-          title="从 Sub2API 服务器导入"
-          description="前往设置页面配置 Sub2API 服务器，再选择其中的 OpenAI 账号导入。"
-          icon={ServerCog}
-          onClick={() => {
-            setOpen(false);
-            resetState();
-            router.push("/settings");
-          }}
-        />
+        <MethodGroup label="登录">
+          <MethodCard
+            recommended
+            title="批量协议登录"
+            description="每行「邮箱----密码----TOTP 密钥」，自动登录、入池并续期"
+            icon={ShieldCheck}
+            onClick={() => setMethod("protocol")}
+          />
+          <MethodCard
+            title="OAuth 登录"
+            description="浏览器登录后回填 callback，拿到 refresh_token 自动续期"
+            icon={LogIn}
+            onClick={() => setMethod("oauth")}
+          />
+        </MethodGroup>
+        <MethodGroup label="粘贴凭证">
+          <MethodCard title="Access Token" description="一行一个，或读取 TXT 文件" icon={KeyRound} onClick={() => setMethod("token")} />
+          <MethodCard title="Session JSON" description="从 chatgpt.com 的 session 接口复制完整 JSON" icon={FileJson} onClick={() => setMethod("session")} />
+          <MethodCard title="Codex 认证 JSON" description="导入后账号来源标记为 codex" icon={FileJson} onClick={() => setMethod("codex-auth")} />
+          <MethodCard title="账号 JSON 文件" description="本项目导出的账号 JSON，也兼容 CPA JSON 文件" icon={Files} onClick={() => setMethod("account-json")} />
+        </MethodGroup>
+        <MethodGroup label="从服务器拉取">
+          <MethodCard title="CPA 服务器" description="在设置里配置远程 CPA 服务器后选择账号导入" icon={Files} onClick={toSettings} />
+          <MethodCard title="Sub2API 服务器" description="在设置里配置 Sub2API 服务器后选择 OpenAI 账号导入" icon={ServerCog} onClick={toSettings} />
+        </MethodGroup>
       </div>
     );
   };
@@ -991,19 +978,15 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <Button
-          className="h-10 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800"
-          onClick={() => setOpen(true)}
-          disabled={disabled}
-        >
+        <Button variant="clay" onClick={() => setOpen(true)} disabled={disabled}>
           <Upload className="size-4" />
-          导入
+          导入账号
         </Button>
-        <DialogContent showCloseButton={false} className="rounded-2xl p-6">
-          <DialogHeader className="gap-2">
-            <DialogTitle>
+        <DialogContent showCloseButton={false} className="max-h-[92vh] overflow-y-auto rounded-[14px] p-6 sm:max-w-[560px]">
+          <DialogHeader className="gap-1.5">
+            <DialogTitle className="font-serif text-[22px] font-medium">
               {method === "menu"
-                ? "导入账户"
+                ? "导入账号"
                 : method === "token"
                   ? "导入 Access Token"
                   : method === "session"
@@ -1033,8 +1016,12 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             </DialogDescription>
           </DialogHeader>
 
+
+          {renderMethodBody()}
+
+          {method !== "menu" ? (
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">导入代理</label>
+            <label className="text-[13px] text-ink-2">代理</label>
             <Select value={proxyChoice} onValueChange={handleProxyChoiceChange}>
               <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white">
                 <SelectValue />
@@ -1085,8 +1072,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
               </p>
             )}
           </div>
-
-          {renderMethodBody()}
+          ) : null}
 
           <DialogFooter className="pt-2">
             <Button

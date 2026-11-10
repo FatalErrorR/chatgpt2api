@@ -40,6 +40,7 @@ export type Account = {
   last_refresh_error?: string | null;
   last_token_refresh_error?: string | null;
   proxy?: string | null;
+  created_at?: string | null;
   /** 后端按代理清单同一规则算出的识别值，用来匹配代理名称、健康和筛选；proxy 本身不变 */
   proxy_key?: string;
 };
