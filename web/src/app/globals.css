@@ -171,6 +171,12 @@
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  /* 侧栏这类窄列表：细滚动条，颜色跟主题走 */
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
 }
 
 /* 去掉旧页面的投影；inset 阴影是新页面画的选中框和状态左边线，必须保留 */

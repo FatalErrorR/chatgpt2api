@@ -966,20 +966,23 @@ function AccountsPageContent() {
               <span>全部</span>
               <span className={facetCount}>{accounts.length}</span>
             </button>
-            {proxies.map((proxy) => (
-              <button
-                key={proxy.key}
-                type="button"
-                className={facetButton(proxyFilter === proxy.key)}
-                onClick={() => setFilter(() => setProxyFilter(proxy.key))}
-                title={proxyLabel(proxy)}
-              >
-                <StatusDot tone={proxy.health.abnormal ? "bad" : proxy.health.successes > 0 ? "ok" : "off"} className="min-w-0 overflow-hidden">
-                  <span className="truncate">{proxyShortName(proxy)}</span>
-                </StatusDot>
-                <span className={facetCount}>{facetCounts.proxyKeys.get(proxy.key) ?? 0}</span>
-              </button>
-            ))}
+            {/* 代理多时只露 10 行（每行 h-8），其余滚动；「全部」「未指定」留在外面 */}
+            <div className="thin-scrollbar max-h-80 overflow-y-auto pr-1 [&>button]:h-8">
+              {proxies.map((proxy) => (
+                <button
+                  key={proxy.key}
+                  type="button"
+                  className={facetButton(proxyFilter === proxy.key)}
+                  onClick={() => setFilter(() => setProxyFilter(proxy.key))}
+                  title={proxyLabel(proxy)}
+                >
+                  <StatusDot tone={proxy.health.abnormal ? "bad" : proxy.health.successes > 0 ? "ok" : "off"} className="min-w-0 overflow-hidden">
+                    <span className="truncate">{proxyShortName(proxy)}</span>
+                  </StatusDot>
+                  <span className={facetCount}>{facetCounts.proxyKeys.get(proxy.key) ?? 0}</span>
+                </button>
+              ))}
+            </div>
             <button type="button" className={facetButton(proxyFilter === "none")} onClick={() => setFilter(() => setProxyFilter("none"))}>
               <StatusDot tone="off">未指定</StatusDot>
               <span className={facetCount}>{facetCounts.noProxy}</span>
