@@ -15,6 +15,7 @@ import {
   type ImageOutputCounts,
 } from "@/lib/api";
 import { getValidatedAuthSession } from "@/lib/auth-session";
+import { shortError } from "@/lib/log-detail";
 import { buildTodos, failedSources, formatSize, settle, type OverviewSources } from "@/lib/overview";
 import { cn } from "@/lib/utils";
 import { getDefaultRouteForRole } from "@/store/auth";
@@ -299,7 +300,7 @@ function Overview() {
                       <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-ink-2 shadow-[inset_2px_0_0_var(--bad)] pl-3">{String(item.time).slice(11)}</td>
                       <td className="py-2.5 pr-4 whitespace-nowrap text-ink">{detail.endpoint || "—"}</td>
                       <td className="py-2.5 pr-4 whitespace-nowrap text-ink-3">{detail.account_email || "—"}</td>
-                      <td className="max-w-[420px] truncate py-2.5 text-ink-3" title={detail.error}>{detail.error || item.summary}</td>
+                      <td className="max-w-[420px] truncate py-2.5 text-ink-3" title={detail.error}>{detail.error ? shortError(detail.error) : item.summary}</td>
                     </tr>
                   );
                 })}
