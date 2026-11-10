@@ -65,3 +65,37 @@
 | 4.5 | 加载骨架、空状态、出错状态统一组件，替换各页零散写法 |
 | 4.6 | 删除页面里写死的 `stone-*` 等颜色，统一用设计变量；深色模式逐页检查 |
 | 4.7 | 版本更新对话框、删除确认对话框统一 |
+
+## 进度（2026-11-10）
+
+已完成并合并到 main（按批次的 commit 见 `git log --oneline -- web`）：
+
+- 第 1 批全部；概览各块加载失败会显示成失败，不再显示 0 /「全部正常」（`lib/overview.ts`）。
+- 第 2 批：2.1–2.5、2.7；代理对话框另加了批量添加和按厂商命名。**2.6 未完成**：导入对话框内部仍是旧样式（约 120 处 stone-*），也还没有「平均分配预览」。
+- 第 3 批：会话栏、结果流、输入框、大图预览已是新样式，但 `image-composer.tsx`、`image-results.tsx`、`image/page.tsx` 里还有零散的 stone-*。
+- 4.1 图片管理、4.2 日志：完成。
+- 4.4 调试：分段控件完成；各面板内部（`debug/components/*`）仍是旧样式。
+- 基础组件（Card、Input、Textarea、Select、Popover、Table、Field、Calendar）已换成设计变量。
+
+共享部件，新页面直接用，不要再各写一份：
+
+| 用途 | 位置 |
+| --- | --- |
+| 页头 | `components/page-header.tsx` |
+| 分段控件 | `components/ui/segmented.tsx`（Tabs 版用 `segmentedListClass` / `segmentedItemClass`） |
+| 加载 / 空 / 出错 | `components/ui/states.tsx`（`SkeletonLines`、`EmptyState`、`ErrorState`） |
+| 确认 / 删除对话框 | `components/confirm-dialog.tsx` |
+| 选中后的批量操作条 | `components/ui/batch-bar.ts` |
+| 状态点 | `components/ui/status-dot.tsx` |
+
+未完成：
+
+- **4.3 设置**：14 个组件都还是旧卡片（`config-card` 一个文件就有 200 多处 stone-*），要改成「左侧目录 + 每组左说明右表单」，5 个设置对话框统一结构。
+- **4.5** 剩下的页面换成 `states.tsx`；**4.7** 版本更新对话框、`badge.tsx`。
+- **4.6** 所有页面改完后，删掉 `globals.css` 里 `.dark .bg-white` / `.dark .text-stone-*` 等带 `!important` 的兜底覆盖和顶部那句注释，再逐页看一遍深色。
+
+已知的坑：
+
+- 深色下 `bg-ink` 是浅色。叠在它上面的东西（批量操作条）不能写死浅色字；深色主题的 `--bad` 是浅粉，在浅底上要用 `#B5483B`。
+- 深色去阴影规则只跳过 `shadow-[inset…]`，选中框、状态线必须用 inset 阴影画。
+- `test/dark-theme.test.ts` 会拦住 `bg-stone-950/900 + text-white` 的按钮和批量条上写死的浅红字。
