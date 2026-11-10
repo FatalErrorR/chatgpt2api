@@ -405,12 +405,12 @@ export function ImageResults({
                   </div>
 
                   {turn.status === "error" && turn.error ? (
-                    <div className="mt-4 flex items-center justify-between border-l-2 border-amber-300 bg-amber-50/70 px-4 py-3 text-sm leading-6 text-amber-700">
+                    <div className="mt-4 flex items-center justify-between border-l-2 border-warn bg-warn-soft px-4 py-3 text-sm leading-6 text-ink-2">
                       <span>{turn.error}</span>
                       <button
                         type="button"
                         onClick={() => void onDismissErrors(selectedConversation.id, turn.id)}
-                        className="ml-3 inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-medium text-amber-700 transition hover:bg-amber-200 hover:text-amber-900"
+                        className="ml-3 inline-flex shrink-0 items-center gap-1 rounded-full bg-surface px-2.5 py-1 text-[11px] font-medium text-warn transition hover:bg-surface-hover hover:text-ink"
                       >
                         <EyeOff className="size-3" />
                         忽略错误

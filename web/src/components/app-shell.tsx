@@ -192,7 +192,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const canvasDialog = (
     <Dialog open={isCanvasDialogOpen} onOpenChange={setIsCanvasDialogOpen}>
-      <DialogContent showCloseButton={false} className="rounded-2xl p-6">
+      <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
         <DialogHeader className="gap-2">
           <DialogTitle>跳转到三方应用</DialogTitle>
           <DialogDescription className="text-sm leading-6">

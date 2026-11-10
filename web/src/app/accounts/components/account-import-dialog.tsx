@@ -710,7 +710,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             </a>
             ，复制页面返回的完整 JSON，系统会自动提取其中的 `accessToken` 导入。
           </div>
-          <div className="rounded-[10px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+          <div className="rounded-[10px] border border-warn-soft bg-warn-soft p-4 text-sm leading-6 text-ink">
             <div className="font-medium">风险提示</div>
             <div>
               不要使用自己的大号，尽量使用不常用的小号进行导入，避免出现封号风险。本项目不承担任何封号风险责任。
@@ -774,9 +774,9 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                     <span
                       className={cn(
                         "shrink-0",
-                        item.status === "成功" ? "text-emerald-600" : "",
+                        item.status === "成功" ? "text-ok" : "",
                         item.status === "失败" ? "text-bad" : "",
-                        item.status === "登录中" ? "text-amber-600" : "",
+                        item.status === "登录中" ? "text-warn" : "",
                         item.status === "等待" ? "text-ink-3" : "",
                       )}
                     >
@@ -886,7 +886,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
               </div>
             </div>
           )}
-          <div className="rounded-[10px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+          <div className="rounded-[10px] border border-warn-soft bg-warn-soft p-4 text-sm leading-6 text-ink">
             <div className="font-medium">注意</div>
             <div>
               授权码（code）只能使用一次。如果浏览器的 callback 页加载完成、显示了 OpenAI 的错误页，那 code 大概率已经被消耗，

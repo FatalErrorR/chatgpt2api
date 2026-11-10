@@ -335,7 +335,7 @@ export function ImageComposer({
                     <span className="hidden sm:inline">剩余额度 </span>{availableQuota}
                   </div>
                   {activeTaskCount > 0 && (
-                    <div className="flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 sm:gap-1.5 sm:px-3 sm:py-2 sm:text-xs">
+                    <div className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-1 text-[10px] font-medium text-warn sm:gap-1.5 sm:px-3 sm:py-2 sm:text-xs">
                       <LoaderCircle className="size-3 animate-spin" />
                       {activeTaskCount}<span className="hidden sm:inline"> 个任务处理中</span>
                     </div>

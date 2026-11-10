@@ -55,3 +55,24 @@ test("批量操作条（bg-ink）上的按钮不写死浅色，深色下条是�
   assert.match(shared, /dark:text-/);
   assert.deepEqual(offenders, []);
 });
+
+test("页面不写死调色盘颜色：深色兜底已删除，只用设计变量", () => {
+  // 灯箱是固定黑底，白色半透明按钮是对的
+  const allowed = new Set(["components/image-lightbox.tsx"]);
+  const pattern = /(?<![\w:-])(?:bg|text|border)-(?:stone|emerald|amber|sky|slate|zinc|gray|red|green|blue|rose)-\d{2,3}\b|(?<![\w:-])bg-white(?![\w-])/;
+  const offenders = sourceFiles(SRC).flatMap((file) => {
+    const rel = file.slice(SRC.length);
+    if (allowed.has(rel)) return [];
+    return readFileSync(file, "utf8")
+      .split("\n")
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => pattern.test(line))
+      .map(({ index }) => `${rel}:${index + 1}`);
+  });
+  assert.deepEqual(offenders, []);
+});
+
+test("选中的复选框在深色下也有底色", () => {
+  const checkbox = readFileSync(join(SRC, "components/ui/checkbox.tsx"), "utf8");
+  assert.match(checkbox, /dark:data-\[state=checked\]:bg-primary/);
+});

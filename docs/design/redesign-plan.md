@@ -71,7 +71,7 @@
 已完成并合并到 main（按批次的 commit 见 `git log --oneline -- web`）：
 
 - 第 1 批全部；概览各块加载失败会显示成失败，不再显示 0 /「全部正常」（`lib/overview.ts`）。
-- 第 2 批全部。2.6 导入对话框已换成设计变量，平均分配会按现有 `account_count` 和健康状态预览每个代理分到几个新账号（`lib/proxy-distribution.ts`，规则与 `ProxyList.reserve` 一致，不含其它批次的预留名额）。
+- 第 2 批全部。2.6 导入对话框已换成设计变量，平均分配会按现有 `account_count` 和健康状态预览每个代理分到几个新账号（`lib/proxy-distribution.ts`，规则与 `ProxyList.reserve` 一致，不含其它批次的预留名额；输入里已在号池的账号也算进去，所以预览可能偏多）。
 - 第 3 批全部。生图页残留的 stone-* 已清掉。
 - 4.1 图片管理、4.2 日志、4.3 设置、4.4 调试：完成。设置是左侧目录加「左说明、右表单」；五个设置对话框（CPA、浏览器导入、Sub2API、用户密钥、R2 备份详情）共用衬线标题、一句说明、右下角操作。调试各面板是左边请求、右边等宽返回。
 - 4.5 加载 / 空 / 出错用 `states.tsx`。4.7 版本更新对话框和 `badge.tsx` 已换成设计变量。
@@ -97,4 +97,6 @@
 - 深色下 `bg-ink` 是浅色。叠在它上面的东西（批量操作条）不能写死浅色字；深色主题的 `--bad` 是浅粉，在浅底上要用 `#B5483B`。
 - 深色去阴影规则只跳过 `shadow-[inset…]`，选中框、状态线必须用 inset 阴影画。
 - `test/dark-theme.test.ts` 会拦住 `bg-stone-950/900 + text-white` 的按钮和批量条上写死的浅红字。
+- 复选框：`dark:bg-input/30` 会盖掉选中底色，所以 `checkbox.tsx` 单独补了 `dark:data-[state=checked]:bg-primary`，否则深色下勾选和没勾一样。
+- `globals.css` 里对 stone / emerald / amber / rose / red / orange 色阶的重定义已删除（页面里已经不用这些色阶）。新代码只用设计变量；`dark-theme.test.ts` 会拦住写死的调色盘颜色和 `bg-white`（灯箱除外）。
 - 大图预览里叠在照片上的半透明白按钮（`bg-white/10`、图片管理的 `hover:bg-white`）是叠层，不是页面底色。
