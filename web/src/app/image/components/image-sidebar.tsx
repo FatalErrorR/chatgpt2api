@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoaderCircle, MessageSquarePlus, Pencil, Trash2 } from "lucide-react";
+import { StatusDot } from "@/components/ui/status-dot";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,12 @@ type ImageSidebarProps = {
   formatConversationTime: (value: string) => string;
   hideActionButtons?: boolean;
 };
+
+function isToday(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+}
 
 export function ImageSidebar({
   conversations,
@@ -67,13 +74,15 @@ export function ImageSidebar({
       <div className="flex h-full min-h-0 flex-col gap-2 py-1 sm:gap-3 sm:py-2">
         {!hideActionButtons && (
           <div className="flex items-center gap-2">
-            <Button className="h-10 flex-1 rounded-xl bg-stone-950 text-white hover:bg-stone-800" onClick={onCreateDraft}>
+            <Button variant="outline" className="h-[34px] flex-1" onClick={onCreateDraft}>
               <MessageSquarePlus className="size-4" />
               新建对话
             </Button>
             <Button
-              variant="outline"
-              className="h-10 rounded-xl border-stone-200 bg-white/85 px-3 text-stone-600 hover:bg-white"
+              variant="ghost"
+              size="icon"
+              className="size-[34px]"
+              title="清空全部会话"
               onClick={() => void onClearHistory()}
               disabled={conversations.length === 0}
             >
@@ -96,18 +105,21 @@ export function ImageSidebar({
           ) : conversations.length === 0 ? (
             <div className="px-2 py-3 text-sm leading-6 text-stone-500">还没有图片记录，输入提示词后会在这里显示。</div>
           ) : (
-            conversations.map((conversation) => {
+            conversations.map((conversation, index) => {
               const active = conversation.id === selectedConversationId;
+              const group = isToday(conversation.updatedAt) ? "今天" : "更早";
+              const prevGroup = index > 0 ? (isToday(conversations[index - 1].updatedAt) ? "今天" : "更早") : null;
               const stats = getImageConversationStats(conversation);
               return (
+                <div key={conversation.id}>
+                {group !== prevGroup ? <div className="px-2.5 pt-2 pb-1 text-[11px] tracking-[0.06em] text-ink-3">{group}</div> : null}
                 <div
-                  key={conversation.id}
                   className={cn(
-                    "group relative w-full border-l-2 text-left transition",
-                    hideActionButtons ? "px-4 py-3.5" : "px-3 py-2 sm:py-3",
+                    "group relative w-full rounded-[7px] text-left transition",
+                    hideActionButtons ? "px-4 py-3" : "px-2.5 py-2",
                     active
-                      ? "border-stone-900 bg-black/[0.035] text-stone-950"
-                      : "border-transparent text-stone-700 hover:border-stone-300 hover:bg-white/40",
+                      ? "bg-surface text-ink shadow-[inset_0_0_0_1px_var(--line)]"
+                      : "text-ink-2 hover:bg-surface-hover hover:text-ink",
                   )}
                 >
                   <button
@@ -115,7 +127,7 @@ export function ImageSidebar({
                     onClick={() => onSelectConversation(conversation.id)}
                     className="block w-full pr-8 text-left"
                   >
-                    <div className={cn("truncate font-semibold", hideActionButtons ? "text-base" : "text-sm")}>
+                    <div className={cn("truncate", hideActionButtons ? "text-base" : "text-[13px]")}>
                       {editingId === conversation.id ? (
                         <input
                           ref={editInputRef}
@@ -133,16 +145,16 @@ export function ImageSidebar({
                         <span className="truncate">{conversation.title}</span>
                       )}
                     </div>
-                    <div className={cn("mt-1 text-xs", active ? "text-stone-500" : "text-stone-400")}>
+                    <div className="mt-0.5 text-[11px] text-ink-3">
                       {conversation.turns.length} 轮 · {formatConversationTime(conversation.updatedAt)}
                     </div>
                     {stats.running > 0 || stats.queued > 0 ? (
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                         {stats.running > 0 ? (
-                          <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-600">处理中 {stats.running}</span>
+                          <StatusDot tone="ok" className="text-[11px] text-ink-2">处理中 {stats.running}</StatusDot>
                         ) : null}
                         {stats.queued > 0 ? (
-                          <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">排队 {stats.queued}</span>
+                          <StatusDot tone="warn" className="text-[11px] text-ink-2">排队 {stats.queued}</StatusDot>
                         ) : null}
                       </div>
                     ) : null}
@@ -165,6 +177,7 @@ export function ImageSidebar({
                       <Trash2 className="size-4" />
                     </button>
                   </div>
+                </div>
                 </div>
               );
             })

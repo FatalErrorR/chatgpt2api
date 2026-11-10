@@ -270,7 +270,7 @@ export function ImageComposer({
 
         <div
           className={cn(
-            "overflow-hidden rounded-[24px] border border-stone-200 bg-white shadow-[0_14px_60px_-42px_rgba(15,23,42,0.45)] transition dark:border-white/10 dark:bg-stone-950/80 sm:rounded-[32px] sm:shadow-none",
+            "overflow-hidden rounded-[16px] border border-line-strong bg-surface shadow-[0_8px_24px_-18px_rgba(60,50,30,0.35)] transition",
             isDraggingImage && "border-stone-900 bg-stone-50",
           )}
         >
@@ -307,10 +307,10 @@ export function ImageComposer({
                   void onSubmit();
                 }
               }}
-              className="min-h-[82px] resize-none rounded-[24px] border-0 bg-transparent px-4 pt-4 pb-2 text-[15px] leading-6 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 dark:text-stone-100 dark:placeholder:text-stone-500 sm:min-h-[148px] sm:rounded-[32px] sm:px-6 sm:pt-6 sm:pb-20 sm:leading-7"
+              className="min-h-[82px] resize-none rounded-[16px] border-0 bg-transparent px-4 pt-4 pb-2 text-[15px] leading-6 text-ink shadow-none placeholder:text-ink-3 focus-visible:ring-0 sm:min-h-[132px] sm:px-5 sm:pt-5 sm:pb-20 sm:leading-7"
             />
             {isDraggingImage ? (
-              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[24px] border-2 border-dashed border-stone-900 bg-white/85 text-sm font-medium text-stone-900 backdrop-blur-[1px] sm:rounded-[32px]">
+              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[16px] border-2 border-dashed border-clay bg-surface/90 text-sm font-medium text-ink backdrop-blur-[1px]">
                 <div className="flex items-center gap-2 rounded-full bg-stone-950 px-4 py-2 text-white shadow-lg">
                   <ImagePlus className="size-4" />
                   <span>松开以上传参考图</span>
@@ -318,7 +318,7 @@ export function ImageComposer({
               </div>
             ) : null}
 
-            <div className="rounded-b-[24px] border-t border-stone-100 bg-white px-3 pb-3 pt-2 dark:border-white/10 dark:bg-stone-950/95 sm:absolute sm:inset-x-0 sm:bottom-0 sm:rounded-b-none sm:border-t-0 sm:bg-gradient-to-t sm:from-white sm:via-white/95 sm:to-transparent sm:px-6 sm:pb-4 sm:pt-6 sm:dark:from-stone-950 sm:dark:via-stone-950/95 sm:dark:to-stone-950/0" onClick={(event) => event.stopPropagation()}>
+            <div className="rounded-b-[16px] border-t border-line bg-surface px-3 pb-3 pt-2 sm:absolute sm:inset-x-0 sm:bottom-0 sm:rounded-b-none sm:border-t-0 sm:bg-gradient-to-t sm:from-surface sm:via-surface/95 sm:to-transparent sm:px-5 sm:pb-3.5 sm:pt-6" onClick={(event) => event.stopPropagation()}>
               <div className="flex items-end justify-between gap-2 sm:gap-3">
                 <div className="hide-scrollbar flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:gap-3 sm:overflow-visible sm:pb-0">
                   <Button
@@ -360,7 +360,7 @@ export function ImageComposer({
                     {isSizeMenuOpen ? (
                       <div
                         ref={sizeMenuRef}
-                        className="fixed z-[80] max-h-[62dvh] overflow-y-auto rounded-[24px] border border-stone-200/70 bg-white p-4 shadow-[0_30px_90px_-34px_rgba(15,23,42,0.42)] sm:max-h-none sm:overflow-visible"
+                        className="fixed z-[80] max-h-[62dvh] overflow-y-auto rounded-[14px] border border-line bg-surface p-4 shadow-[0_30px_60px_-30px_rgba(30,25,15,0.45)] sm:max-h-[calc(100dvh-8rem)] sm:overflow-y-auto"
                         style={{
                           top: sizeMenuPos.top,
                           left: sizeMenuPos.left,
@@ -418,7 +418,7 @@ export function ImageComposer({
                                   type="button"
                                   className={cn(
                                     "h-9 cursor-pointer rounded-full border border-stone-200 bg-white text-sm text-stone-800 transition hover:border-stone-300 hover:bg-stone-50",
-                                    active && "border-stone-950 bg-white font-medium text-stone-950",
+                                    active && "border-ink bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--ink)]",
                                   )}
                                   onClick={() => onImageQualityChange(option.value)}
                                 >
@@ -441,7 +441,7 @@ export function ImageComposer({
                                   disabled={disabled}
                                   className={cn(
                                     "h-9 cursor-pointer rounded-full border border-stone-200 bg-white text-sm text-stone-800 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40",
-                                    active && "border-stone-950 bg-white font-medium text-stone-950",
+                                    active && "border-ink bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--ink)]",
                                   )}
                                   onClick={() => onImageOutputFormatChange(format)}
                                 >
@@ -561,7 +561,7 @@ export function ImageComposer({
                                   type="button"
                                   className={cn(
                                     "h-9 cursor-pointer rounded-full border border-stone-200 bg-white text-sm text-stone-800 transition hover:border-stone-300 hover:bg-stone-50",
-                                    active && "border-stone-950 bg-white font-medium text-stone-950",
+                                    active && "border-ink bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--ink)]",
                                   )}
                                   onClick={() => onImageCountChange(option)}
                                 >
@@ -591,7 +591,7 @@ export function ImageComposer({
                   type="button"
                   onClick={() => void onSubmit()}
                   disabled={!prompt.trim()}
-                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-stone-950 text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300 sm:size-11"
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-clay text-white transition hover:bg-clay-hover disabled:cursor-not-allowed disabled:bg-line-strong"
                   aria-label={referenceImages.length > 0 ? "编辑图片" : "生成图片"}
                 >
                   <ArrowUp className="size-3.5 sm:size-4" />

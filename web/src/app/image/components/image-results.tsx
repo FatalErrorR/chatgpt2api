@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { Clock3, Download, EyeOff, LoaderCircle, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { StatusDot } from "@/components/ui/status-dot";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -131,21 +132,9 @@ export function ImageResults({
     return (
       <div className="flex h-full min-h-[260px] items-center justify-center text-center sm:min-h-[420px]">
         <div className="w-full max-w-4xl">
-          <h1
-            className="text-2xl font-semibold tracking-tight text-stone-950 sm:text-3xl md:text-5xl"
-            style={{
-              fontFamily: '"Palatino Linotype","Book Antiqua","URW Palladio L","Times New Roman",serif',
-            }}
-          >
-            Turn ideas into images
-          </h1>
-          <p
-            className="mx-auto mt-3 max-w-[280px] text-sm italic tracking-[0.01em] text-stone-500 sm:mt-4 sm:max-w-none sm:text-[15px]"
-            style={{
-              fontFamily: '"Palatino Linotype","Book Antiqua","URW Palladio L","Times New Roman",serif',
-            }}
-          >
-            在同一窗口里保留本地历史与任务状态，并从已有结果图继续发起新的无状态编辑。
+          <h1 className="font-serif text-3xl font-medium text-ink sm:text-[40px]">想画点什么？</h1>
+          <p className="mx-auto mt-3 max-w-[300px] text-sm text-ink-3 sm:max-w-none sm:text-[15px]">
+            描述画面，或粘贴一张参考图。历史和任务状态保存在本地，可以从任意结果图继续编辑。
           </p>
         </div>
       </div>
@@ -177,8 +166,8 @@ export function ImageResults({
           <div key={turn.id} className="flex flex-col gap-3 sm:gap-4">
             {!turn.promptDeleted ? (
               <div className="flex justify-end">
-                <div className="max-w-[90%] px-1 py-1 text-[14px] leading-6 text-stone-900 sm:max-w-[82%] sm:text-[15px] sm:leading-7">
-                  <div className="mb-1.5 flex flex-wrap justify-end gap-2 text-[11px] text-stone-400 sm:mb-2">
+                <div className="max-w-[90%] text-[14px] leading-6 text-ink sm:max-w-[72%] sm:text-[15px] sm:leading-7">
+                  <div className="mb-1.5 flex flex-wrap justify-end gap-2 text-[11px] text-ink-3">
                     <span>第 {turnIndex + 1} 轮</span>
                     <span>
                       {turn.mode === "edit" ? "编辑图" : "文生图"}
@@ -186,12 +175,12 @@ export function ImageResults({
                     <span>{getTurnStatusLabel(turn.status)}</span>
                     <span>{formatConversationTime(turn.createdAt)}</span>
                   </div>
-                  <div className="text-right">{turn.prompt}</div>
+                  <div className="rounded-[14px] bg-sunken px-4 py-3 text-left whitespace-pre-wrap">{turn.prompt}</div>
                   <div className="mt-2 flex flex-wrap justify-end gap-1.5">
                     <button
                       type="button"
                       onClick={() => void onReuseTurnConfig(selectedConversation.id, turn.id)}
-                      className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-medium text-stone-600 transition hover:bg-stone-200 hover:text-stone-900"
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-3 transition hover:bg-surface-hover hover:text-ink"
                     >
                       复用配置
                     </button>
@@ -244,12 +233,20 @@ export function ImageResults({
                     </div>
                   ) : null}
 
-                  <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px] text-stone-500 sm:mb-4 sm:gap-2 sm:text-xs">
-                    <span className="rounded-full bg-stone-100 px-3 py-1">{turn.count} 张</span>
-                    <span className="rounded-full bg-stone-100 px-3 py-1">{getTurnStatusLabel(turn.status)}</span>
-                    {turn.status === "queued" ? (
-                      <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">等待当前对话中的前序任务完成</span>
-                    ) : null}
+                  <div className="mb-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-3">
+                    <span className="rounded-md bg-sunken px-2 py-0.5 text-ink-2">{turn.model}</span>
+                    <span>
+                      {[turn.ratio && turn.ratio !== "auto" ? turn.ratio : turn.size, `${turn.count} 张`, turn.outputFormat === "gif" ? "GIF" : ""]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    <span>·</span>
+                    <StatusDot
+                      tone={turn.status === "error" ? "bad" : turn.status === "success" ? "ok" : "warn"}
+                      className="text-xs text-ink-2"
+                    >
+                      {turn.status === "queued" ? "排队中：等待本对话前面的任务完成" : getTurnStatusLabel(turn.status)}
+                    </StatusDot>
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 sm:block sm:columns-2 sm:gap-4 sm:space-y-4 xl:columns-3">
