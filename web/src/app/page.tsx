@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +12,10 @@ import {
   fetchImageStorage,
   fetchProxies,
   fetchSystemLogs,
-  type Account,
   type ImageOutputCounts,
-  type ImageStorageStats,
-  type ProxyEntry,
-  type SystemLog,
 } from "@/lib/api";
 import { getValidatedAuthSession } from "@/lib/auth-session";
+import { buildTodos, failedSources, formatSize, settle, type OverviewSources } from "@/lib/overview";
 import { cn } from "@/lib/utils";
 import { getDefaultRouteForRole } from "@/store/auth";
 
@@ -33,35 +30,45 @@ function formatNumber(value: number) {
   return value.toLocaleString("en-US");
 }
 
-function formatSize(mb: number) {
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
-}
-
-function isEditCooled(account: Account) {
-  const until = account.edit_upload_blocked_until ? Date.parse(account.edit_upload_blocked_until) : NaN;
-  return Number.isFinite(until) && until > Date.now();
-}
-
 function today() {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-type OverviewData = {
-  accounts: Account[];
-  proxies: ProxyEntry[];
-  counts: ImageOutputCounts | null;
-  storage: ImageStorageStats | null;
-  failures: SystemLog[];
-};
-
-function Kpi({ label, value, note, tone }: { label: string; value: React.ReactNode; note: string; tone?: "bad" | "good" }) {
+function Kpi({
+  label,
+  value,
+  note,
+  tone,
+  error,
+}: {
+  label: string;
+  value: React.ReactNode;
+  note: string;
+  tone?: "bad" | "good";
+  /** 这块数据加载失败：不显示数值，免得 0 / 「全部正常」被当成真的 */
+  error?: string;
+}) {
   return (
     <div className="rounded-[10px] border border-line bg-surface px-[18px] py-4">
       <div className="text-xs text-ink-3">{label}</div>
-      <div className="mt-1 mb-0.5 font-serif text-[30px] leading-tight text-ink">{value}</div>
-      <div className={cn("text-xs", tone === "bad" ? "text-bad" : tone === "good" ? "text-ok" : "text-ink-2")}>{note}</div>
+      <div className={cn("mt-1 mb-0.5 font-serif text-[30px] leading-tight", error ? "text-ink-3" : "text-ink")}>{error ? "—" : value}</div>
+      <div
+        className={cn("truncate text-xs", error || tone === "bad" ? "text-bad" : tone === "good" ? "text-ok" : "text-ink-2")}
+        title={error || undefined}
+      >
+        {error ? "加载失败" : note}
+      </div>
+    </div>
+  );
+}
+
+function LoadError({ label, error }: { label: string; error: string }) {
+  return (
+    <div className="flex items-center gap-3 py-2 text-sm text-bad" title={error}>
+      <i className="size-[7px] flex-none rounded-full bg-bad" />
+      <span className="min-w-0 truncate">{label}加载失败：{error}</span>
     </div>
   );
 }
@@ -79,51 +86,54 @@ function Panel({ title, action, children, className }: { title: string; action?:
 }
 
 function Overview() {
-  const [data, setData] = useState<OverviewData | null>(null);
-  const [error, setError] = useState("");
+  const [data, setData] = useState<OverviewSources | null>(null);
+  const [reloading, setReloading] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      // 各块互不依赖：某个接口失败只影响对应的块
-      const [accounts, proxies, counts, storage, logs] = await Promise.allSettled([
-        fetchAccounts(),
-        fetchProxies(),
-        fetchImageOutputCounts(),
-        fetchImageStorage(),
-        fetchSystemLogs({ type: "call", start_date: today() }),
-      ]);
-      if (!active) return;
-      if (accounts.status === "rejected") {
-        setError(accounts.reason instanceof Error ? accounts.reason.message : "加载失败");
-      }
-      setData({
-        accounts: accounts.status === "fulfilled" ? accounts.value.items : [],
-        proxies: proxies.status === "fulfilled" ? proxies.value.items : [],
-        counts: counts.status === "fulfilled" ? counts.value : null,
-        storage: storage.status === "fulfilled" ? storage.value : null,
-        failures:
-          logs.status === "fulfilled"
-            ? logs.value.items.filter((item) => (item.detail as { status?: string } | undefined)?.status === "failed").slice(0, 5)
-            : [],
-      });
-    };
-    void load();
-    return () => {
-      active = false;
+  const load = useCallback(async () => {
+    // 各块互不依赖：某个接口失败只影响对应的块，并且要显示成失败，不能当成 0 / 正常
+    const [accounts, proxies, counts, storage, logs] = await Promise.allSettled([
+      fetchAccounts().then((result) => result.items),
+      fetchProxies().then((result) => result.items),
+      fetchImageOutputCounts(),
+      fetchImageStorage(),
+      fetchSystemLogs({ type: "call", start_date: today() }).then((result) => result.items),
+    ]);
+    return {
+      accounts: settle(accounts),
+      proxies: settle(proxies),
+      counts: settle(counts),
+      storage: settle(storage),
+      logs: settle(logs),
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void load().then((sources) => {
+      if (active) setData(sources);
+    });
+    return () => {
+      active = false;
+    };
+  }, [load]);
+
+  const reload = async () => {
+    setReloading(true);
+    try {
+      setData(await load());
+    } finally {
+      setReloading(false);
+    }
+  };
+
   const stats = useMemo(() => {
-    const accounts = data?.accounts ?? [];
+    const accounts = data?.accounts.ok ? data.accounts.value : [];
     const normal = accounts.filter((item) => item.status === "正常");
     return {
       total: accounts.length,
       normal: normal.length,
       abnormal: accounts.filter((item) => item.status === "异常").length,
-      cooled: accounts.filter(isEditCooled).length,
-      quota: normal.reduce((sum, item) => sum + Math.max(0, item.quota || 0), 0),
-      badProxies: (data?.proxies ?? []).filter((proxy) => proxy.health.abnormal),
+      badProxies: data?.proxies.ok ? data.proxies.value.filter((proxy) => proxy.health.abnormal) : [],
     };
   }, [data]);
 
@@ -135,28 +145,15 @@ function Overview() {
     );
   }
 
-  const counts = data.counts;
+  const counts = data.counts.ok ? data.counts.value : null;
+  const storage = data.storage.ok ? data.storage.value : null;
   const total = (key: keyof ImageOutputCounts["generations"]) => (counts ? counts.generations[key] + counts.edits[key] : 0);
   const maxTotal = Math.max(1, ...PERIODS.map((period) => total(period.key)));
-  const firstBadError = stats.badProxies.find((proxy) => proxy.health.last_error)?.health.last_error ?? "";
-  const todos = [
-    stats.badProxies.length > 0 && {
-      tone: "bad",
-      title: `${stats.badProxies.length} 个代理异常`,
-      note: firstBadError || "连续请求失败",
-      href: "/accounts",
-      action: "查看代理",
-    },
-    stats.abnormal > 0 && { tone: "bad", title: `${stats.abnormal} 个账号异常`, note: "可在号池里尝试恢复", href: "/accounts", action: "查看" },
-    stats.cooled > 0 && { tone: "warn", title: `${stats.cooled} 个账号图生图冷却`, note: "冷却结束后自动恢复", href: "/accounts", action: "查看" },
-    data.storage && data.storage.disk_free_mb < 2048 && {
-      tone: "warn",
-      title: "磁盘空间不足",
-      note: `剩余 ${formatSize(data.storage.disk_free_mb)}`,
-      href: "/image-manager",
-      action: "去清理",
-    },
-  ].filter(Boolean) as Array<{ tone: "bad" | "warn"; title: string; note: string; href: string; action: string }>;
+  const todos = buildTodos(data);
+  const failed = failedSources(data);
+  const failures = data.logs.ok
+    ? data.logs.value.filter((item) => (item.detail as { status?: string } | undefined)?.status === "failed").slice(0, 5)
+    : [];
 
   return (
     <section className="space-y-[18px]">
@@ -177,7 +174,17 @@ function Overview() {
         </div>
       </div>
 
-      {error ? <div className="rounded-lg bg-bad-soft px-3 py-2.5 text-sm text-bad">加载账号失败：{error}</div> : null}
+      {failed.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">
+          <span className="min-w-0 flex-1">
+            部分数据加载失败：{failed.map((item) => item.label).join("、")}。下面对应的数字不可信。
+          </span>
+          <Button variant="ghost" size="sm" className="h-7 text-bad hover:bg-bad/10 hover:text-bad" disabled={reloading} onClick={() => void reload()}>
+            <RefreshCw className={cn("size-3.5", reloading && "animate-spin")} />
+            重试
+          </Button>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         <Kpi
@@ -189,18 +196,26 @@ function Overview() {
           }
           note={stats.abnormal > 0 ? `${stats.abnormal} 个异常` : "全部正常"}
           tone={stats.abnormal > 0 ? "bad" : "good"}
+          error={data.accounts.ok ? undefined : data.accounts.error}
         />
-        <Kpi label="今日生图" value={formatNumber(total("today"))} note={`昨日 ${formatNumber(total("yesterday"))}`} />
+        <Kpi
+          label="今日生图"
+          value={formatNumber(total("today"))}
+          note={`昨日 ${formatNumber(total("yesterday"))}`}
+          error={data.counts.ok ? undefined : data.counts.error}
+        />
         <Kpi
           label="代理"
-          value={data.proxies.length}
+          value={data.proxies.ok ? data.proxies.value.length : 0}
           note={stats.badProxies.length > 0 ? `${stats.badProxies.length} 个异常` : "全部正常"}
           tone={stats.badProxies.length > 0 ? "bad" : "good"}
+          error={data.proxies.ok ? undefined : data.proxies.error}
         />
         <Kpi
           label="图片存储"
-          value={data.storage ? formatSize(data.storage.image_size_mb) : "—"}
-          note={data.storage ? `${formatNumber(data.storage.image_count)} 张 · 磁盘剩余 ${formatSize(data.storage.disk_free_mb)}` : "暂无数据"}
+          value={storage ? formatSize(storage.image_size_mb) : "—"}
+          note={storage ? `${formatNumber(storage.image_count)} 张 · 磁盘剩余 ${formatSize(storage.disk_free_mb)}` : ""}
+          error={data.storage.ok ? undefined : data.storage.error}
         />
       </div>
 
@@ -214,22 +229,26 @@ function Overview() {
             </div>
           }
         >
-          <div className="grid gap-3">
-            {PERIODS.map((period) => {
-              const generations = counts?.generations[period.key] ?? 0;
-              const edits = counts?.edits[period.key] ?? 0;
-              return (
-                <div key={period.key} className="grid grid-cols-[56px_1fr_70px] items-center gap-3 text-xs text-ink-2">
-                  <span>{period.label}</span>
-                  <div className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
-                    <i className="h-full bg-ink" style={{ width: `${(generations / maxTotal) * 100}%` }} />
-                    <i className="h-full bg-clay" style={{ width: `${(edits / maxTotal) * 100}%` }} />
+          {!data.counts.ok ? (
+            <LoadError label="生图统计" error={data.counts.error} />
+          ) : (
+            <div className="grid gap-3">
+              {PERIODS.map((period) => {
+                const generations = counts?.generations[period.key] ?? 0;
+                const edits = counts?.edits[period.key] ?? 0;
+                return (
+                  <div key={period.key} className="grid grid-cols-[56px_1fr_70px] items-center gap-3 text-xs text-ink-2">
+                    <span>{period.label}</span>
+                    <div className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
+                      <i className="h-full bg-ink" style={{ width: `${(generations / maxTotal) * 100}%` }} />
+                      <i className="h-full bg-clay" style={{ width: `${(edits / maxTotal) * 100}%` }} />
+                    </div>
+                    <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
                   </div>
-                  <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </Panel>
 
         <Panel title="需要处理">
@@ -265,13 +284,15 @@ function Overview() {
           </Button>
         }
       >
-        {data.failures.length === 0 ? (
+        {!data.logs.ok ? (
+          <LoadError label="调用日志" error={data.logs.error} />
+        ) : failures.length === 0 ? (
           <div className="py-2 text-sm text-ink-3">今天还没有失败的调用。</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[13px]">
               <tbody>
-                {data.failures.map((item) => {
+                {failures.map((item) => {
                   const detail = (item.detail ?? {}) as { endpoint?: string; error?: string; account_email?: string };
                   return (
                     <tr key={item.id} className="border-t border-line first:border-t-0">
