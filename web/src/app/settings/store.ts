@@ -259,10 +259,12 @@ function normalizeFiles(items: CPARemoteFile[]) {
 type SettingsStore = {
   config: SettingsConfig | null;
   isLoadingConfig: boolean;
+  configLoadError: string;
   isSavingConfig: boolean;
   backups: BackupItem[];
   backupState: BackupState | null;
   isLoadingBackups: boolean;
+  backupsLoadError: string;
   isRunningBackup: boolean;
   deletingBackupKey: string | null;
   isTestingBackup: boolean;
@@ -271,6 +273,7 @@ type SettingsStore = {
 
   pools: CPAPool[];
   isLoadingPools: boolean;
+  poolsLoadError: string;
   deletingId: string | null;
   loadingFilesId: string | null;
 
@@ -360,10 +363,12 @@ type SettingsStore = {
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   config: null,
   isLoadingConfig: true,
+  configLoadError: "",
   isSavingConfig: false,
   backups: [],
   backupState: null,
   isLoadingBackups: true,
+  backupsLoadError: "",
   isRunningBackup: false,
   deletingBackupKey: null,
   isTestingBackup: false,
@@ -372,6 +377,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   pools: [],
   isLoadingPools: true,
+  poolsLoadError: "",
   deletingId: null,
   loadingFilesId: null,
 
@@ -409,7 +415,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   loadConfig: async () => {
-    set({ isLoadingConfig: true });
+    set({ isLoadingConfig: true, configLoadError: "" });
     try {
       const data = await fetchSettingsConfig();
       const normalized = normalizeConfig(data.config);
@@ -417,7 +423,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         config: normalized,
       });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载系统配置失败");
+      const message = error instanceof Error ? error.message : "加载系统配置失败";
+      set({ configLoadError: message });
+      toast.error(message);
     } finally {
       set({ isLoadingConfig: false });
     }
@@ -860,17 +868,20 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   loadBackups: async (silent = false) => {
     if (!silent) {
-      set({ isLoadingBackups: true });
+      set({ isLoadingBackups: true, backupsLoadError: "" });
     }
     try {
       const data = await fetchBackups();
       set({
         backups: data.items,
         backupState: data.state,
+        backupsLoadError: "",
       });
     } catch (error) {
       if (!silent) {
-        toast.error(error instanceof Error ? error.message : "加载备份列表失败");
+        const message = error instanceof Error ? error.message : "加载备份列表失败";
+        set({ backupsLoadError: message });
+        toast.error(message);
       }
     } finally {
       if (!silent) {
@@ -927,14 +938,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   loadPools: async (silent = false) => {
     if (!silent) {
-      set({ isLoadingPools: true });
+      set({ isLoadingPools: true, poolsLoadError: "" });
     }
     try {
       const data = await fetchCPAPools();
-      set({ pools: data.pools });
+      set({ pools: data.pools, poolsLoadError: "" });
     } catch (error) {
       if (!silent) {
-        toast.error(error instanceof Error ? error.message : "加载 CPA 连接失败");
+        const message = error instanceof Error ? error.message : "加载 CPA 连接失败";
+        set({ poolsLoadError: message });
+        toast.error(message);
       }
     } finally {
       if (!silent) {

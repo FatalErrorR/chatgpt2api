@@ -5,10 +5,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ErrorState, SkeletonLines } from "@/components/ui/states";
 import { Textarea } from "@/components/ui/textarea";
 import {
   testProxy,
@@ -20,6 +20,10 @@ import {
 } from "@/lib/api";
 
 import { useSettingsStore } from "../store";
+import { SettingGroup } from "./setting-group";
+
+const title = "FlareSolverr 清障";
+const description = "上游请求遇到 Cloudflare 拦截后获取 clearance，并可配合 WARP / Privoxy 代理链路重试。";
 
 export function ProxyRuntimeCard() {
   const [isTestingProxy, setIsTestingProxy] = useState(false);
@@ -29,19 +33,26 @@ export function ProxyRuntimeCard() {
   const [targetUrl, setTargetUrl] = useState("https://chatgpt.com");
   const config = useSettingsStore((state) => state.config);
   const isLoadingConfig = useSettingsStore((state) => state.isLoadingConfig);
+  const configLoadError = useSettingsStore((state) => state.configLoadError);
+  const loadConfig = useSettingsStore((state) => state.loadConfig);
   const isSavingConfig = useSettingsStore((state) => state.isSavingConfig);
   const saveConfig = useSettingsStore((state) => state.saveConfig);
   const setProxyRuntimeField = useSettingsStore((state) => state.setProxyRuntimeField);
   const setProxyRuntimeClearanceField = useSettingsStore((state) => state.setProxyRuntimeClearanceField);
   const setProxyRuntimeStatusCodesText = useSettingsStore((state) => state.setProxyRuntimeStatusCodesText);
 
-  if (isLoadingConfig || !config?.proxy_runtime) {
+  if (isLoadingConfig && !config) {
     return (
-      <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
-        <CardContent className="flex items-center justify-center p-10">
-          <LoaderCircle className="size-5 animate-spin text-stone-400" />
-        </CardContent>
-      </Card>
+      <SettingGroup title={title} description={description}>
+        <SkeletonLines lines={6} />
+      </SettingGroup>
+    );
+  }
+  if (!config?.proxy_runtime) {
+    return (
+      <SettingGroup title={title} description={description}>
+        <ErrorState message={configLoadError || "加载系统配置失败"} onRetry={() => void loadConfig()} />
+      </SettingGroup>
     );
   }
 
@@ -96,34 +107,24 @@ export function ProxyRuntimeCard() {
   };
 
   return (
-    <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
-      <CardContent className="space-y-5 p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-base font-semibold text-stone-900">
-              <PlugZap className="size-5 text-stone-500" />
-              FlareSolverr 清障
-            </div>
-            <p className="mt-1 text-xs leading-6 text-stone-500">
-              默认关闭。用于上游请求遇到 Cloudflare 拦截后获取 clearance，可配合 WARP / Privoxy 代理链路重试。
-            </p>
-          </div>
-          <span className={`rounded-full px-3 py-1 text-xs ${runtimeEnabled ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>
+    <SettingGroup title={title} description={description}>
+        <div className="flex justify-end">
+          <span className={`rounded-full px-3 py-1 text-xs ${runtimeEnabled ? "bg-ok-soft text-ok" : "bg-sunken text-ink-3"}`}>
             {runtimeEnabled ? "已启用" : "未启用"}
           </span>
         </div>
 
-        <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-xs leading-6 text-stone-600">
+        <div className="rounded-[7px] border border-line bg-sunken px-4 py-3 text-xs leading-6 text-ink-2">
           代理优先级：账号代理 &gt; FlareSolverr 代理链路 &gt; 显式代理 &gt; 全局代理。Cookie / cf_clearance 不会在接口响应中明文返回。
         </div>
 
-        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-800">
+        <div className="flex items-start gap-2 rounded-[7px] border border-warn-soft bg-warn-soft px-4 py-3 text-xs leading-6 text-warn">
           <AlertTriangle className="mt-1 size-4 shrink-0" />
           <span>使用 FlareSolverr 模式前，请先通过 Docker 启动 flaresolverr、privoxy、warp-proxy 等相关容器；容器内 URL 通常填写 http://flaresolverr:8191。</span>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700 md:col-span-2">
+          <label className="flex items-center gap-3 rounded-[7px] border border-line bg-surface px-3.5 py-3 text-sm text-ink-2 md:col-span-2">
             <Checkbox
               checked={runtimeEnabled}
               onCheckedChange={(checked) => setProxyRuntimeField("enabled", Boolean(checked))}
@@ -132,13 +133,13 @@ export function ProxyRuntimeCard() {
           </label>
 
           <div className="space-y-2">
-            <label className="text-sm text-stone-700">出站模式</label>
+            <label className="text-sm text-ink-2">出站模式</label>
             <Select
               value={runtime.egress_mode}
               onValueChange={(value) => setProxyRuntimeField("egress_mode", value as ProxyRuntimeEgressMode)}
               disabled={!runtimeEnabled}
             >
-              <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white shadow-none">
+              <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -146,47 +147,44 @@ export function ProxyRuntimeCard() {
                 <SelectItem value="single_proxy">单代理/WARP</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-stone-500">WARP compose 默认使用 single_proxy。</p>
+            <p className="text-xs text-ink-3">WARP compose 默认使用 single_proxy。</p>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm text-stone-700">清障代理 URL</label>
+            <label className="text-sm text-ink-2">清障代理 URL</label>
             <Input
               value={runtime.proxy_url}
               onChange={(event) => setProxyRuntimeField("proxy_url", event.target.value)}
               placeholder="http://privoxy:8118"
-              className="h-10 rounded-xl border-stone-200 bg-white"
               disabled={!runtimeEnabled || runtime.egress_mode !== "single_proxy"}
             />
-            <p className="text-xs leading-5 text-stone-500">
+            <p className="text-xs leading-5 text-ink-3">
               支持 http/https/socks5/socks5h，socks5 会转为 socks5h。带认证格式：协议://账号:密码@主机:端口，也可直接粘贴 主机:端口:账号:密码。
             </p>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm text-stone-700">资源代理 URL</label>
+            <label className="text-sm text-ink-2">资源代理 URL</label>
             <Input
               value={runtime.resource_proxy_url}
               onChange={(event) => setProxyRuntimeField("resource_proxy_url", event.target.value)}
               placeholder="留空则复用清障代理"
-              className="h-10 rounded-xl border-stone-200 bg-white"
               disabled={!runtimeEnabled || runtime.egress_mode !== "single_proxy"}
             />
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm text-stone-700">重置会话状态码</label>
+            <label className="text-sm text-ink-2">重置会话状态码</label>
             <Input
               value={runtime.reset_session_status_codes.join(",")}
               onChange={(event) => setProxyRuntimeStatusCodesText(event.target.value)}
               placeholder="403"
-              className="h-10 rounded-xl border-stone-200 bg-white"
               disabled={!runtimeEnabled}
             />
-            <p className="text-xs text-stone-500">默认 403，只对 Cloudflare/挑战类错误触发。</p>
+            <p className="text-xs text-ink-3">默认 403，只对 Cloudflare/挑战类错误触发。</p>
           </div>
 
-          <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+          <label className="flex items-center gap-3 rounded-[7px] border border-line bg-surface px-3.5 py-3 text-sm text-ink-2">
             <Checkbox
               checked={Boolean(runtime.skip_ssl_verify)}
               onCheckedChange={(checked) => setProxyRuntimeField("skip_ssl_verify", Boolean(checked))}
@@ -199,7 +197,6 @@ export function ProxyRuntimeCard() {
             <Button
               type="button"
               variant="outline"
-              className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
               onClick={() => void handleTestRuntimeProxy()}
               disabled={isTestingProxy || !runtimeEnabled}
             >
@@ -209,7 +206,7 @@ export function ProxyRuntimeCard() {
           </div>
 
           {proxyResult ? (
-            <div className={`rounded-xl border px-3 py-2 text-xs leading-6 md:col-span-2 ${proxyResult.ok ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
+            <div className={`rounded-[7px] border px-3 py-2 text-xs leading-6 md:col-span-2 ${proxyResult.ok ? "border-ok-soft bg-ok-soft text-ok" : "border-bad-soft bg-bad-soft text-bad"}`}>
               {proxyResult.ok
                 ? `代理可用：HTTP ${proxyResult.status}，用时 ${proxyResult.latency_ms} ms，来源 ${proxyResult.proxy_source ?? "unknown"}`
                 : `代理不可用：${proxyResult.error ?? "未知错误"}（用时 ${proxyResult.latency_ms} ms）`}
@@ -217,20 +214,20 @@ export function ProxyRuntimeCard() {
           ) : null}
         </div>
 
-        <div className="space-y-4 rounded-xl border border-stone-200 bg-white px-4 py-3">
+        <div className="space-y-4 rounded-[7px] border border-line bg-surface px-3.5 py-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2 text-sm font-medium text-stone-800">
-              <Cookie className="size-4 text-stone-500" />
+            <div className="flex items-center gap-2 text-sm font-medium text-ink">
+              <Cookie className="size-4 text-ink-3" />
               Cloudflare Clearance
             </div>
-            <span className={`rounded-full px-3 py-1 text-xs ${clearance.enabled ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>
+            <span className={`rounded-full px-3 py-1 text-xs ${clearance.enabled ? "bg-ok-soft text-ok" : "bg-sunken text-ink-3"}`}>
               {clearance.enabled ? clearanceMode : "disabled"}
             </span>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm text-stone-700">Clearance 模式</label>
+              <label className="text-sm text-ink-2">Clearance 模式</label>
               <Select
                 value={clearanceMode}
                 onValueChange={(value) => {
@@ -240,7 +237,7 @@ export function ProxyRuntimeCard() {
                 }}
                 disabled={!runtimeEnabled}
               >
-                <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white shadow-none">
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -252,74 +249,71 @@ export function ProxyRuntimeCard() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm text-stone-700">FlareSolverr URL</label>
+              <label className="text-sm text-ink-2">FlareSolverr URL</label>
               <Input
                 value={clearance.flaresolverr_url}
                 onChange={(event) => setProxyRuntimeClearanceField("flaresolverr_url", event.target.value)}
                 placeholder="http://flaresolverr:8191"
-                className="h-10 rounded-xl border-stone-200 bg-white"
                 disabled={!runtimeEnabled || clearanceMode !== "flaresolverr"}
               />
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm text-stone-700">User-Agent</label>
+              <label className="text-sm text-ink-2">User-Agent</label>
               <Input
                 value={clearance.user_agent}
                 onChange={(event) => setProxyRuntimeClearanceField("user_agent", event.target.value)}
-                className="h-10 rounded-xl border-stone-200 bg-white font-mono text-xs"
+                className="font-mono text-xs"
                 disabled={!runtimeEnabled || clearanceMode === "none"}
               />
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm text-stone-700">超时秒数</label>
+              <label className="text-sm text-ink-2">超时秒数</label>
               <Input
                 value={String(clearance.timeout_sec)}
                 onChange={(event) => setProxyRuntimeClearanceField("timeout_sec", event.target.value)}
                 placeholder="60"
-                className="h-10 rounded-xl border-stone-200 bg-white"
                 disabled={!runtimeEnabled || clearanceMode === "none"}
               />
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm text-stone-700">刷新间隔秒数</label>
+              <label className="text-sm text-ink-2">刷新间隔秒数</label>
               <Input
                 value={String(clearance.refresh_interval)}
                 onChange={(event) => setProxyRuntimeClearanceField("refresh_interval", event.target.value)}
                 placeholder="3600"
-                className="h-10 rounded-xl border-stone-200 bg-white"
                 disabled={!runtimeEnabled || clearanceMode === "none"}
               />
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm text-stone-700">手动 Cookie</label>
+              <label className="text-sm text-ink-2">手动 Cookie</label>
               <Textarea
                 value={clearance.cf_cookies}
                 onChange={(event) => setProxyRuntimeClearanceField("cf_cookies", event.target.value)}
                 placeholder="可选：foo=bar; cf_clearance=..."
-                className="min-h-24 rounded-xl border-stone-200 bg-white font-mono text-xs shadow-none"
+                className="font-mono text-xs"
                 disabled={!runtimeEnabled || clearanceMode !== "manual"}
               />
-              <p className="text-xs text-stone-500">
+              <p className="text-xs text-ink-3">
                 {hasStoredClearance ? "服务端已保存过 Cookie/clearance；留空保存不会清空已有值。" : "留空表示不使用手动 Cookie。"}
               </p>
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm text-stone-700">单独 cf_clearance</label>
+              <label className="text-sm text-ink-2">单独 cf_clearance</label>
               <Input
                 value={clearance.cf_clearance}
                 onChange={(event) => setProxyRuntimeClearanceField("cf_clearance", event.target.value)}
                 placeholder="可选：只填写 cf_clearance 值"
-                className="h-10 rounded-xl border-stone-200 bg-white font-mono text-xs"
+                className="font-mono text-xs"
                 disabled={!runtimeEnabled || clearanceMode !== "manual"}
               />
             </div>
 
-            <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-700">
+            <label className="flex items-center gap-3 rounded-[7px] border border-line bg-sunken px-4 py-3 text-sm text-ink-2">
               <Checkbox
                 checked={Boolean(clearance.warm_up_on_start)}
                 onCheckedChange={(checked) => setProxyRuntimeClearanceField("warm_up_on_start", Boolean(checked))}
@@ -329,12 +323,11 @@ export function ProxyRuntimeCard() {
             </label>
 
             <div className="space-y-2">
-              <label className="text-sm text-stone-700">测试目标 URL</label>
+              <label className="text-sm text-ink-2">测试目标 URL</label>
               <Input
                 value={targetUrl}
                 onChange={(event) => setTargetUrl(event.target.value)}
                 placeholder="https://chatgpt.com"
-                className="h-10 rounded-xl border-stone-200 bg-white"
                 disabled={!runtimeEnabled || clearanceMode === "none"}
               />
             </div>
@@ -343,7 +336,6 @@ export function ProxyRuntimeCard() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
                 onClick={() => void handleTestClearance()}
                 disabled={isTestingClearance || !runtimeEnabled || clearanceMode === "none"}
               >
@@ -353,7 +345,7 @@ export function ProxyRuntimeCard() {
             </div>
 
             {clearanceResult ? (
-              <div className={`rounded-xl border px-3 py-2 text-xs leading-6 md:col-span-2 ${clearanceResult.ok ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800"}`}>
+              <div className={`rounded-[7px] border px-3 py-2 text-xs leading-6 md:col-span-2 ${clearanceResult.ok ? "border-ok-soft bg-ok-soft text-ok" : "border-bad-soft bg-bad-soft text-bad"}`}>
                 {clearanceResult.ok
                   ? `Clearance 可用：${clearanceResult.has_cookies ? "已获取 Cookie" : "无 Cookie"}，用时 ${clearanceResult.latency_ms} ms`
                   : `Clearance 不可用：${clearanceResult.error ?? clearanceResult.status}（用时 ${clearanceResult.latency_ms} ms）`}
@@ -365,7 +357,6 @@ export function ProxyRuntimeCard() {
         <div className="flex justify-end">
           <Button
             type="button"
-            className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
             onClick={() => void saveConfig()}
             disabled={isSavingConfig}
           >
@@ -373,7 +364,6 @@ export function ProxyRuntimeCard() {
             保存配置
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </SettingGroup>
   );
 }

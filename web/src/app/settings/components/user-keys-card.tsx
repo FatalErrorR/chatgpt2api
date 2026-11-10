@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Ban, CheckCircle2, Copy, KeyRound, LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
+import { Ban, CheckCircle2, Copy, LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +15,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { EmptyState, ErrorState, SkeletonLines } from "@/components/ui/states";
 import { createUserKey, deleteUserKey, fetchUserKeys, updateUserKey, type UserKey } from "@/lib/api";
+
+import { SettingGroup } from "./setting-group";
 
 function formatDateTime(value?: string | null) {
   if (!value) {
@@ -39,6 +41,7 @@ export function UserKeysCard() {
   const didLoadRef = useRef(false);
   const [items, setItems] = useState<UserKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -51,11 +54,14 @@ export function UserKeysCard() {
 
   const load = async () => {
     setIsLoading(true);
+    setLoadError("");
     try {
       const data = await fetchUserKeys();
       setItems(data.items);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载用户密钥失败");
+      const message = error instanceof Error ? error.message : "加载用户密钥失败";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -173,33 +179,22 @@ export function UserKeysCard() {
 
   return (
     <>
-      <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
-        <CardContent className="space-y-6 p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-stone-100">
-                <KeyRound className="size-5 text-stone-600" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold tracking-tight">用户密钥管理</h2>
-                <p className="text-sm text-stone-500">为普通用户创建专用密钥；普通用户只能进入画图页，不能查看设置和号池。</p>
-              </div>
-            </div>
-            <Button className="h-9 rounded-xl bg-ink px-4 text-page hover:bg-ink/85" onClick={() => setIsDialogOpen(true)}>
+      <SettingGroup title="用户密钥" description="为普通用户创建专用密钥；普通用户只能进入画图页，不能查看设置和号池。">
+          <div className="flex justify-end">
+            <Button onClick={() => setIsDialogOpen(true)}>
               <Plus className="size-4" />
               创建用户密钥
             </Button>
           </div>
 
           {revealedKey ? (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
+            <div className="rounded-[7px] border border-ok-soft bg-ok-soft px-4 py-4 text-sm text-ok">
               <div className="font-medium">新密钥仅展示一次，请立即保存：</div>
-              <div className="mt-3 flex flex-col gap-3 rounded-lg border border-emerald-200 bg-white/80 p-3 md:flex-row md:items-center md:justify-between">
-                <code className="break-all font-mono text-[13px]">{revealedKey}</code>
+              <div className="mt-3 flex flex-col gap-3 rounded-[7px] border border-ok-soft bg-surface p-3 md:flex-row md:items-center md:justify-between">
+                <code className="break-all font-mono text-[13px] text-ink">{revealedKey}</code>
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 rounded-xl border-emerald-200 bg-white px-4 text-emerald-700"
                   onClick={() => void handleCopy(revealedKey)}
                 >
                   <Copy className="size-4" />
@@ -209,28 +204,30 @@ export function UserKeysCard() {
             </div>
           ) : null}
 
-          {isLoading ? (
-            <div className="flex items-center justify-center py-10">
-              <LoaderCircle className="size-5 animate-spin text-stone-400" />
-            </div>
+          {isLoading && items.length === 0 ? (
+            <SkeletonLines lines={4} />
+          ) : loadError && items.length === 0 ? (
+            <ErrorState message={loadError} onRetry={() => void load()} />
           ) : items.length === 0 ? (
-            <div className="rounded-xl bg-stone-50 px-6 py-10 text-center text-sm text-stone-500">
-              暂无普通用户密钥。点击右上角按钮后即可创建并分发给其他人。
-            </div>
+            <EmptyState
+              title="还没有用户密钥"
+              description="创建后可以分发给其他人，普通用户只能进入画图页。"
+              action={<Button onClick={() => setIsDialogOpen(true)}>创建用户密钥</Button>}
+            />
           ) : (
             <div className="space-y-3">
               {items.map((item) => {
                 const isPending = pendingIds.has(item.id);
                 return (
-                  <div key={item.id} className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white px-4 py-4 md:flex-row md:items-center md:justify-between">
+                  <div key={item.id} className="flex flex-col gap-3 rounded-[7px] border border-line bg-surface px-4 py-4 md:flex-row md:items-center md:justify-between">
                     <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="truncate text-sm font-medium text-stone-800">{item.name}</div>
+                        <div className="truncate text-sm font-medium text-ink">{item.name}</div>
                         <Badge variant={item.enabled ? "success" : "secondary"} className="rounded-md">
                           {item.enabled ? "已启用" : "已禁用"}
                         </Badge>
                       </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
                         <span>创建时间 {formatDateTime(item.created_at)}</span>
                         <span>最近使用 {formatDateTime(item.last_used_at)}</span>
                       </div>
@@ -240,7 +237,6 @@ export function UserKeysCard() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
                         onClick={() => openEditDialog(item)}
                         disabled={isPending}
                       >
@@ -250,7 +246,6 @@ export function UserKeysCard() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
                         onClick={() => void handleToggle(item)}
                         disabled={isPending}
                       >
@@ -266,7 +261,6 @@ export function UserKeysCard() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-9 rounded-xl border-rose-200 bg-white px-4 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
                         onClick={() => setDeletingItem(item)}
                         disabled={isPending}
                       >
@@ -279,31 +273,28 @@ export function UserKeysCard() {
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+      </SettingGroup>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="rounded-2xl p-6">
-          <DialogHeader className="gap-2">
-            <DialogTitle>创建用户密钥</DialogTitle>
-            <DialogDescription className="text-sm leading-6">
-              可选填写一个备注名称，方便区分不同使用者；创建后会生成一条只能查看一次的原始密钥。
+        <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
+          <DialogHeader className="gap-1.5">
+            <DialogTitle className="font-serif text-[22px] font-medium">创建用户密钥</DialogTitle>
+            <DialogDescription className="text-[13px] leading-6 text-ink-2">
+              填写可选备注并生成一条只展示一次的普通用户密钥。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">名称（可选）</label>
+            <label className="text-sm font-medium text-ink-2">名称（可选）</label>
             <Input
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="例如：设计同学 A、运营临时账号"
-              className="h-11 rounded-xl border-stone-200 bg-white"
             />
           </div>
-          <DialogFooter>
+          <DialogFooter className="pt-2">
             <Button
               type="button"
-              variant="secondary"
-              className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
+              variant="ghost"
               onClick={() => setIsDialogOpen(false)}
               disabled={isCreating}
             >
@@ -311,7 +302,6 @@ export function UserKeysCard() {
             </Button>
             <Button
               type="button"
-              className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
               onClick={() => void handleCreate()}
               disabled={isCreating}
             >
@@ -323,18 +313,17 @@ export function UserKeysCard() {
       </Dialog>
 
       <Dialog open={Boolean(deletingItem)} onOpenChange={(open) => (!open ? setDeletingItem(null) : null)}>
-        <DialogContent className="rounded-2xl p-6">
-          <DialogHeader className="gap-2">
-            <DialogTitle>删除用户密钥</DialogTitle>
-            <DialogDescription className="text-sm leading-6">
-              确认删除用户密钥「{deletingItem?.name}」吗？删除后该密钥将无法继续调用接口。
+        <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
+          <DialogHeader className="gap-1.5">
+            <DialogTitle className="font-serif text-[22px] font-medium">删除用户密钥</DialogTitle>
+            <DialogDescription className="text-[13px] leading-6 text-ink-2">
+              删除用户密钥「{deletingItem?.name || "未命名"}」后，该密钥将无法继续调用接口。
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="pt-2">
             <Button
               type="button"
-              variant="secondary"
-              className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
+              variant="ghost"
               onClick={() => setDeletingItem(null)}
               disabled={deletingItem ? pendingIds.has(deletingItem.id) : false}
             >
@@ -342,7 +331,7 @@ export function UserKeysCard() {
             </Button>
             <Button
               type="button"
-              className="h-10 rounded-xl bg-rose-600 px-5 text-white hover:bg-rose-700"
+              variant="destructive"
               onClick={() => void handleDelete()}
               disabled={deletingItem ? pendingIds.has(deletingItem.id) : false}
             >
@@ -362,41 +351,39 @@ export function UserKeysCard() {
           }
         }}
       >
-        <DialogContent className="rounded-2xl p-6">
-          <DialogHeader className="gap-2">
-            <DialogTitle>编辑用户密钥</DialogTitle>
-            <DialogDescription className="text-sm leading-6">
-              可以修改备注名称；如需更换专用密钥，直接填写新的原始密钥即可。留空则保持当前密钥不变。
+        <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
+          <DialogHeader className="gap-1.5">
+            <DialogTitle className="font-serif text-[22px] font-medium">编辑用户密钥</DialogTitle>
+            <DialogDescription className="text-[13px] leading-6 text-ink-2">
+              修改备注名称，或填写新的原始密钥来替换当前专用密钥。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-stone-700">名称</label>
+              <label className="text-sm font-medium text-ink-2">名称</label>
               <Input
                 value={editName}
                 onChange={(event) => setEditName(event.target.value)}
                 placeholder="例如：设计同学 A、运营临时账号"
-                className="h-11 rounded-xl border-stone-200 bg-white"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-stone-700">新的专用密钥（可选）</label>
+              <label className="text-sm font-medium text-ink-2">新的专用密钥（可选）</label>
               <Input
                 value={editKey}
                 onChange={(event) => setEditKey(event.target.value)}
                 placeholder="例如：sk-your-custom-user-key"
-                className="h-11 rounded-xl border-stone-200 bg-white font-mono"
+                className="font-mono"
               />
-              <p className="text-xs leading-5 text-stone-500">
+              <p className="text-xs leading-5 text-ink-3">
                 保存后旧密钥会立即失效，新密钥生效。系统仍只保存哈希，不会回显当前密钥。
               </p>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="pt-2">
             <Button
               type="button"
-              variant="secondary"
-              className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
+              variant="ghost"
               onClick={() => {
                 setEditingItem(null);
                 setEditKey("");
@@ -407,7 +394,6 @@ export function UserKeysCard() {
             </Button>
             <Button
               type="button"
-              className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
               onClick={() => void handleEdit()}
               disabled={editingItem ? pendingIds.has(editingItem.id) : false}
             >

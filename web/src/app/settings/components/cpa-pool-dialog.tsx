@@ -31,26 +31,25 @@ export function CPAPoolDialog() {
   const savePool = useSettingsStore((state) => state.savePool);
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-      <DialogContent showCloseButton={false} className="rounded-2xl p-6">
-        <DialogHeader className="gap-2">
-          <DialogTitle>{editingPool ? "编辑连接" : "添加连接"}</DialogTitle>
-          <DialogDescription className="text-sm leading-6">
-            {editingPool ? "修改 CPA 连接信息" : "添加一个新的 CLIProxyAPI 连接"}
+    <Dialog open={dialogOpen} onOpenChange={(open) => (!isSavingPool ? setDialogOpen(open) : null)}>
+      <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
+        <DialogHeader className="gap-1.5">
+          <DialogTitle className="font-serif text-[22px] font-medium">{editingPool ? "编辑 CPA 连接" : "添加 CPA 连接"}</DialogTitle>
+          <DialogDescription className="text-[13px] leading-6 text-ink-2">
+            {editingPool ? "修改名称、地址或管理密钥。密钥留空则保持不变。" : "保存 CLIProxyAPI 的地址和管理密钥，之后可以按连接导入账号。"}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">名称（可选）</label>
+            <label className="text-[13px] text-ink-2">名称（可选）</label>
             <Input
               value={formName}
               onChange={(event) => setFormName(event.target.value)}
               placeholder="例如：主号池、备用池"
-              className="h-11 rounded-xl border-stone-200 bg-white"
             />
           </div>
           <div className="space-y-2">
-            <label className="flex items-center gap-1.5 text-sm font-medium text-stone-700">
+            <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
               <Link2 className="size-3.5" />
               CPA 地址
             </label>
@@ -58,11 +57,10 @@ export function CPAPoolDialog() {
               value={formBaseUrl}
               onChange={(event) => setFormBaseUrl(event.target.value)}
               placeholder="http://your-cpa-host:8317"
-              className="h-11 rounded-xl border-stone-200 bg-white"
             />
           </div>
           <div className="space-y-2">
-            <label className="flex items-center gap-1.5 text-sm font-medium text-stone-700">
+            <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
               <Unplug className="size-3.5" />
               Management Secret Key
             </label>
@@ -72,11 +70,11 @@ export function CPAPoolDialog() {
                 value={formSecretKey}
                 onChange={(event) => setFormSecretKey(event.target.value)}
                 placeholder={editingPool ? "留空则不修改密钥" : "CPA 管理密钥"}
-                className="h-11 rounded-xl border-stone-200 bg-white pr-10"
+                className="pr-10"
               />
               <button
                 type="button"
-                className="absolute top-1/2 right-3 -translate-y-1/2 text-stone-400 transition hover:text-stone-600"
+                className="absolute top-1/2 right-3 -translate-y-1/2 text-ink-3 transition hover:text-ink"
                 onClick={() => setShowSecret(!showSecret)}
               >
                 {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -85,19 +83,10 @@ export function CPAPoolDialog() {
           </div>
         </div>
         <DialogFooter className="pt-2">
-          <Button
-            variant="secondary"
-            className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
-            onClick={() => setDialogOpen(false)}
-            disabled={isSavingPool}
-          >
+          <Button variant="ghost" onClick={() => setDialogOpen(false)} disabled={isSavingPool}>
             取消
           </Button>
-          <Button
-            className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
-            onClick={() => void savePool()}
-            disabled={isSavingPool}
-          >
+          <Button onClick={() => void savePool()} disabled={isSavingPool}>
             {isSavingPool ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
             {editingPool ? "保存修改" : "添加"}
           </Button>
