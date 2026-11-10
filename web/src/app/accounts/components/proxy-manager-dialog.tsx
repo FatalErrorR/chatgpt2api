@@ -15,7 +15,16 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
-import { addProxy, deleteProxy, renameProxy, testProxies, type ProxyEntry, type ProxyTestResult } from "@/lib/api";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  addProxies,
+  deleteProxy,
+  renameProxy,
+  testProxies,
+  type ProxyBatchAddResult,
+  type ProxyEntry,
+  type ProxyTestResult,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type ProxyManagerDialogProps = {
@@ -47,8 +56,9 @@ function testText(result: ProxyTestResult) {
 export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProps) {
   const [open, setOpen] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
-  const [newUrl, setNewUrl] = useState("");
-  const [newName, setNewName] = useState("");
+  const [newLines, setNewLines] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [batchResult, setBatchResult] = useState<ProxyBatchAddResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<string[] | null>(null); // 正在测试的代理 key；null 表示没在测
   const [results, setResults] = useState<Record<string, ProxyTestResult>>({});
@@ -99,17 +109,34 @@ export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProp
     void run(() => renameProxy(proxy.url, name), "已保存代理名称");
   };
 
+  const lineCount = newLines.split("\n").filter((line) => line.trim()).length;
+
   const handleAdd = async () => {
-    if (!newUrl.trim()) {
-      toast.error("请填写代理地址");
+    if (lineCount === 0) {
+      toast.error("请填写代理，每行一个");
       return;
     }
-    const ok = await run(() => addProxy(newUrl.trim(), newName.trim()), "已添加代理");
-    if (ok) {
-      setNames((prev) => ({ ...prev, [newUrl.trim()]: newName.trim() }));
-      setNewUrl("");
-      setNewName("");
-      setAdding(false);
+    setBusy(true);
+    try {
+      const data = await addProxies(newLines, vendor.trim());
+      onChange(data.items);
+      setNames((prev) => ({ ...prev, ...Object.fromEntries(data.items.map((proxy) => [proxy.url, prev[proxy.url] ?? proxy.name])) }));
+      setBatchResult(data);
+      const summary = `新增 ${data.added.length} 个，跳过 ${data.skipped.length} 个，无效 ${data.invalid.length} 个`;
+      if (data.added.length > 0) toast.success(summary);
+      else toast.error(summary);
+      if (data.invalid.length === 0) {
+        setNewLines("");
+        if (data.skipped.length === 0) setAdding(false);
+      } else {
+        // 只留下无效的行，改完可以直接再提交
+        const invalidLines = new Set(data.invalid.map((item) => item.line));
+        setNewLines(newLines.split("\n").filter((line, index) => line.trim() && invalidLines.has(index + 1)).join("\n"));
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "添加代理失败");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -196,20 +223,50 @@ export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProp
         </div>
 
         {adding ? (
-          <div className="flex items-center gap-2">
-            <Input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="名称" className="h-[34px] w-32 rounded-[7px]" disabled={busy} />
-            <Input
-              value={newUrl}
-              onChange={(event) => setNewUrl(event.target.value)}
-              placeholder="http://user:pass@host:port"
-              className="h-[34px] flex-1 rounded-[7px]"
+          <div className="space-y-2.5 rounded-[10px] border border-line bg-sunken p-3">
+            <Textarea
+              value={newLines}
+              onChange={(event) => setNewLines(event.target.value)}
+              placeholder={"每行一个代理，例如：\n194.39.33.194:5903:账号:密码\n1.2.3.4:8080\nsocks5://user:pass@host:1080"}
+              className="min-h-28 resize-y rounded-[7px] border-line-strong bg-surface px-3 py-2 font-mono text-xs leading-5 text-ink shadow-none placeholder:text-ink-3 focus-visible:border-ink-3 focus-visible:ring-0"
               disabled={busy}
               autoFocus
             />
-            <Button onClick={() => void handleAdd()} disabled={busy}>
-              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              添加
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={vendor}
+                onChange={(event) => setVendor(event.target.value)}
+                placeholder="厂商名称（可选）"
+                className="h-[34px] w-44 rounded-[7px] border-line-strong bg-surface px-3 text-[13px] shadow-none placeholder:text-ink-3 focus-visible:border-ink-3 focus-visible:ring-0"
+                disabled={busy}
+              />
+              <span className="min-w-0 flex-1 text-xs text-ink-3">
+                {vendor.trim() ? `依次命名为「${vendor.trim()}-序号」，接着这个厂商已有的最大序号` : "不填厂商则不命名，之后可逐个修改"}
+              </span>
+              <Button onClick={() => void handleAdd()} disabled={busy || lineCount === 0}>
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                添加{lineCount > 0 ? ` ${lineCount} 个` : ""}
+              </Button>
+            </div>
+            {batchResult && (batchResult.skipped.length > 0 || batchResult.invalid.length > 0) ? (
+              <ul className="max-h-28 space-y-0.5 overflow-y-auto text-xs">
+                {[
+                  ...batchResult.invalid.map((item) => ({ line: item.line, text: item.text, note: item.error, bad: true })),
+                  ...batchResult.skipped.map((item) => ({
+                    line: item.line,
+                    text: item.text,
+                    note: item.name ? `${item.reason}（${item.name}）` : item.reason,
+                    bad: false,
+                  })),
+                ]
+                  .sort((a, b) => a.line - b.line)
+                  .map((item) => (
+                    <li key={item.line} className={item.bad ? "text-bad" : "text-ink-3"}>
+                      第 {item.line} 行 <span className="font-mono">{item.text}</span>：{item.note}
+                    </li>
+                  ))}
+              </ul>
+            ) : null}
           </div>
         ) : null}
         <p className="text-xs leading-5 text-ink-3">
@@ -217,7 +274,13 @@ export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProp
         </p>
 
         <DialogFooter className="pt-1 sm:justify-between">
-          <Button variant="ghost" onClick={() => setAdding((value) => !value)}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setAdding((value) => !value);
+              setBatchResult(null);
+            }}
+          >
             <Plus className="size-4" />
             添加代理
           </Button>

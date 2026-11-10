@@ -17,6 +17,13 @@ class ProxyEntryRequest(BaseModel):
     name: str = ""
 
 
+class ProxyBatchAddRequest(BaseModel):
+    # 每行一个代理：host:port:账号:密码、host:port 或完整地址
+    text: str = ""
+    # 填了就依次命名「厂商-N」，接着这个厂商已有的最大序号
+    vendor: str = ""
+
+
 class ProxyBatchTestRequest(BaseModel):
     # 为空时测试清单里的全部代理
     urls: list[str] = Field(default_factory=list)
@@ -57,6 +64,15 @@ def create_router() -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return await run_in_threadpool(_list)
+
+    @router.post("/api/proxies/batch")
+    async def add_proxies(body: ProxyBatchAddRequest, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        try:
+            result = proxy_list.add_batch(body.text, body.vendor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {**result, **await run_in_threadpool(_list)}
 
     @router.post("/api/proxies/test")
     async def test_proxies(body: ProxyBatchTestRequest, authorization: str | None = Header(default=None)):

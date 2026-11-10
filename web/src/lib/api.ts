@@ -397,8 +397,15 @@ export async function fetchProxies() {
   return httpRequest<ProxyListResponse>("/api/proxies");
 }
 
-export async function addProxy(url: string, name: string) {
-  return httpRequest<ProxyListResponse>("/api/proxies", { method: "POST", body: { url, name } });
+export type ProxyBatchAddResult = ProxyListResponse & {
+  added: { name: string; masked_url: string; key: string }[];
+  skipped: { line: number; text: string; reason: string; name: string }[];
+  invalid: { line: number; text: string; error: string }[];
+};
+
+/** 批量添加代理，每行一个；填了 vendor 就依次命名「厂商-N」，接着这个厂商已有的最大序号。 */
+export async function addProxies(text: string, vendor: string) {
+  return httpRequest<ProxyBatchAddResult>("/api/proxies/batch", { method: "POST", body: { text, vendor } });
 }
 
 export async function renameProxy(url: string, name: string) {

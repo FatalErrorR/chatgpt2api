@@ -1,3 +1,4 @@
+import json
 import tempfile
 import threading
 import time
@@ -419,6 +420,78 @@ class ImportDistributionTests(unittest.TestCase):
         service.start(self.lines("n", 2), proxy=C, run_async=False)
         self.assertEqual([self.proxy_of(f"tok-n{i}@example.com") for i in range(2)], [C, C])
         self.assertEqual(self.proxies._reserved, {})
+
+
+class ProxyBatchAddTests(unittest.TestCase):
+    """POST /api/proxies/batch：多行添加、厂商命名接着最大序号、去重、无效行、密码不外露。"""
+
+    # 借用同一套临时账号/代理清单和 API 客户端，但不继承（否则会把那边的用例再跑一遍）
+    setUp = ImportDistributionTests.setUp
+    fake_refresh = ImportDistributionTests.fake_refresh
+    listed = ImportDistributionTests.listed
+
+    def batch(self, text, vendor="", status=200):
+        response = self.client.post("/api/proxies/batch", json={"text": text, "vendor": vendor})
+        self.assertEqual(response.status_code, status, response.text)
+        return response.json()
+
+    def names(self):
+        return {item["masked_url"]: item["name"] for item in self.client.get("/api/proxies").json()["items"]}
+
+    def test_colon_format_is_saved_as_url_and_the_password_is_hidden(self):
+        result = self.batch("194.39.33.194:5903:rgqflcyp:gqnfwz1z3697\n 5.6.7.8:3128 \n\nsocks5://u:p@9.9.9.9:1080", "IPRoyal")
+        self.assertEqual([item["name"] for item in result["added"]], ["IPRoyal-1", "IPRoyal-2", "IPRoyal-3"])
+        # 显示用的字段不带密码（url/key 是管理员接口给前端改名、删除用的，本来就是完整地址）
+        displayed = [item["masked_url"] for item in self.client.get("/api/proxies").json()["items"]]
+        self.assertFalse(any("gqnfwz1z3697" in text for text in displayed + [i["masked_url"] for i in result["added"]]))
+        self.assertEqual(self.names(), {
+            "http://rgqflcyp:***@194.39.33.194:5903": "IPRoyal-1",
+            "http://5.6.7.8:3128": "IPRoyal-2",
+            "socks5://u:***@9.9.9.9:1080": "IPRoyal-3",
+        })
+        stored = json.loads((Path(self.dir.name) / "proxies.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored[0]["url"], "http://rgqflcyp:gqnfwz1z3697@194.39.33.194:5903")  # 实际请求用的地址
+
+    def test_numbering_continues_from_the_vendors_highest_number(self):
+        self.batch("1.1.1.1:1\n1.1.1.2:1", "IPRoyal")
+        self.client.post("/api/proxies/update", json={"url": "http://1.1.1.2:1", "name": "iproyal 7"})
+        self.batch("1.1.1.3:1", "Other")
+        result = self.batch("1.1.1.4:1\n1.1.1.5:1", "IPRoyal")
+        self.assertEqual([item["name"] for item in result["added"]], ["IPRoyal-8", "IPRoyal-9"])
+        self.assertEqual(self.batch("1.1.1.6:1", "Other")["added"][0]["name"], "Other-2")
+
+    def test_duplicates_and_invalid_lines_are_reported_and_do_not_use_numbers(self):
+        self.accounts.add_account_items([{"access_token": "a1", "proxy": "socks5://2.2.2.2:1080"}])
+        self.batch("3.3.3.3:80", "V")
+        result = self.batch(
+            "socks5h://2.2.2.2:1080\n3.3.3.3:80\n4.4.4.4:80:u:p\n4.4.4.4:80:u:p\nnot-a-proxy\n5.5.5.5:99999\nftp://6.6.6.6:21\n7.7.7.7:80",
+            "V",
+        )
+        self.assertEqual([(item["name"], item["masked_url"]) for item in result["added"]],
+                         [("V-2", "http://u:***@4.4.4.4:80"), ("V-3", "http://7.7.7.7:80")])
+        self.assertEqual([(item["line"], item["reason"]) for item in result["skipped"]],
+                         [(1, "已在清单里"), (2, "已在清单里"), (4, "本批重复")])
+        self.assertEqual([item["line"] for item in result["invalid"]], [5, 6, 7])
+        shown = [item["masked_url"] for item in result["added"]] + [item["text"] for item in result["skipped"] + result["invalid"]]
+        self.assertFalse(any(":p@" in text for text in shown))
+        self.assertEqual(self.listed("socks5://2.2.2.2:1080")["account_count"], 1)  # 账号带进来的那条不变
+
+    def test_without_vendor_names_stay_empty(self):
+        result = self.batch("8.8.8.8:80")
+        self.assertEqual(result["added"][0]["name"], "")
+
+    def test_empty_and_oversized_batches_are_rejected(self):
+        self.assertIn("每行一个", self.batch(" \n ", status=400)["detail"]["error"])
+        lines = "\n".join(f"10.0.{i // 250}.{i % 250}:80" for i in range(501))
+        self.assertIn("500", self.batch(lines, status=400)["detail"]["error"])
+        self.assertEqual(self.client.get("/api/proxies").json()["items"], [])
+
+    def test_colon_format_proxy_on_an_account_is_masked_in_the_list(self):
+        self.accounts.add_account_items([{"access_token": "c1", "proxy": "194.39.33.194:5903:rgqflcyp:gqnfwz1z3697"}])
+        [item] = self.client.get("/api/proxies").json()["items"]
+        self.assertEqual(item["masked_url"], "http://rgqflcyp:***@194.39.33.194:5903")
+        self.assertEqual(item["account_count"], 1)
+        self.assertEqual(self.batch("194.39.33.194:5903:rgqflcyp:gqnfwz1z3697")["skipped"][0]["reason"], "已在清单里")
 
 
 if __name__ == "__main__":

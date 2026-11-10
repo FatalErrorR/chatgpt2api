@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlsplit
 from threading import Lock
 
 from services.config import DATA_DIR
@@ -16,10 +18,16 @@ from services.proxy_service import normalize_proxy_url
 
 # 连续这么多次请求失败（重试后仍是 Cloudflare 挑战页，或连接出错）就标记异常；成功一次即恢复
 FAILURE_THRESHOLD = 3
+MAX_BATCH_LINES = 500
+PROXY_SCHEMES = {"http", "https", "socks", "socks4", "socks4a", "socks5", "socks5h"}
 
 
 def mask_proxy_url(url: str) -> str:
-    """隐藏代理密码：scheme://user:pass@host:port -> scheme://user:***@host:port。"""
+    """隐藏代理密码：scheme://user:pass@host:port -> scheme://user:***@host:port。
+
+    host:port:user:pass 这种写法先按实际请求的方式转成 URL 再隐藏。"""
+    if "://" not in url:
+        url = normalize_proxy_url(url)
     if "@" not in url:
         return url
     credentials, host = url.rsplit("@", 1)
@@ -37,6 +45,34 @@ def proxy_key(url: str) -> str:
         return url
     userinfo, at, host = rest.rpartition("@")
     return f"{scheme.lower()}://{userinfo}{at}{host.lower()}"
+
+
+def parse_proxy_line(line: str) -> str:
+    """把一行代理转成要保存的地址；格式不对抛 ValueError。
+
+    host:port:user:pass 和 host:port 转成 http:// 地址（账号密码做 URL 编码）；带 scheme 的地址原样保留。
+    """
+    line = line.strip()
+    url = line if "://" in line else normalize_proxy_url(line)
+    if "://" not in url:
+        raise ValueError("格式应为 host:port:账号:密码、host:port 或完整代理地址")
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in PROXY_SCHEMES:
+        raise ValueError(f"不支持的代理协议 {parts.scheme}")
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if not parts.hostname or not port:
+        raise ValueError("缺少主机或端口不正确")
+    return url
+
+
+def _next_vendor_number(names: list[str], vendor: str) -> int:
+    """厂商已有的最大序号 + 1。认「厂商-3」「厂商 3」「厂商3」等写法，厂商名不分大小写。"""
+    pattern = re.compile(rf"^{re.escape(vendor)}\s*[-_#]?\s*(\d+)$", re.IGNORECASE)
+    numbers = [int(match.group(1)) for name in names if (match := pattern.match(name.strip()))]
+    return max(numbers, default=0) + 1
 
 
 def _counts_by_key(account_counts: dict[str, int]) -> dict[str, int]:
@@ -106,6 +142,43 @@ class ProxyList:
                 raise ValueError("这个代理已经在清单里")
             self._entries.append({"url": url, "name": name.strip()})
             self._save_locked()
+
+    def add_batch(self, text: str, vendor: str = "") -> dict:
+        """批量添加，每行一个代理。填了厂商时依次命名「厂商-N」，N 从这个厂商已有的最大序号往后接；
+        已在清单里（含同一代理的其它写法）或本批重复的跳过，不占序号；格式不对的行列出来。"""
+        vendor = vendor.strip()
+        lines = [(number, line.strip()) for number, line in enumerate(text.splitlines(), 1) if line.strip()]
+        if not lines:
+            raise ValueError("请填写代理，每行一个")
+        if len(lines) > MAX_BATCH_LINES:
+            raise ValueError(f"一次最多 {MAX_BATCH_LINES} 个代理")
+        added: list[dict[str, str]] = []
+        skipped: list[dict] = []
+        invalid: list[dict] = []
+        with self._lock:
+            sequence = _next_vendor_number([entry["name"] for entry in self._entries], vendor) if vendor else 0
+            for number, line in lines:
+                try:
+                    url = parse_proxy_line(line)
+                except ValueError as exc:
+                    invalid.append({"line": number, "text": mask_proxy_url(line), "error": str(exc)})
+                    continue
+                existing = self._find_locked(url)
+                if existing is not None:
+                    reason = "本批重复" if any(item is existing for item in added) else "已在清单里"
+                    skipped.append({"line": number, "text": mask_proxy_url(line), "reason": reason, "name": existing["name"]})
+                    continue
+                entry = {"url": url, "name": f"{vendor}-{sequence}" if vendor else ""}
+                sequence += 1
+                self._entries.append(entry)
+                added.append(entry)
+            if added:
+                self._save_locked()
+        return {
+            "added": [{"name": entry["name"], "masked_url": mask_proxy_url(entry["url"]), "key": proxy_key(entry["url"])} for entry in added],
+            "skipped": skipped,
+            "invalid": invalid,
+        }
 
     def rename(self, url: str, name: str) -> None:
         with self._lock:
