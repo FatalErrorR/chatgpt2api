@@ -728,13 +728,37 @@ export function getBackupDownloadUrl(key: string) {
   return `/api/backups/download?${params.toString()}`;
 }
 
-export async function fetchManagedImages(filters: { start_date?: string; end_date?: string }) {
+export type ManagedImageFilters = { start_date?: string; end_date?: string; tags?: string[] };
+
+function managedImageParams(filters: ManagedImageFilters) {
   const params = new URLSearchParams();
   if (filters.start_date) params.set("start_date", filters.start_date);
   if (filters.end_date) params.set("end_date", filters.end_date);
-  return httpRequest<{ items: ManagedImage[]; groups: Array<{ date: string; items: ManagedImage[] }> }>(
-    `/api/images${params.toString() ? `?${params.toString()}` : ""}`,
-  );
+  if (filters.tags?.length) params.set("tags", filters.tags.join(","));
+  return params;
+}
+
+/** 分页取图片：只返回这一页，total 为筛选后的总数；refresh 让后端立即和磁盘对账。 */
+export async function fetchManagedImages(
+  filters: ManagedImageFilters & { page: number; page_size: number; refresh?: boolean },
+) {
+  const params = managedImageParams(filters);
+  params.set("page", String(filters.page));
+  params.set("page_size", String(filters.page_size));
+  if (filters.refresh) params.set("refresh", "true");
+  return httpRequest<{
+    items: ManagedImage[];
+    total: number;
+    page: number;
+    page_size: number;
+    page_count: number;
+  }>(`/api/images?${params.toString()}`);
+}
+
+/** 符合筛选条件的全部图片路径（跨页），供「全选结果」使用。 */
+export async function fetchManagedImagePaths(filters: ManagedImageFilters) {
+  const params = managedImageParams(filters);
+  return httpRequest<{ paths: string[] }>(`/api/images/paths${params.toString() ? `?${params.toString()}` : ""}`);
 }
 
 export async function deleteManagedImages(body: { paths?: string[]; start_date?: string; end_date?: string; all_matching?: boolean }) {

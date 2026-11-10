@@ -165,10 +165,15 @@ class WebDAVClient:
             self.session.close()
 
 
+# 图片列表和磁盘对账的最短间隔（秒）
+RECONCILE_INTERVAL_SECS = 60.0
+
+
 class ImageStorageService:
     def __init__(self, index_file: Path = IMAGE_INDEX_FILE):
         self.index_file = index_file
         self._index_lock = IMAGE_INDEX_LOCK
+        self._last_reconcile = 0.0
 
     def settings(self) -> dict[str, object]:
         return config.get_image_storage_settings()
@@ -270,57 +275,27 @@ class ImageStorageService:
         safe_rel = _safe_relative_path(rel)
         return _is_image_rel(safe_rel) and _local_image_path(safe_rel).is_file()
 
-    def list_items(self, base_url: str, start_date: str = "", end_date: str = "") -> list[dict[str, object]]:
+    def list_items(
+            self,
+            base_url: str,
+            start_date: str = "",
+            end_date: str = "",
+            *,
+            refresh: bool = False,
+    ) -> list[dict[str, object]]:
+        """按日期筛选列出图片，新的在前。
+
+        平时直接读索引（保存、删除都会同步更新索引）；和磁盘对账要遍历整个图片目录，
+        最多每 RECONCILE_INTERVAL_SECS 秒一次，refresh=True 时立即对账。
+        """
         with self._index_lock:
             indexed = self._load_clean_index()
-            root = config.images_dir
-            changed = False
-            for path in root.rglob("*"):
-                if not path.is_file() or not _is_image_rel(path.name):
-                    continue
-                rel = path.relative_to(root).as_posix()
-                if rel in indexed:
-                    continue
-                dimensions = None
-                try:
-                    dimensions = _image_dimensions(path.read_bytes())
-                except Exception:
-                    dimensions = None
-                indexed[rel] = {
-                    "rel": rel,
-                    "path": rel,
-                    "name": path.name,
-                    "date": "-".join(rel.split("/")[:3]) if len(rel.split("/")) >= 4 else datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
-                    "size": path.stat().st_size,
-                    "created_at": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                    "storage": "local",
-                    "local": True,
-                    "webdav": False,
-                    **({"width": dimensions[0], "height": dimensions[1]} if dimensions else {}),
-                }
-                changed = True
-
+            now = time.time()
+            if refresh or now - self._last_reconcile >= RECONCILE_INTERVAL_SECS:
+                self._reconcile_locked(indexed)
+                self._last_reconcile = now
             items: list[dict[str, object]] = []
-            for rel, item in list(indexed.items()):
-                if not _is_image_rel(rel):
-                    indexed.pop(rel, None)
-                    changed = True
-                    continue
-                local = _local_image_path(rel).is_file()
-                webdav = bool(item.get("webdav"))
-                if not local and not webdav:
-                    indexed.pop(rel, None)
-                    changed = True
-                    continue
-                storage = "both" if local and webdav else ("webdav" if webdav else "local")
-                if item.get("local") != local or item.get("storage") != storage:
-                    item = {
-                        **item,
-                        "local": local,
-                        "storage": storage,
-                    }
-                    indexed[rel] = item
-                    changed = True
+            for rel, item in indexed.items():
                 day = str(item.get("date") or "")
                 if start_date and day < start_date:
                     continue
@@ -332,10 +307,54 @@ class ImageStorageService:
                     "path": rel,
                     "url": self._public_url(rel, base_url),
                 })
-            if changed:
-                self._save_index(indexed)
         items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return items
+
+    def _reconcile_locked(self, indexed: dict[str, dict[str, object]]) -> None:
+        """补上磁盘上有、索引里没有的图片，去掉文件已不存在的条目（如被定时清理删掉的），有变化时写回。"""
+        root = config.images_dir
+        changed = False
+        for path in root.rglob("*"):
+            if not path.is_file() or not _is_image_rel(path.name):
+                continue
+            rel = path.relative_to(root).as_posix()
+            if rel in indexed:
+                continue
+            dimensions = None
+            try:
+                dimensions = _image_dimensions(path.read_bytes())
+            except Exception:
+                dimensions = None
+            indexed[rel] = {
+                "rel": rel,
+                "path": rel,
+                "name": path.name,
+                "date": "-".join(rel.split("/")[:3]) if len(rel.split("/")) >= 4 else datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
+                "size": path.stat().st_size,
+                "created_at": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "storage": "local",
+                "local": True,
+                "webdav": False,
+                **({"width": dimensions[0], "height": dimensions[1]} if dimensions else {}),
+            }
+            changed = True
+        for rel, item in list(indexed.items()):
+            if not _is_image_rel(rel):
+                indexed.pop(rel, None)
+                changed = True
+                continue
+            local = _local_image_path(rel).is_file()
+            webdav = bool(item.get("webdav"))
+            if not local and not webdav:
+                indexed.pop(rel, None)
+                changed = True
+                continue
+            storage = "both" if local and webdav else ("webdav" if webdav else "local")
+            if item.get("local") != local or item.get("storage") != storage:
+                indexed[rel] = {**item, "local": local, "storage": storage}
+                changed = True
+        if changed:
+            self._save_index(indexed)
 
     def delete(self, rel: str) -> bool:
         safe_rel = _safe_relative_path(rel)

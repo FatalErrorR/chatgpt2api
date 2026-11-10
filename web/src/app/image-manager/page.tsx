@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { compressAllImages, deleteImageTag, deleteManagedImages, deleteToTarget, downloadImages, downloadSingleImage, fetchImageStorage, fetchImageTags, fetchManagedImages, setImageTags, type ImageStorageStats, type ManagedImage } from "@/lib/api";
+import { compressAllImages, deleteImageTag, deleteManagedImages, deleteToTarget, downloadImages, downloadSingleImage, fetchImageStorage, fetchImageTags, fetchManagedImagePaths, fetchManagedImages, setImageTags, type ImageStorageStats, type ManagedImage } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 const LONG_PRESS_MS = 800;
@@ -58,7 +58,10 @@ function useLongPress(onLongPress: () => void, ms = LONG_PRESS_MS) {
 }
 
 function ImageManagerContent() {
-  const [items, setItems] = useState<ManagedImage[]>([]);
+  const [items, setItems] = useState<ManagedImage[]>([]); // 当前页
+  const [total, setTotal] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
+  const loadSeqRef = useRef(0);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -93,40 +96,61 @@ function ImageManagerContent() {
   const [deleteMode, setDeleteMode] = useState<"selected" | "filtered" | "byDate" | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const filteredItems = selectedTags.length > 0
-    ? items.filter((item) => selectedTags.every((t) => (item.tags ?? []).includes(t)))
-    : items;
-
-  const lightboxImages = filteredItems.map((item) => ({
+  const lightboxImages = items.map((item) => ({
     id: item.name,
     src: item.url,
     sizeLabel: formatSize(item.size),
     dimensions: item.width && item.height ? `${item.width} x ${item.height}` : undefined,
   }));
   const pageSize = 12;
-  const pageCount = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const safePage = Math.min(page, pageCount);
-  const currentRows = filteredItems.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const currentRows = items;
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
-  const selectedCount = deleteMode === "filtered" ? items.length : deleteMode === "byDate" ? 0 : selectedPaths.length;
+  const selectedCount = deleteMode === "filtered" ? total : deleteMode === "byDate" ? 0 : selectedPaths.length;
   const currentPageSelected = currentRows.length > 0 && currentRows.every((item) => selectedSet.has(imageKey(item)));
-  const allSelected = filteredItems.length > 0 && filteredItems.every((item) => selectedSet.has(imageKey(item)));
+  const allSelected = total > 0 && selectedPaths.length >= total;
 
-  const loadImages = async () => {
+  /** 取当前筛选条件下的这一页；选中状态跨页保留。refresh 让后端立即和磁盘对账。 */
+  const loadImages = async (options: { refresh?: boolean } = {}) => {
+    const seq = ++loadSeqRef.current;
     setIsLoading(true);
     try {
       const [data, tagsData] = await Promise.all([
-        fetchManagedImages({ start_date: startDate, end_date: endDate }),
+        fetchManagedImages({
+          start_date: startDate,
+          end_date: endDate,
+          tags: selectedTags,
+          page,
+          page_size: pageSize,
+          refresh: options.refresh,
+        }),
         fetchImageTags(),
       ]);
+      if (seq !== loadSeqRef.current) return; // 已经有更新的请求，丢弃过期结果
       setItems(data.items);
+      setTotal(data.total);
+      setPageCount(data.page_count);
+      if (data.page !== page) setPage(data.page);
       setAllTags(tagsData.tags);
-      setSelectedPaths((current) => current.filter((path) => data.items.some((item) => imageKey(item) === path)));
-      setPage(1);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载图片失败");
+      if (seq === loadSeqRef.current) toast.error(error instanceof Error ? error.message : "加载图片失败");
     } finally {
-      setIsLoading(false);
+      if (seq === loadSeqRef.current) setIsLoading(false);
+    }
+  };
+
+  const filterPaths = () => fetchManagedImagePaths({ start_date: startDate, end_date: endDate, tags: selectedTags });
+
+  const toggleAllResults = async (checked: boolean) => {
+    if (!checked) {
+      setSelectedPaths([]);
+      return;
+    }
+    try {
+      const data = await filterPaths();
+      setSelectedPaths(data.paths);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "获取图片列表失败");
     }
   };
 
@@ -146,9 +170,9 @@ function ImageManagerContent() {
     setIsDeleting(true);
     try {
       await deleteManagedImages({ paths: [deleteTarget.rel] });
-      setItems((prev) => prev.filter((item) => item.rel !== deleteTarget.rel));
       setSelectedPaths((prev) => prev.filter((p) => p !== imageKey(deleteTarget)));
       toast.success("图片已删除");
+      void loadImages();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "删除失败");
     } finally {
@@ -228,6 +252,7 @@ function ImageManagerContent() {
     setStartDate("");
     setEndDate("");
     setSelectedTags([]);
+    setPage(1);
   };
 
   const togglePaths = (paths: string[], checked: boolean) => {
@@ -251,10 +276,10 @@ function ImageManagerContent() {
   };
 
   const handleBatchDownload = async () => {
-    const paths = deleteMode === "filtered" ? items.map((item) => item.rel) : selectedPaths;
-    if (paths.length === 0) return;
     setIsDownloading(true);
     try {
+      const paths = deleteMode === "filtered" ? (await filterPaths()).paths : selectedPaths;
+      if (paths.length === 0) return;
       await downloadImages(paths);
       toast.success(`已下载 ${paths.length} 张图片`);
     } catch (error) {
@@ -270,7 +295,7 @@ function ImageManagerContent() {
 
   useEffect(() => {
     void loadImages();
-  }, [startDate, endDate]);
+  }, [startDate, endDate, selectedTags, page]);
 
   return (
     <section className="space-y-5">
@@ -280,7 +305,7 @@ function ImageManagerContent() {
           <h1 className="text-2xl font-semibold tracking-tight">图片管理</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); }} />
+          <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); setPage(1); }} />
           <Button variant="outline" onClick={clearFilters} className="h-10 rounded-xl border-stone-200 bg-white px-4 text-stone-700">
             清除筛选条件
           </Button>
@@ -288,7 +313,7 @@ function ImageManagerContent() {
             {isLoading ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
             查询
           </Button>
-          <Button variant="outline" onClick={() => setDeleteMode("filtered")} disabled={isDeleting || items.length === 0 || (!startDate && !endDate)} className="h-10 rounded-xl border-rose-200 bg-white px-4 text-rose-600 hover:bg-rose-50">
+          <Button variant="outline" onClick={() => setDeleteMode("filtered")} disabled={isDeleting || total === 0 || (!startDate && !endDate)} className="h-10 rounded-xl border-rose-200 bg-white px-4 text-rose-600 hover:bg-rose-50">
             <Trash2 className="size-4" />
             删除匹配日期
           </Button>
@@ -333,7 +358,7 @@ function ImageManagerContent() {
             );
           })}
           {selectedTags.length > 0 ? (
-            <button type="button" onClick={() => setSelectedTags([])}>
+            <button type="button" onClick={() => { setSelectedTags([]); setPage(1); }}>
               <Badge variant="secondary" className="cursor-pointer rounded-md">
                 <X className="mr-0.5 size-3" />
                 清除
@@ -442,20 +467,19 @@ function ImageManagerContent() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 px-5 py-4">
             <div className="flex flex-wrap items-center gap-3 text-sm text-stone-600">
               <ImageIcon className="size-4" />
-              共 {filteredItems.length} 张
-              {selectedTags.length > 0 ? <span className="text-stone-400">（筛选自 {items.length} 张）</span> : null}
+              共 {total} 张
               <label className="flex items-center gap-2">
                 <Checkbox className={IMAGE_MANAGER_CHECKBOX_CLASS} checked={currentPageSelected} onCheckedChange={(checked) => togglePaths(currentRows.map(imageKey), Boolean(checked))} />
                 本页全选
               </label>
               <label className="flex items-center gap-2">
-                <Checkbox className={IMAGE_MANAGER_CHECKBOX_CLASS} checked={allSelected} onCheckedChange={(checked) => togglePaths(filteredItems.map(imageKey), Boolean(checked))} />
+                <Checkbox className={IMAGE_MANAGER_CHECKBOX_CLASS} checked={allSelected} onCheckedChange={(checked) => void toggleAllResults(Boolean(checked))} />
                 全选结果
               </label>
               {selectedPaths.length > 0 ? <span>已选 {selectedPaths.length} 张</span> : null}
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" className="h-8 rounded-lg px-3 text-stone-500" onClick={() => void loadImages()} disabled={isLoading}>
+              <Button variant="ghost" className="h-8 rounded-lg px-3 text-stone-500" onClick={() => void loadImages({ refresh: true })} disabled={isLoading}>
                 <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
                 刷新
               </Button>
@@ -474,7 +498,7 @@ function ImageManagerContent() {
           </div>
           <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {currentRows.map((item) => {
-              const imageIndex = filteredItems.findIndex((row) => row.url === item.url);
+              const imageIndex = items.findIndex((row) => row.url === item.url);
               return (
               <div key={item.rel} className="group border-r border-b border-stone-100 p-4 transition hover:bg-stone-50 dark:hover:bg-white/5">
                 <div className="relative">
@@ -621,7 +645,7 @@ function ImageManagerContent() {
             )})}
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-stone-100 px-4 py-3 text-sm text-stone-500">
-            <span>第 {safePage} / {pageCount} 页，共 {filteredItems.length} 张</span>
+            <span>第 {safePage} / {pageCount} 页，共 {total} 张</span>
             <Button variant="outline" size="icon" className="size-9 rounded-lg border-stone-200 bg-white" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
               <ChevronLeft className="size-4" />
             </Button>
@@ -629,7 +653,7 @@ function ImageManagerContent() {
               <ChevronRight className="size-4" />
             </Button>
           </div>
-          {!isLoading && filteredItems.length === 0 ? <div className="px-6 py-14 text-center text-sm text-stone-500">没有找到图片</div> : null}
+          {!isLoading && total === 0 ? <div className="px-6 py-14 text-center text-sm text-stone-500">没有找到图片</div> : null}
         </CardContent>
       </Card>
 

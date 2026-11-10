@@ -149,10 +149,42 @@ def cleanup_image_thumbnails() -> int:
     _cleanup_empty_dirs(thumbnails_root)
     return removed
 
-def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict[str, object]:
-    config.cleanup_old_images()
-    cleanup_image_thumbnails()
+IMAGE_PAGE_SIZE_MAX = 200
+
+
+def _filtered_images(base_url: str, start_date: str, end_date: str, tags: list[str], refresh: bool) -> tuple[list[dict], dict]:
+    """按日期和标签筛选（标签需全部命中），新的在前。返回 (图片, 全部标签映射)。"""
     all_tags = load_tags()
+    wanted = [tag for tag in tags if tag]
+    rows = image_storage_service.list_items(base_url, start_date, end_date, refresh=refresh)
+    if wanted:
+        rows = [row for row in rows if all(tag in all_tags.get(str(row["path"]), []) for tag in wanted)]
+    return rows, all_tags
+
+
+def list_images(
+        base_url: str,
+        start_date: str = "",
+        end_date: str = "",
+        *,
+        tags: list[str] | None = None,
+        page: int = 0,
+        page_size: int = 48,
+        refresh: bool = False,
+) -> dict[str, object]:
+    """图片列表。page > 0 时只返回这一页，并带 total/page/page_size/page_count；不传 page 时返回全部（旧行为）。
+
+    过期清理由定时任务负责，不在请求里做。
+    """
+    rows, all_tags = _filtered_images(base_url, start_date, end_date, tags or [], refresh)
+    total = len(rows)
+    paging: dict[str, int] = {}
+    if page > 0:
+        page_size = max(1, min(IMAGE_PAGE_SIZE_MAX, page_size))
+        page_count = max(1, -(-total // page_size))
+        page = min(page, page_count)
+        rows = rows[(page - 1) * page_size:page * page_size]
+        paging = {"page": page, "page_size": page_size, "page_count": page_count}
     items = [
         {
             **item,
@@ -160,12 +192,23 @@ def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict
             "thumbnail_url": thumbnail_url(base_url, str(item["path"])),
             "tags": all_tags.get(str(item["path"]), []),
         }
-        for item in image_storage_service.list_items(base_url, start_date, end_date)
+        for item in rows
     ]
     groups: dict[str, list[dict[str, object]]] = {}
     for item in items:
         groups.setdefault(str(item["date"]), []).append(item)
-    return {"items": items, "groups": [{"date": key, "items": value} for key, value in groups.items()]}
+    return {
+        "items": items,
+        "groups": [{"date": key, "items": value} for key, value in groups.items()],
+        "total": total,
+        **paging,
+    }
+
+
+def list_image_paths(start_date: str = "", end_date: str = "", tags: list[str] | None = None) -> dict[str, object]:
+    """符合筛选条件的全部图片路径，供分页后的「全选结果」、批量下载使用。"""
+    rows, _ = _filtered_images("", start_date, end_date, tags or [], False)
+    return {"paths": [str(row["path"]) for row in rows]}
 
 
 def delete_images(paths: list[str] | None = None, start_date: str = "", end_date: str = "", all_matching: bool = False) -> dict[str, int]:

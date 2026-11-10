@@ -18,6 +18,7 @@ from services.image_service import (
     get_image_download_response,
     get_image_response,
     get_thumbnail_response,
+    list_image_paths,
     list_images,
     storage_stats,
 )
@@ -37,6 +38,10 @@ class ProxyTestRequest(BaseModel):
 
 class ClearanceTestRequest(BaseModel):
     target_url: str = "https://chatgpt.com"
+
+
+def _split_tags(value: str) -> list[str]:
+    return [tag.strip() for tag in value.split(",") if tag.strip()]
 
 
 class ImageDeleteRequest(BaseModel):
@@ -95,9 +100,41 @@ def create_router(app_version: str) -> APIRouter:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
     @router.get("/api/images")
-    async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
+    async def get_images(
+        request: Request,
+        start_date: str = "",
+        end_date: str = "",
+        tags: str = "",
+        page: int = 0,
+        page_size: int = 48,
+        refresh: bool = False,
+        authorization: str | None = Header(default=None),
+    ):
+        """page > 0 时分页返回；tags 为逗号分隔、需全部命中；refresh 强制和磁盘对账。"""
         require_admin(authorization)
-        return list_images(resolve_image_base_url(request), start_date=start_date.strip(), end_date=end_date.strip())
+        return await run_in_threadpool(
+            lambda: list_images(
+                resolve_image_base_url(request),
+                start_date=start_date.strip(),
+                end_date=end_date.strip(),
+                tags=_split_tags(tags),
+                page=page,
+                page_size=page_size,
+                refresh=refresh,
+            )
+        )
+
+    @router.get("/api/images/paths")
+    async def get_image_paths(
+        start_date: str = "",
+        end_date: str = "",
+        tags: str = "",
+        authorization: str | None = Header(default=None),
+    ):
+        require_admin(authorization)
+        return await run_in_threadpool(
+            list_image_paths, start_date.strip(), end_date.strip(), _split_tags(tags)
+        )
 
     @router.get("/images/{image_path:path}", include_in_schema=False)
     async def get_image(image_path: str):
