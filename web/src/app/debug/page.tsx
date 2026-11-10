@@ -3,7 +3,9 @@
 import { LoaderCircle } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { segmentedItemClass, segmentedListClass } from "@/components/ui/segmented";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 import { ChatPanel } from "./components/chat-panel";
@@ -35,12 +37,12 @@ export default function DebugPage() {
     <section className="space-y-5">
     <PageHeader title="调试" description="直接调用上游能力，用于排查问题，不计入号池统计。" />
     <Tabs defaultValue="skills" className="flex w-full flex-col gap-4">
-      <TabsList className="h-auto w-fit max-w-full flex-wrap justify-start gap-0.5 rounded-[9px] bg-sunken p-[3px]">
+      <TabsList className={cn(segmentedListClass, "justify-start")}>
         {tabs.map(({ value, title }) => (
           <TabsTrigger
             key={value}
             value={value}
-            className="h-7 flex-none rounded-[7px] px-3 text-[13px] font-normal text-ink-2 data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,.06)]"
+            className={segmentedItemClass}
           >
             {title}
           </TabsTrigger>

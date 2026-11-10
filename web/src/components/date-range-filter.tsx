@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Field } from "@/components/ui/field";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 type DateRangeFilterProps = {
   startDate: string;
@@ -23,14 +24,14 @@ export function DateRangeFilter({ startDate, endDate, onChange }: DateRangeFilte
       }
     : undefined;
 
-  const label = startDate ? `${startDate} 至 ${endDate || startDate}` : "选择日期范围";
+  const label = startDate ? `${startDate} 至 ${endDate || startDate}` : "全部日期";
 
   return (
-    <Field className="w-[240px]">
+    <Field className="w-auto">
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="h-10 justify-start rounded-xl border-stone-200 bg-white px-3 font-normal text-stone-700">
-            <CalendarIcon className="size-4 text-stone-400" />
+          <Button variant="outline" className={cn("h-[34px] justify-start px-[11px] text-[13px] font-normal", startDate ? "text-ink" : "text-ink-3")}>
+            <CalendarIcon className="size-4 text-ink-3" />
             {label}
           </Button>
         </PopoverTrigger>
