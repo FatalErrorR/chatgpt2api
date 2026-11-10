@@ -54,6 +54,7 @@ import {
   type ProxyEntry,
 } from "@/lib/api";
 import { previewProxyDistribution } from "@/lib/proxy-distribution";
+import { proxyShortName, proxyTitle } from "@/lib/proxy-match";
 import { cn } from "@/lib/utils";
 
 type ImportMethod = "menu" | "token" | "session" | "codex-auth" | "account-json" | "oauth" | "protocol";
@@ -212,7 +213,7 @@ function MethodGroup({ label, children }: { label: string; children: React.React
 }
 
 export function proxyLabel(proxy: ProxyEntry) {
-  return proxy.name ? `${proxy.name}（${proxy.masked_url}）` : proxy.masked_url;
+  return proxyTitle(proxy);
 }
 
 export function AccountImportDialog({ disabled, proxies = [], onImported }: AccountImportDialogProps) {
@@ -1089,7 +1090,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                     const proxy = proxies.find((entry) => entry.url === item.url);
                     return (
                       <div key={item.url} className="grid grid-cols-[1fr_auto] gap-3 border-t border-line px-3 py-2 text-[13px] first:border-t-0">
-                        <span className="truncate text-ink">{proxy?.name || proxy?.masked_url || item.url}</span>
+                        <span className="truncate text-ink" title={proxy ? proxyTitle(proxy) : undefined}>{proxy ? proxyShortName(proxy) : item.url}</span>
                         <span className="text-ink-3 tabular-nums">
                           {item.abnormal && distributionPreview.some((entry) => !entry.abnormal) ? "跳过" : `现有 ${item.accountCount} · 本次 +${item.assigned}`}
                         </span>

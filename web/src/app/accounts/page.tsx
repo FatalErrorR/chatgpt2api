@@ -60,7 +60,7 @@ import {
   type ProxyEntry,
   type RefreshProgressResponse,
 } from "@/lib/api";
-import { accountMatchesProxyFilter, proxyForAccount } from "@/lib/proxy-match";
+import { accountMatchesProxyFilter, proxyForAccount, proxyShortName } from "@/lib/proxy-match";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
@@ -120,6 +120,16 @@ function formatRestoreAt(value?: string | null) {
   const absolute = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
   return { absolute, relative };
+}
+
+/**
+ * 恢复时间列：额度恢复只对限流账号、或恢复时间还没到的账号有意义。
+ * 正常且有额度、或已异常的账号，过去的恢复时间只是噪音。
+ */
+function restoreLabel(account: Account, restore: { relative: string }) {
+  if (!restore.relative) return "";
+  if (restore.relative === "已到恢复时间" && account.status !== "限流") return "";
+  return restore.relative;
 }
 
 function formatCreatedAt(raw?: string | null) {
@@ -918,7 +928,7 @@ function AccountsPageContent() {
 
       <div className="grid gap-[22px] lg:grid-cols-[210px_minmax(0,1fr)]">
         {/* 左侧筛选栏：状态 / 类型 / 代理，带数量，可以组合 */}
-        <aside className="hidden content-start gap-[18px] lg:grid">
+        <aside className="hidden min-w-0 content-start gap-[18px] lg:grid [&>div]:min-w-0">
           <div>
             <h4 className="mb-1.5 text-xs font-medium tracking-[0.04em] text-ink-3">状态</h4>
             {(
@@ -964,8 +974,8 @@ function AccountsPageContent() {
                 onClick={() => setFilter(() => setProxyFilter(proxy.key))}
                 title={proxyLabel(proxy)}
               >
-                <StatusDot tone={proxy.health.abnormal ? "bad" : proxy.health.successes > 0 ? "ok" : "off"} className="min-w-0">
-                  <span className="truncate">{proxy.name || proxy.masked_url}</span>
+                <StatusDot tone={proxy.health.abnormal ? "bad" : proxy.health.successes > 0 ? "ok" : "off"} className="min-w-0 overflow-hidden">
+                  <span className="truncate">{proxyShortName(proxy)}</span>
                 </StatusDot>
                 <span className={facetCount}>{facetCounts.proxyKeys.get(proxy.key) ?? 0}</span>
               </button>
@@ -1012,7 +1022,7 @@ function AccountsPageContent() {
                   <SelectItem value="all">全部代理</SelectItem>
                   <SelectItem value="none">未指定代理</SelectItem>
                   {proxies.map((proxy) => (
-                    <SelectItem key={proxy.key} value={proxy.key}>{proxy.name || proxy.masked_url}</SelectItem>
+                    <SelectItem key={proxy.key} value={proxy.key}>{proxyShortName(proxy)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1100,7 +1110,7 @@ function AccountsPageContent() {
                         </div>
                         <div className={cn("mt-0.5 truncate text-xs", statusError ? "text-bad" : "text-ink-3")}>
                           {statusError ||
-                            [proxy ? proxy.name || proxy.masked_url : "", displayAccountType(account), `额度 ${formatQuota(account)}`, restore.relative]
+                            [proxy ? proxyShortName(proxy) : "", displayAccountType(account), `额度 ${formatQuota(account)}`, restoreLabel(account, restore)]
                               .filter(Boolean)
                               .join(" · ")}
                         </div>
@@ -1172,8 +1182,11 @@ function AccountsPageContent() {
                             {!url ? (
                               <span className="text-ink-3">—</span>
                             ) : (
-                              <span className={cn("block max-w-[150px] truncate", proxy?.health.abnormal ? "text-bad" : "text-ink-2")} title={proxy ? proxyLabel(proxy) : undefined}>
-                                {proxy ? proxy.name || proxy.masked_url : "…"}
+                              <span
+                                className={cn("block max-w-[150px] truncate", proxy?.health.abnormal ? "text-bad" : "text-ink-2")}
+                                title={proxy ? `${proxyLabel(proxy)}${proxy.health.abnormal ? `\n代理异常：${proxy.health.last_error || "连续请求失败"}` : ""}` : undefined}
+                              >
+                                {proxy ? proxyShortName(proxy) : "…"}
                               </span>
                             )}
                           </td>
@@ -1184,9 +1197,9 @@ function AccountsPageContent() {
                           </td>
                           <td className="px-2.5 py-3 text-right tabular-nums text-ink">{formatQuota(account)}</td>
                           <td className="px-2.5 py-3 whitespace-nowrap">
-                            {restore.relative ? (
+                            {restoreLabel(account, restore) ? (
                               <>
-                                <div className="text-ink">{restore.relative}</div>
+                                <div className="text-ink">{restoreLabel(account, restore)}</div>
                                 <div className="text-xs text-ink-3">{restore.absolute}</div>
                               </>
                             ) : (

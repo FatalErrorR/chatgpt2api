@@ -60,3 +60,13 @@ test("没有 proxy_key 的旧数据不会误匹配", () => {
   assert.equal(accountMatchesProxyFilter({ proxy: "socks5://3.3.3.3:1080" }, KEY), false);
   assert.equal(proxyForAccount(byKey, { proxy: "socks5://3.3.3.3:1080" }), undefined);
 });
+
+test("代理短名：没名字时用主机:端口，不用以账号名开头的地址", async () => {
+  const { proxyShortName, proxyTitle } = await import("../src/lib/proxy-match.ts");
+  const masked = "http://vvuyblcwstaticresidential:***@194.39.33.194:5903";
+  assert.equal(proxyShortName({ name: "", masked_url: masked }), "194.39.33.194:5903");
+  assert.equal(proxyShortName({ name: " IPRoyal-3 ", masked_url: masked }), "IPRoyal-3");
+  assert.equal(proxyShortName({ name: "", masked_url: "socks5://9.9.9.9:1080" }), "9.9.9.9:1080");
+  assert.equal(proxyShortName({ name: "", masked_url: "http://1.2.3.4:80/" }), "1.2.3.4:80");
+  assert.equal(proxyTitle({ name: "", masked_url: masked }), `194.39.33.194:5903（${masked}）`);
+});
