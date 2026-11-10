@@ -408,6 +408,14 @@ export async function deleteProxy(url: string) {
   return httpRequest<ProxyListResponse>("/api/proxies/delete", { method: "POST", body: { url } });
 }
 
+/** 批量测试代理连 chatgpt.com；urls 为空时测全部。results 按代理 key，结果同时记进健康状况。 */
+export async function testProxies(urls: string[] = []) {
+  return httpRequest<ProxyListResponse & { results: Record<string, ProxyTestResult> }>("/api/proxies/test", {
+    method: "POST",
+    body: { urls },
+  });
+}
+
 export type OAuthLoginStartResponse = {
   session_id: string;
   authorize_url: string;

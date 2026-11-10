@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, LoaderCircle, Plus, Trash2 } from "lucide-react";
+import { Activity, Globe, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { addProxy, deleteProxy, renameProxy, type ProxyEntry } from "@/lib/api";
+import { addProxy, deleteProxy, renameProxy, testProxies, type ProxyEntry, type ProxyTestResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type ProxyManagerDialogProps = {
@@ -33,12 +33,39 @@ function healthText(proxy: ProxyEntry) {
   return `正常 · 成功 ${health.successes} / 失败 ${health.failures}`;
 }
 
+function testText(result: ProxyTestResult) {
+  if (result.status >= 200 && result.status < 400) {
+    return `测试可用 · ${result.latency_ms} ms`;
+  }
+  if (result.status === 403) {
+    return `测试被 Cloudflare 拦截（HTTP 403）· ${result.latency_ms} ms`;
+  }
+  return `测试失败：${result.error || `HTTP ${result.status}`}`;
+}
+
 export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProps) {
   const [open, setOpen] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
   const [newUrl, setNewUrl] = useState("");
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState<string[] | null>(null); // 正在测试的代理 key；null 表示没在测
+  const [results, setResults] = useState<Record<string, ProxyTestResult>>({});
+
+  const handleTest = async (targets: ProxyEntry[]) => {
+    setTesting(targets.map((proxy) => proxy.key));
+    try {
+      const data = await testProxies(targets.length === proxies.length ? [] : targets.map((proxy) => proxy.url));
+      onChange(data.items);
+      setResults((prev) => ({ ...prev, ...data.results }));
+      const passed = Object.values(data.results).filter((result) => result.status >= 200 && result.status < 400).length;
+      toast.success(`测试完成：${passed}/${Object.keys(data.results).length} 个代理可用`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "测试代理失败");
+    } finally {
+      setTesting(null);
+    }
+  };
 
   const run = async (action: () => Promise<{ items: ProxyEntry[] }>, success: string) => {
     setBusy(true);
@@ -128,6 +155,16 @@ export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProp
                   <Button
                     variant="ghost"
                     size="icon"
+                    className="size-8 shrink-0 text-stone-500 hover:text-stone-800"
+                    disabled={busy || testing !== null}
+                    title="测试这个代理"
+                    onClick={() => void handleTest([proxy])}
+                  >
+                    {testing?.includes(proxy.key) ? <LoaderCircle className="size-4 animate-spin" /> : <Activity className="size-4" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="size-8 shrink-0 text-stone-500 hover:text-rose-600"
                     disabled={busy || proxy.account_count > 0}
                     title={proxy.account_count > 0 ? "还有账号在用这个代理，不能删除" : "删除代理"}
@@ -143,6 +180,16 @@ export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProp
                   {healthText(proxy)}
                   {proxy.health.abnormal && proxy.health.last_error ? ` · ${proxy.health.last_error}` : ""}
                 </p>
+                {results[proxy.key] ? (
+                  <p
+                    className={cn(
+                      "mt-0.5 text-xs",
+                      results[proxy.key].status >= 200 && results[proxy.key].status < 400 ? "text-emerald-600" : "text-rose-500",
+                    )}
+                  >
+                    {testText(results[proxy.key])}
+                  </p>
+                ) : null}
               </div>
             ))
           )}
@@ -170,9 +217,23 @@ export function ProxyManagerDialog({ proxies, onChange }: ProxyManagerDialogProp
         </div>
         <p className="text-xs text-stone-500">
           健康状况只统计本次启动以来的请求：连续 3 次被 Cloudflare 挑战或连接失败就标记异常，成功一次即恢复。
+          测试会经代理访问 chatgpt.com，结果同样计入健康状况；代理续费或更换后点「全部测试」可立即清掉异常标记。
         </p>
 
         <DialogFooter className="pt-2">
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl border-stone-200 px-5 text-stone-700"
+            disabled={busy || testing !== null || proxies.length === 0}
+            onClick={() => void handleTest(proxies)}
+          >
+            {testing !== null && testing.length > 1 ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <Activity className="size-4" />
+            )}
+            全部测试
+          </Button>
           <Button
             variant="secondary"
             className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
