@@ -115,7 +115,7 @@ a { color: inherit; }
 .check.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid var(--bg); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 
 /* ---------- 应用框架：左侧栏 ---------- */
-.app { display: grid; grid-template-columns: 224px 1fr; min-height: 760px; }
+.app { display: grid; grid-template-columns: 64px 1fr; min-height: 760px; }
 .side { background: var(--bg-sunken); border-right: 1px solid var(--line); padding: 18px 12px; display: flex; flex-direction: column; gap: 2px; }
 .brand { display: flex; align-items: center; gap: 9px; padding: 4px 10px 18px; font-family: var(--serif); font-size: 18px; }
 .brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--clay); display: grid; place-items: center; color: #fff; font: 600 12px var(--sans); }
@@ -131,6 +131,49 @@ a { color: inherit; }
 .page-head h1 { font-size: 30px; margin: 0; }
 .page-head p { margin: 4px 0 0; color: var(--ink-2); }
 .page-actions { display: flex; gap: 8px; }
+
+/* ---------- 应用框架：左侧窄图标栏 ---------- */
+.rail { background: var(--bg-sunken); border-right: 1px solid var(--line); padding: 14px 0 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.rail .brand-mark { width: 30px; height: 30px; border-radius: 8px; font-size: 14px; margin-bottom: 14px; }
+.rail-item { width: 50px; padding: 7px 0 6px; border-radius: 9px; display: grid; justify-items: center; gap: 3px; color: var(--ink-2); font-size: 11px; }
+.rail-item svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+.rail-item.active { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.rail-item.active svg { stroke: var(--clay); }
+.rail-sep { width: 28px; height: 1px; background: var(--line); margin: 6px 0; }
+.rail-foot { margin-top: auto; display: grid; justify-items: center; gap: 8px; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-size: 12px; }
+
+/* 号池 A：状态标签 + 代理健康条 */
+.tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.tabs span { padding: 0 2px 10px; color: var(--ink-2); font-size: 14px; position: relative; white-space: nowrap; }
+.tabs span em { font-style: normal; color: var(--ink-3); margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.tabs span.on { color: var(--ink); }
+.tabs span.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--clay); }
+.tabs span.alert em { color: var(--rust); }
+.proxy-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; font-size: 12px; color: var(--ink-3); }
+.pchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); }
+.pchip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--olive); }
+.pchip.bad::before { background: var(--rust); }
+.pchip.idle::before { background: var(--ink-3); }
+.pchip.on { border-color: var(--ink); color: var(--ink); }
+.pchip b { font-weight: 500; color: var(--ink-3); }
+.subline { display: flex; gap: 18px; color: var(--ink-2); margin-top: 6px; font-size: 13px; }
+.subline b { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* 号池 B：页内筛选栏 */
+.split { display: grid; grid-template-columns: 210px 1fr; gap: 22px; }
+.facets { display: grid; gap: 18px; align-content: start; }
+.facet h4 { margin: 0 0 6px; font: 500 12px var(--sans); color: var(--ink-3); letter-spacing: .04em; }
+.facet div { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 9px; border-radius: 7px; font-size: 13px; color: var(--ink-2); }
+.facet div.on { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.facet div em { font-style: normal; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.facet .dot { display: inline-flex; align-items: center; gap: 8px; }
+.facet .dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--olive); }
+.facet .dot.bad::before { background: var(--rust); }
+.facet .dot.warn::before { background: var(--amber); }
+.facet .dot.idle::before { background: var(--ink-3); }
+.variant-label { display: inline-flex; align-items: center; gap: 8px; margin: 28px 0 12px; font-family: var(--serif); font-size: 20px; }
+.variant-label span { font: 500 12px var(--sans); color: var(--clay-hover); background: var(--clay-soft); border-radius: 6px; padding: 2px 8px; }
 
 /* 号池：概览数字 */
 .figures { display: grid; grid-template-columns: repeat(6, 1fr); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); margin-bottom: 20px; }
@@ -151,7 +194,7 @@ a { color: inherit; }
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-weight: 500; font-size: 12px; color: var(--ink-3); padding: 10px 10px; border-bottom: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
 td { padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 13px; white-space: nowrap; }
-.cell-main, .cell-sub { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
+td .cell-main, td .cell-sub { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
 td.wrap { white-space: normal; }
 tr.failed td:first-child { box-shadow: inset 2px 0 0 var(--rust); }
 tr:last-child td { border-bottom: 0; }
@@ -165,7 +208,7 @@ tbody tr:hover td { background: var(--surface-hover); }
 .pager b { background: var(--ink); color: var(--bg); }
 
 /* 生图 */
-.studio { display: grid; grid-template-columns: 224px 248px 1fr; min-height: 820px; }
+.studio { display: grid; grid-template-columns: 64px 248px 1fr; min-height: 820px; }
 .threads { border-right: 1px solid var(--line); padding: 18px 12px; display: flex; flex-direction: column; gap: 2px; background: var(--bg); }
 .threads .new { margin: 0 4px 12px; justify-content: center; }
 .thread { padding: 9px 10px; border-radius: var(--radius-sm); color: var(--ink-2); font-size: 13px; }
@@ -279,7 +322,7 @@ tbody tr:hover td { background: var(--surface-hover); }
       <li>用 1px 细线分隔区域，几乎不用阴影；只有浮层（对话框、输入框）有一层很浅的投影</li>
       <li>低频操作收进「…」菜单或选中后才出现的操作条，常驻按钮控制在 3 个以内</li>
       <li>中文界面统一用简体、句子式文案，不用感叹号和 emoji（如现在的 🧹、🗜️）</li>
-      <li>导航从顶部改为左侧栏，与 Claude 一致，页面有更多横向空间给表格</li>
+      <li>导航改为左侧 64px 窄图标栏（图标 + 小字），与 Claude 收起侧栏时一致，宽度全部留给内容</li>
       <li>深色模式用暖调深灰（不是纯黑），与浅色共用同一套语义变量</li>
     </ul>
   </section>
@@ -349,42 +392,27 @@ tbody tr:hover td { background: var(--surface-hover); }
   <!-- ================= 5. 号池 ================= -->
   <section class="doc-section">
     <h2>号池（账号管理）</h2>
-    <p class="lede">最常用的页面。现状是顶部一排 8 个按钮 + 表格 14 列。重做后：概览数字一行、筛选一行、选中账号后才出现批量操作条；每行的编辑 / 刷新 / 删除收进「⋯」。</p>
+    <p class="lede">两个编排方案供选择。共同点：左侧改为窄图标栏；汇总数字不再单独占一整行，而是和筛选合在一起——看到数字的地方就能直接点开筛选；选中账号后才出现批量操作条；每行的编辑 / 刷新 / 删除收进「⋯」。</p>
+
+    <div class="variant-label"><span>方案 A</span>状态标签页</div>
     <div class="frame">
       <div class="frame-bar"><i></i><i></i><i></i><span>/accounts</span></div>
       <div class="app">
-        <aside class="side">
-          <div class="brand"><span class="brand-mark">C</span>chatgpt2api</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="6" cy="6" r="1.5"/><path d="M14 11l-3.5-3.5L4 14"/></svg>生图</div>
-          <div class="nav-label">管理</div>
-          <div class="nav-item active"><svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 14c.6-2.5 2.4-4 4.5-4s3.9 1.5 4.5 4"/><path d="M11 3.5a2.3 2.3 0 010 4.4M12.5 10.3c1 .6 1.7 1.9 2 3.7"/></svg>号池<span class="count">131</span></div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M1.5 10l3.5-3 3 2.5 2-1.5 4.5 3.5"/></svg>图片<span class="count">5,158</span></div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><path d="M3 3h10M3 6.5h10M3 10h7M3 13.5h5"/></svg>日志</div>
-          <div class="nav-label">系统</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>设置</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><path d="M5 4L1.5 8 5 12M11 4l3.5 4-3.5 4"/></svg>调试</div>
-          <div class="side-foot">
-            <div class="who">管理员<span class="icon-btn">◐</span></div>
-            <span>v1.8.0 · 上游 chatgpt.com</span>
-          </div>
-        </aside>
+        <aside class="rail"><span class="brand-mark" style="display:grid">C</span><div class="rail-item"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="6" cy="6" r="1.5"/><path d="M14 11l-3.5-3.5L4 14"/></svg>生图</div><span class="rail-sep"></span><div class="rail-item active"><svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 14c.6-2.5 2.4-4 4.5-4s3.9 1.5 4.5 4"/><path d="M11 3.5a2.3 2.3 0 010 4.4M12.5 10.3c1 .6 1.7 1.9 2 3.7"/></svg>号池</div><div class="rail-item"><svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M1.5 10l3.5-3 3 2.5 2-1.5 4.5 3.5"/></svg>图片</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M3 3h10M3 6.5h10M3 10h7M3 13.5h5"/></svg>日志</div><span class="rail-sep"></span><div class="rail-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>设置</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M5 4L1.5 8 5 12M11 4l3.5 4-3.5 4"/></svg>调试</div><div class="rail-foot"><span class="icon-btn">◐</span><span class="avatar">管</span></div></aside>
         <main class="main">
           <div class="page-head">
-            <div><h1>号池</h1><p>131 个账号分布在 10 个代理上，今日成功生图 625 张。</p></div>
-            <div class="page-actions"><span class="btn btn-outline">代理</span><span class="btn btn-outline">刷新全部额度</span><span class="btn btn-primary">导入账号</span></div>
+            <div>
+              <h1>号池</h1>
+              <div class="subline"><span>可用额度 <b>1,204</b></span><span>今日成功 <b>625</b> 张</span><span>在途 <b>3</b></span></div>
+            </div>
+            <div class="page-actions"><span class="btn btn-outline">刷新全部额度</span><span class="btn btn-primary">导入账号</span></div>
           </div>
-          <div class="figures">
-            <div class="figure"><small>账号</small><strong>131</strong></div>
-            <div class="figure"><small>正常</small><strong>48</strong><em style="color:var(--olive)">37%</em></div>
-            <div class="figure"><small>限流</small><strong>10</strong></div>
-            <div class="figure"><small>异常</small><strong>73</strong><em style="color:var(--rust)">需处理</em></div>
-            <div class="figure"><small>可用额度</small><strong>1,204</strong></div>
-            <div class="figure"><small>代理</small><strong>10</strong><em style="color:var(--rust)">10 异常</em></div>
+          <div class="tabs"><span class="on">全部<em>131</em></span><span>正常<em>48</em></span><span>限流<em>10</em></span><span class="alert">异常<em>73</em></span><span>禁用<em>0</em></span><span>图生图冷却<em>5</em></span></div>
+          <div class="proxy-strip">代理
+            <span class="pchip bad">美西-1 <b>22</b></span><span class="pchip">东京-2 <b>14</b></span><span class="pchip">东京-3 <b>13</b></span><span class="pchip bad">新加坡-1 <b>13</b></span><span class="pchip">洛杉矶-2 <b>14</b></span><span class="pchip idle">未命名 <b>0</b></span>
+            <span class="btn btn-ghost btn-sm">管理代理</span>
           </div>
-          <div class="toolbar">
-            <span class="field">⌕ 搜索邮箱</span><span class="select">全部类型</span><span class="select">全部状态</span><span class="select">全部代理</span>
-            <span class="spacer"></span><span class="muted" style="font-size:12px">每页 20</span>
-          </div>
+          <div class="toolbar"><span class="field">⌕ 搜索邮箱</span><span class="select">全部类型</span><span class="spacer"></span><span class="muted" style="font-size:12px">每页 20</span></div>
           <div class="selection-bar">已选 3 个账号<span class="grow"></span><span class="btn">刷新额度</span><span class="btn">测试生图</span><span class="btn">尝试恢复</span><span class="btn">导出</span><span class="btn warn">删除</span><span class="btn" style="border:0">取消</span></div>
           <div class="table-wrap">
             <table>
@@ -396,16 +424,68 @@ tbody tr:hover td { background: var(--surface-hover); }
                 <tr><td><span class="check"></span></td><td><div class="cell-main">epoch.azure@example.com</div><div class="cell-sub" style="color:var(--amber)">图生图冷却至 15:40</div></td><td><div class="cell-main">东京-2</div><div class="cell-sub mono">9.142.54.52</div></td><td><span class="tag">free</span></td><td><span class="status ok"><span>正常</span></span></td><td class="num">3</td><td><div class="cell-main">剩余 23 小时</div><div class="cell-sub">11-10 11:11</div></td><td class="muted">10-16</td><td class="num mono">1 / 100 / 12</td><td class="muted">password</td><td><span class="icon-btn">⧉</span><span class="icon-btn">⋯</span></td></tr>
               </tbody>
             </table>
-            <div class="table-foot"><span>共 131 个，筛选后 131 个</span><div class="pager"><span>‹</span><b>1</b><span>2</span><span>3</span><span>…</span><span>7</span><span>›</span></div></div>
+            <div class="table-foot"><span>全部 131 个</span><div class="pager"><span>‹</span><b>1</b><span>2</span><span>3</span><span>…</span><span>7</span><span>›</span></div></div>
           </div>
         </main>
       </div>
     </div>
     <ul class="notes">
-      <li>「token」列取消，复制按钮 ⧉ 移到行尾；完整 token 永不显示</li>
-      <li>异常原因、图生图冷却直接写在账号下方一行小字，不再藏在悬停提示里</li>
-      <li>在途 / 成功 / 失败合并为一列等宽数字，节省 2 列</li>
-      <li>概览里的「代理 10 异常」可点击，直接打开代理对话框</li>
+      <li>状态标签同时是汇总和筛选，原来的「概览数字」行和「状态」下拉都去掉</li>
+      <li>代理一排小圆标：红点代表异常，数字是账号数；点一下按代理筛选，「管理代理」打开代理对话框</li>
+      <li>可用额度、今日成功、在途放在标题下一行，只读不占地方</li>
+      <li>适合代理不多（十个以内）的情况，页面最紧凑</li>
+    </ul>
+
+    <div class="variant-label"><span>方案 B</span>页内筛选栏</div>
+    <div class="frame">
+      <div class="frame-bar"><i></i><i></i><i></i><span>/accounts</span></div>
+      <div class="app">
+        <aside class="rail"><span class="brand-mark" style="display:grid">C</span><div class="rail-item"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="6" cy="6" r="1.5"/><path d="M14 11l-3.5-3.5L4 14"/></svg>生图</div><span class="rail-sep"></span><div class="rail-item active"><svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 14c.6-2.5 2.4-4 4.5-4s3.9 1.5 4.5 4"/><path d="M11 3.5a2.3 2.3 0 010 4.4M12.5 10.3c1 .6 1.7 1.9 2 3.7"/></svg>号池</div><div class="rail-item"><svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M1.5 10l3.5-3 3 2.5 2-1.5 4.5 3.5"/></svg>图片</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M3 3h10M3 6.5h10M3 10h7M3 13.5h5"/></svg>日志</div><span class="rail-sep"></span><div class="rail-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>设置</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M5 4L1.5 8 5 12M11 4l3.5 4-3.5 4"/></svg>调试</div><div class="rail-foot"><span class="icon-btn">◐</span><span class="avatar">管</span></div></aside>
+        <main class="main">
+          <div class="page-head">
+            <div>
+              <h1>号池</h1>
+              <div class="subline"><span>可用额度 <b>1,204</b></span><span>今日成功 <b>625</b> 张</span><span>在途 <b>3</b></span></div>
+            </div>
+            <div class="page-actions"><span class="btn btn-outline">刷新全部额度</span><span class="btn btn-primary">导入账号</span></div>
+          </div>
+          <div class="split">
+            <div class="facets">
+              <div class="facet"><h4>状态</h4>
+                <div class="on">全部<em>131</em></div><div><span class="dot">正常</span><em>48</em></div><div><span class="dot warn">限流</span><em>10</em></div><div><span class="dot bad">异常</span><em>73</em></div><div><span class="dot idle">禁用</span><em>0</em></div><div><span class="dot warn">图生图冷却</span><em>5</em></div>
+              </div>
+              <div class="facet"><h4>类型</h4>
+                <div>free<em>118</em></div><div>plus<em>11</em></div><div>pro<em>2</em></div>
+              </div>
+              <div class="facet"><h4>代理 <span class="btn btn-ghost btn-sm" style="float:right;margin-top:-6px">管理</span></h4>
+                <div><span class="dot bad">美西-1</span><em>22</em></div><div><span class="dot">东京-2</span><em>14</em></div><div><span class="dot">东京-3</span><em>13</em></div><div><span class="dot bad">新加坡-1</span><em>13</em></div><div><span class="dot">洛杉矶-2</span><em>14</em></div><div><span class="dot idle">未指定</span><em>0</em></div>
+              </div>
+            </div>
+            <div style="min-width:0">
+              <div class="toolbar"><span class="field" style="flex:1">⌕ 搜索邮箱</span><span class="muted" style="font-size:12px">每页 20</span></div>
+              <div class="selection-bar">已选 3 个<span class="grow"></span><span class="btn">刷新额度</span><span class="btn">测试生图</span><span class="btn">恢复</span><span class="btn warn">删除</span><span class="btn" style="border:0">取消</span></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th style="width:34px"><span class="check"></span></th><th>账号</th><th>代理</th><th>状态</th><th class="num">额度</th><th>恢复时间</th><th class="num">成功 / 失败</th><th></th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="check on"></span></td><td><div class="cell-main">hermit.crab@example.com</div><div class="cell-sub">free · password · 10-27</div></td><td>美西-1</td><td><span class="status ok"><span>正常</span></span></td><td class="num">25</td><td><div class="cell-main">剩余 1 天</div><div class="cell-sub">11-10 13:06</div></td><td class="num mono">130 / 4</td><td><span class="icon-btn">⧉</span><span class="icon-btn">⋯</span></td></tr>
+                    <tr><td><span class="check on"></span></td><td><div class="cell-main">night.jogger@example.com</div><div class="cell-sub" style="color:var(--rust)">代理返回 402，无法刷新</div></td><td style="color:var(--rust)">美西-1</td><td><span class="status bad"><span>异常</span></span></td><td class="num">0</td><td><div class="cell-main">已到恢复时间</div><div class="cell-sub">11-02 23:24</div></td><td class="num mono">43 / 3</td><td><span class="icon-btn">⧉</span><span class="icon-btn">⋯</span></td></tr>
+                    <tr><td><span class="check on"></span></td><td><div class="cell-main">insole.phone@example.com</div><div class="cell-sub">plus · oauth · 10-27</div></td><td>东京-2</td><td><span class="status warn"><span>限流</span></span></td><td class="num">0</td><td><div class="cell-main">剩余 1 小时</div><div class="cell-sub">11-09 13:14</div></td><td class="num mono">57 / 0</td><td><span class="icon-btn">⧉</span><span class="icon-btn">⋯</span></td></tr>
+                    <tr><td><span class="check"></span></td><td><div class="cell-main">epoch.azure@example.com</div><div class="cell-sub" style="color:var(--amber)">图生图冷却至 15:40</div></td><td>东京-2</td><td><span class="status ok"><span>正常</span></span></td><td class="num">3</td><td><div class="cell-main">剩余 23 小时</div><div class="cell-sub">11-10 11:11</div></td><td class="num mono">100 / 12</td><td><span class="icon-btn">⧉</span><span class="icon-btn">⋯</span></td></tr>
+                  </tbody>
+                </table>
+                <div class="table-foot"><span>全部 131 个</span><div class="pager"><span>‹</span><b>1</b><span>2</span><span>…</span><span>7</span><span>›</span></div></div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <ul class="notes">
+      <li>左栏同时显示所有维度的数量：状态、类型、代理，点任意一项筛选，可以组合</li>
+      <li>类型、来源、创建日期合并到账号下方一行小字，表格只留 8 列</li>
+      <li>代理多（十几个以上）时更好用，一眼看到每个代理挂了多少账号、是否异常</li>
+      <li>代价是表格窄一些，长邮箱会被截断</li>
     </ul>
   </section>
 
@@ -433,15 +513,7 @@ tbody tr:hover td { background: var(--surface-hover); }
     <div class="frame">
       <div class="frame-bar"><i></i><i></i><i></i><span>/image</span></div>
       <div class="studio">
-        <aside class="side">
-          <div class="brand"><span class="brand-mark">C</span>chatgpt2api</div>
-          <div class="nav-item active"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="6" cy="6" r="1.5"/><path d="M14 11l-3.5-3.5L4 14"/></svg>生图</div>
-          <div class="nav-label">管理</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 14c.6-2.5 2.4-4 4.5-4s3.9 1.5 4.5 4"/></svg>号池</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M1.5 10l3.5-3 3 2.5 2-1.5 4.5 3.5"/></svg>图片</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><path d="M3 3h10M3 6.5h10M3 10h7M3 13.5h5"/></svg>日志</div>
-          <div class="side-foot"><div class="who">管理员<span class="icon-btn">◐</span></div></div>
-        </aside>
+        <aside class="rail"><span class="brand-mark" style="display:grid">C</span><div class="rail-item active"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="6" cy="6" r="1.5"/><path d="M14 11l-3.5-3.5L4 14"/></svg>生图</div><span class="rail-sep"></span><div class="rail-item"><svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 14c.6-2.5 2.4-4 4.5-4s3.9 1.5 4.5 4"/><path d="M11 3.5a2.3 2.3 0 010 4.4M12.5 10.3c1 .6 1.7 1.9 2 3.7"/></svg>号池</div><div class="rail-item"><svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M1.5 10l3.5-3 3 2.5 2-1.5 4.5 3.5"/></svg>图片</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M3 3h10M3 6.5h10M3 10h7M3 13.5h5"/></svg>日志</div><span class="rail-sep"></span><div class="rail-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>设置</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M5 4L1.5 8 5 12M11 4l3.5 4-3.5 4"/></svg>调试</div><div class="rail-foot"><span class="icon-btn">◐</span><span class="avatar">管</span></div></aside>
         <div class="threads">
           <span class="btn btn-outline new">＋ 新建对话</span>
           <div class="nav-label" style="padding-top:0">今天</div>
@@ -490,14 +562,7 @@ tbody tr:hover td { background: var(--surface-hover); }
     <div class="frame">
       <div class="frame-bar"><i></i><i></i><i></i><span>/image-manager</span></div>
       <div class="app" style="min-height:0">
-        <aside class="side">
-          <div class="brand"><span class="brand-mark">C</span>chatgpt2api</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>生图</div>
-          <div class="nav-label">管理</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 14c.6-2.5 2.4-4 4.5-4s3.9 1.5 4.5 4"/></svg>号池</div>
-          <div class="nav-item active"><svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M1.5 10l3.5-3 3 2.5 2-1.5 4.5 3.5"/></svg>图片</div>
-          <div class="nav-item"><svg viewBox="0 0 16 16"><path d="M3 3h10M3 6.5h10M3 10h7M3 13.5h5"/></svg>日志</div>
-        </aside>
+        <aside class="rail"><span class="brand-mark" style="display:grid">C</span><div class="rail-item"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"/><circle cx="6" cy="6" r="1.5"/><path d="M14 11l-3.5-3.5L4 14"/></svg>生图</div><span class="rail-sep"></span><div class="rail-item"><svg viewBox="0 0 16 16"><circle cx="6" cy="5.5" r="2.5"/><path d="M1.5 14c.6-2.5 2.4-4 4.5-4s3.9 1.5 4.5 4"/><path d="M11 3.5a2.3 2.3 0 010 4.4M12.5 10.3c1 .6 1.7 1.9 2 3.7"/></svg>号池</div><div class="rail-item active"><svg viewBox="0 0 16 16"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M1.5 10l3.5-3 3 2.5 2-1.5 4.5 3.5"/></svg>图片</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M3 3h10M3 6.5h10M3 10h7M3 13.5h5"/></svg>日志</div><span class="rail-sep"></span><div class="rail-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>设置</div><div class="rail-item"><svg viewBox="0 0 16 16"><path d="M5 4L1.5 8 5 12M11 4l3.5 4-3.5 4"/></svg>调试</div><div class="rail-foot"><span class="icon-btn">◐</span><span class="avatar">管</span></div></aside>
         <main class="main">
           <div class="page-head"><div><h1>图片</h1><p>保留 15 天，过期自动清理。</p></div><div class="page-actions"><span class="btn btn-outline">存储 ▾</span><span class="btn btn-outline">刷新</span></div></div>
           <div class="storage">
