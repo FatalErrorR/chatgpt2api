@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { RowMenu } from "@/components/row-menu";
+import { SkeletonLines } from "@/components/ui/states";
 import { StatusDot, type StatusTone } from "@/components/ui/status-dot";
 import {
   Dialog,
@@ -1384,11 +1385,7 @@ export default function AccountsPage() {
   const { isCheckingAuth, session } = useAuthGuard(["admin"]);
 
   if (isCheckingAuth || !session || session.role !== "admin") {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <LoaderCircle className="size-5 animate-spin text-stone-400" />
-      </div>
-    );
+    return <SkeletonLines lines={6} className="pt-6" />;
   }
 
   return <AccountsPageContent />;
