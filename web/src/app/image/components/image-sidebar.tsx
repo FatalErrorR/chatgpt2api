@@ -99,17 +99,17 @@ export function ImageSidebar({
 
         <div
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(120,113,108,.45)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-400/45 [&::-webkit-scrollbar-track]:bg-transparent",
+            "min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(120,113,108,.45)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-ink-3/45 [&::-webkit-scrollbar-track]:bg-transparent",
             hideActionButtons ? "space-y-1 pr-0" : "space-y-2 pr-1",
           )}
         >
           {isLoadingHistory ? (
-            <div className="flex items-center gap-2 px-2 py-3 text-sm text-stone-500">
+            <div className="flex items-center gap-2 px-2 py-3 text-sm text-ink-3">
               <LoaderCircle className="size-4 animate-spin" />
               正在读取会话记录
             </div>
           ) : conversations.length === 0 ? (
-            <div className="px-2 py-3 text-sm leading-6 text-stone-500">还没有图片记录，输入提示词后会在这里显示。</div>
+            <div className="px-2 py-3 text-sm leading-6 text-ink-3">还没有图片记录，输入提示词后会在这里显示。</div>
           ) : (
             conversations.map((conversation, index) => {
               const active = conversation.id === selectedConversationId;
@@ -145,7 +145,7 @@ export function ImageSidebar({
                             if (e.key === "Escape") cancelRename();
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          className="w-full truncate rounded border border-stone-300 bg-white px-1 py-0.5 text-sm outline-none focus:border-stone-500"
+                          className="w-full truncate rounded border border-line-strong bg-surface px-1 py-0.5 text-sm outline-none focus:border-clay"
                         />
                       ) : (
                         <span className="truncate">{conversation.title}</span>
@@ -169,7 +169,7 @@ export function ImageSidebar({
                     <button
                       type="button"
                       onClick={(e) => startRename(conversation, e)}
-                      className="inline-flex size-7 items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-ink-3 hover:bg-surface-hover hover:text-ink-2"
                       aria-label="重命名会话"
                     >
                       <Pencil className="size-3.5" />
@@ -177,7 +177,7 @@ export function ImageSidebar({
                     <button
                       type="button"
                       onClick={() => void onDeleteConversation(conversation.id)}
-                      className="inline-flex size-7 items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-rose-500"
+                      className="inline-flex size-7 items-center justify-center rounded-md text-ink-3 hover:bg-surface-hover hover:text-bad"
                       aria-label="删除会话"
                     >
                       <Trash2 className="size-4" />

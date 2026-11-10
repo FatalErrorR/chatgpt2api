@@ -243,7 +243,7 @@ export function ImageComposer({
                     setLightboxIndex(index);
                     setLightboxOpen(true);
                   }}
-                  className="group size-14 overflow-hidden rounded-2xl border border-stone-200 bg-stone-50 transition hover:border-stone-300 sm:size-16"
+                  className="group size-14 overflow-hidden rounded-[10px] border border-line bg-sunken transition hover:border-line-strong sm:size-16"
                   aria-label={`预览参考图 ${image.name || index + 1}`}
                 >
                   <img
@@ -258,7 +258,7 @@ export function ImageComposer({
                     event.stopPropagation();
                     onRemoveReferenceImage(index);
                   }}
-                  className="absolute -right-1 -top-1 inline-flex size-5 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-stone-300 hover:text-stone-800"
+                  className="absolute -right-1 -top-1 inline-flex size-5 items-center justify-center rounded-full border border-line bg-surface text-ink-3 transition hover:border-line-strong hover:text-ink"
                   aria-label={`移除参考图 ${image.name || index + 1}`}
                 >
                   <X className="size-3" />
@@ -271,7 +271,7 @@ export function ImageComposer({
         <div
           className={cn(
             "overflow-hidden rounded-[16px] border border-line-strong bg-surface shadow-[0_8px_24px_-18px_rgba(60,50,30,0.35)] transition",
-            isDraggingImage && "border-stone-900 bg-stone-50",
+            isDraggingImage && "border-clay bg-sunken",
           )}
         >
           <div
@@ -311,7 +311,7 @@ export function ImageComposer({
             />
             {isDraggingImage ? (
               <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-[16px] border-2 border-dashed border-clay bg-surface/90 text-sm font-medium text-ink backdrop-blur-[1px]">
-                <div className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-page shadow-lg">
+                <div className="flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-page ">
                   <ImagePlus className="size-4" />
                   <span>松开以上传参考图</span>
                 </div>
@@ -324,14 +324,14 @@ export function ImageComposer({
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 shrink-0 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                    className="h-9 shrink-0 rounded-full border-line bg-surface px-3 text-xs font-medium text-ink-2 shadow-none sm:h-10 sm:px-4 sm:text-sm"
                     onClick={onPickReferenceImage}
                     aria-label={referenceImages.length > 0 ? "添加参考图" : "上传"}
                   >
                     <ImagePlus className="size-3.5 sm:size-4" />
                     <span className="hidden sm:inline">{referenceImages.length > 0 ? "添加参考图" : "上传"}</span>
                   </Button>
-                  <div className="shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[10px] font-medium text-stone-600 sm:px-3 sm:py-2 sm:text-xs">
+                  <div className="shrink-0 rounded-full bg-sunken px-2 py-1 text-[10px] font-medium text-ink-2 sm:px-3 sm:py-2 sm:text-xs">
                     <span className="hidden sm:inline">剩余额度 </span>{availableQuota}
                   </div>
                   {activeTaskCount > 0 && (
@@ -344,7 +344,7 @@ export function ImageComposer({
                     <button
                       ref={sizeMenuBtnRef}
                       type="button"
-                      className="inline-flex h-9 w-fit max-w-[calc(100vw-12rem)] items-center justify-between gap-2 rounded-full bg-stone-100 px-4 text-left text-xs font-semibold text-stone-900 sm:h-10 sm:max-w-none sm:text-sm"
+                      className="inline-flex h-9 w-fit max-w-[calc(100vw-12rem)] items-center justify-between gap-2 rounded-full bg-sunken px-4 text-left text-xs font-semibold text-ink sm:h-10 sm:max-w-none sm:text-sm"
                       onClick={() => {
                         if (!isSizeMenuOpen && sizeMenuBtnRef.current) {
                           const rect = sizeMenuBtnRef.current.getBoundingClientRect();
@@ -368,22 +368,22 @@ export function ImageComposer({
                           width: "min(460px, calc(100vw - 2rem))",
                         }}
                       >
-                        <h3 className="mb-3 text-base font-semibold text-stone-950">图像设置</h3>
+                        <h3 className="mb-3 text-base font-semibold text-ink">图像设置</h3>
                         <div className="mb-3">
-                          <div className="mb-2 text-sm font-medium text-stone-900">模型</div>
+                          <div className="mb-2 text-sm font-medium text-ink">模型</div>
                           <Select
                             value={imageModel}
                             onValueChange={(value) => {
                               onImageModelChange(value as ImageModel);
                             }}
                           >
-                            <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white text-sm shadow-none">
+                            <SelectTrigger className="h-10 rounded-[7px] border-line bg-surface text-sm shadow-none">
                               <div className="flex min-w-0 items-center gap-2">
                                 <img
                                   src="/openai.svg"
                                   alt=""
                                   aria-hidden="true"
-                                  className="size-4 shrink-0 text-stone-700"
+                                  className="size-4 shrink-0 text-ink-2"
                                 />
                                 <span className="truncate">{selectedModelLabel}</span>
                               </div>
@@ -408,7 +408,7 @@ export function ImageComposer({
                           </Select>
                         </div>
                         <div className="mb-3">
-                          <div className="mb-2 text-sm font-medium text-stone-900">质量</div>
+                          <div className="mb-2 text-sm font-medium text-ink">质量</div>
                           <div className="grid grid-cols-4 gap-2">
                             {qualityOptions.map((option) => {
                               const active = option.value === imageQuality;
@@ -417,7 +417,7 @@ export function ImageComposer({
                                   key={option.value}
                                   type="button"
                                   className={cn(
-                                    "h-9 cursor-pointer rounded-full border border-stone-200 bg-white text-sm text-stone-800 transition hover:border-stone-300 hover:bg-stone-50",
+                                    "h-9 cursor-pointer rounded-full border border-line bg-surface text-sm text-ink transition hover:border-line-strong hover:bg-surface-hover",
                                     active && "border-ink bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--ink)]",
                                   )}
                                   onClick={() => onImageQualityChange(option.value)}
@@ -429,7 +429,7 @@ export function ImageComposer({
                           </div>
                         </div>
                         <div className="mb-3">
-                          <div className="mb-2 text-sm font-medium text-stone-900">格式</div>
+                          <div className="mb-2 text-sm font-medium text-ink">格式</div>
                           <div className="grid grid-cols-2 gap-2">
                             {(["png", "gif"] as const).map((format) => {
                               const active = format === activeFormat;
@@ -440,7 +440,7 @@ export function ImageComposer({
                                   type="button"
                                   disabled={disabled}
                                   className={cn(
-                                    "h-9 cursor-pointer rounded-full border border-stone-200 bg-white text-sm text-stone-800 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40",
+                                    "h-9 cursor-pointer rounded-full border border-line bg-surface text-sm text-ink transition hover:border-line-strong hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40",
                                     active && "border-ink bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--ink)]",
                                   )}
                                   onClick={() => onImageOutputFormatChange(format)}
@@ -452,19 +452,19 @@ export function ImageComposer({
                           </div>
                           {activeFormat === "gif" ? (
                             <div className="mt-2 grid grid-cols-2 gap-2">
-                              <label className="flex items-center gap-2 rounded-lg bg-stone-100 px-3 py-1.5 text-sm text-stone-700">
-                                <span className="shrink-0 text-stone-500">帧</span>
+                              <label className="flex items-center gap-2 rounded-lg bg-sunken px-3 py-1.5 text-sm text-ink-2">
+                                <span className="shrink-0 text-ink-3">帧</span>
                                 <Input
                                   type="number"
                                   min="2"
                                   max="64"
                                   value={frameCount}
                                   onChange={(event) => onFrameCountChange(event.target.value)}
-                                  className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-stone-800 shadow-none focus-visible:ring-0"
+                                  className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-ink shadow-none focus-visible:ring-0"
                                 />
                               </label>
-                              <label className="flex items-center gap-2 rounded-lg bg-stone-100 px-3 py-1.5 text-sm text-stone-700">
-                                <span className="shrink-0 text-stone-500">毫秒</span>
+                              <label className="flex items-center gap-2 rounded-lg bg-sunken px-3 py-1.5 text-sm text-ink-2">
+                                <span className="shrink-0 text-ink-3">毫秒</span>
                                 <Input
                                   type="number"
                                   min="20"
@@ -472,45 +472,45 @@ export function ImageComposer({
                                   step="10"
                                   value={frameDurationMs}
                                   onChange={(event) => onFrameDurationMsChange(event.target.value)}
-                                  className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-stone-800 shadow-none focus-visible:ring-0"
+                                  className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-ink shadow-none focus-visible:ring-0"
                                 />
                               </label>
                             </div>
                           ) : null}
                         </div>
                         <div className="mb-3">
-                          <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-stone-900">
-                            尺寸 <Info className="size-3.5 text-stone-400" />
+                          <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink">
+                            尺寸 <Info className="size-3.5 text-ink-3" />
                           </div>
                           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                            <div className="flex items-center rounded-lg bg-stone-100 px-3 py-1.5 text-sm text-stone-700">
-                              <span className="mr-2 text-stone-500">W</span>
+                            <div className="flex items-center rounded-lg bg-sunken px-3 py-1.5 text-sm text-ink-2">
+                              <span className="mr-2 text-ink-3">W</span>
                               <Input
                                 type="number"
                                 inputMode="numeric"
                                 min="1"
                                 value={imageWidth}
                                 onChange={(event) => onImageWidthChange(event.target.value)}
-                                className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-stone-800 shadow-none focus-visible:ring-0"
+                                className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-ink shadow-none focus-visible:ring-0"
                               />
                             </div>
-                            <span className="text-stone-400">×</span>
-                            <div className="flex items-center rounded-lg bg-stone-100 px-3 py-1.5 text-sm text-stone-700">
-                              <span className="mr-2 text-stone-500">H</span>
+                            <span className="text-ink-3">×</span>
+                            <div className="flex items-center rounded-lg bg-sunken px-3 py-1.5 text-sm text-ink-2">
+                              <span className="mr-2 text-ink-3">H</span>
                               <Input
                                 type="number"
                                 inputMode="numeric"
                                 min="1"
                                 value={imageHeight}
                                 onChange={(event) => onImageHeightChange(event.target.value)}
-                                className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-stone-800 shadow-none focus-visible:ring-0"
+                                className="h-7 border-0 bg-transparent px-0 text-sm font-medium text-ink shadow-none focus-visible:ring-0"
                               />
                             </div>
                           </div>
                         </div>
                         <div className="mb-3">
-                          <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-stone-900">
-                            宽高比 <Info className="size-3.5 text-stone-400" />
+                          <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink">
+                            宽高比 <Info className="size-3.5 text-ink-3" />
                           </div>
                           <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
                             {aspectOptions.map((option) => {
@@ -523,9 +523,9 @@ export function ImageComposer({
                                   type="button"
                                   disabled={disabled}
                                   className={cn(
-                                    "flex h-[64px] cursor-pointer flex-col items-center justify-center gap-1 rounded-2xl border border-stone-200 bg-white text-sm text-stone-800 transition hover:border-stone-300 hover:bg-stone-50",
-                                    active && "border-stone-950",
-                                    disabled && "cursor-not-allowed border-stone-100 bg-stone-50 text-stone-300 hover:border-stone-100 hover:bg-stone-50",
+                                    "flex h-[64px] cursor-pointer flex-col items-center justify-center gap-1 rounded-[10px] border border-line bg-surface text-sm text-ink transition hover:border-line-strong hover:bg-surface-hover",
+                                    active && "border-ink",
+                                    disabled && "cursor-not-allowed border-line bg-sunken text-ink-3 hover:border-line hover:bg-surface-hover",
                                   )}
                                   onClick={() => {
                                     if (disabled) {
@@ -550,8 +550,8 @@ export function ImageComposer({
                             })}
                           </div>
                         </div>
-                        <div className="border-t border-stone-100 pt-3">
-                          <div className="mb-2 text-sm font-medium text-stone-900">生成数量</div>
+                        <div className="border-t border-line pt-3">
+                          <div className="mb-2 text-sm font-medium text-ink">生成数量</div>
                           <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
                             {countOptions.map((option) => {
                               const active = imageCount === option;
@@ -560,7 +560,7 @@ export function ImageComposer({
                                   key={option}
                                   type="button"
                                   className={cn(
-                                    "h-9 cursor-pointer rounded-full border border-stone-200 bg-white text-sm text-stone-800 transition hover:border-stone-300 hover:bg-stone-50",
+                                    "h-9 cursor-pointer rounded-full border border-line bg-surface text-sm text-ink transition hover:border-line-strong hover:bg-surface-hover",
                                     active && "border-ink bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--ink)]",
                                   )}
                                   onClick={() => onImageCountChange(option)}
@@ -577,7 +577,7 @@ export function ImageComposer({
                               step="1"
                               value={imageCount}
                               onChange={(event) => onImageCountChange(event.target.value)}
-                              className="h-9 rounded-full border-stone-200 bg-white px-3 text-center text-sm font-medium text-stone-800 shadow-none focus-visible:ring-0"
+                              className="h-9 rounded-full border-line bg-surface px-3 text-center text-sm font-medium text-ink shadow-none focus-visible:ring-0"
                             />
                           </div>
                         </div>
