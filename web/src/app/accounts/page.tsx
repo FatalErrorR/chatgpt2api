@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { batchBarDangerClass } from "@/components/ui/batch-bar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -1043,7 +1044,7 @@ function AccountsPageContent() {
                   type="button"
                   onClick={action}
                   disabled={busy}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/20 px-2.5 text-xs transition hover:bg-white/10 disabled:opacity-50"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-page/20 px-2.5 text-xs transition hover:bg-page/10 disabled:opacity-50"
                 >
                   {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Icon className="size-3.5" />}
                   {label}
@@ -1053,12 +1054,12 @@ function AccountsPageContent() {
                 type="button"
                 onClick={() => confirmDelete(selectedTokens, `删除 ${selectedTokens.length} 个账号？`)}
                 disabled={isDeleting}
-                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/20 px-2.5 text-xs text-[#F0B3A0] transition hover:bg-white/10 disabled:opacity-50"
+                className={cn(batchBarDangerClass, "h-7 text-xs")}
               >
                 <Trash2 className="size-3.5" />
                 删除
               </button>
-              <button type="button" onClick={() => setSelectedIds([])} className="h-7 rounded-md px-2.5 text-xs transition hover:bg-white/10">
+              <button type="button" onClick={() => setSelectedIds([])} className="h-7 rounded-md px-2.5 text-xs transition hover:bg-page/10">
                 取消
               </button>
             </div>

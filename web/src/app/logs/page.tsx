@@ -9,6 +9,7 @@ import { DateRangeFilter } from "@/components/date-range-filter";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { ImageThumbnail, getImageThumbnailUrl } from "@/components/image-thumbnail";
 import { PageHeader } from "@/components/page-header";
+import { batchBarClass, batchBarDangerClass } from "@/components/ui/batch-bar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Segmented } from "@/components/ui/segmented";
@@ -177,7 +178,7 @@ function LogsContent() {
       </div>
 
       {selectedIds.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-[10px] bg-ink py-2 pr-2.5 pl-4 text-[13px] text-page">
+        <div className={batchBarClass}>
           <span>已选 {selectedIds.length} 条</span>
           {selectedIds.length < items.length ? (
             <button type="button" className="rounded-[6px] px-2 py-1 text-page/75 hover:text-page" onClick={() => toggleIds(items.map((item) => item.id), true)}>
@@ -190,7 +191,7 @@ function LogsContent() {
           </button>
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-[6px] bg-page/10 px-2.5 py-1 text-[#F1B4A8] hover:bg-page/15"
+            className={batchBarDangerClass}
             onClick={() => setDeletingItems(items.filter((item) => selectedSet.has(item.id)))}
             disabled={isDeleting}
           >
