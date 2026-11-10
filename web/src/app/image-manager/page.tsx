@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Copy, Download, ImageIcon, LoaderCircle, Maximize2, Plus, RefreshCw, Search, Tag, Trash2, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Copy, Download, HardDrive, ImageIcon, LoaderCircle, Maximize2, Plus, RefreshCw, Tag, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { DateRangeFilter } from "@/components/date-range-filter";
+import { PageHeader } from "@/components/page-header";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,10 @@ const IMAGE_MANAGER_CHECKBOX_CLASS = "border-stone-300 bg-white/80 dark:border-w
 
 function formatSize(size: number) {
   return size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(2)} MB` : `${Math.ceil(size / 1024)} KB`;
+}
+
+function formatMb(mb: number) {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
 }
 
 function imageKey(item: ManagedImage) {
@@ -76,6 +81,9 @@ function ImageManagerContent() {
   const [storageLoading, setStorageLoading] = useState(false);
   const [compressResult, setCompressResult] = useState<string>("");
   const [targetFreeMb, setTargetFreeMb] = useState(500);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupPreview, setCleanupPreview] = useState<{ removed: number; freed_mb: number } | null>(null);
 
   const loadStorage = useCallback(async () => {
     try {
@@ -299,25 +307,97 @@ function ImageManagerContent() {
 
   return (
     <section className="space-y-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="space-y-1">
-          <div className="text-xs font-semibold tracking-[0.18em] text-stone-500 uppercase">Images</div>
-          <h1 className="text-2xl font-semibold tracking-tight">图片管理</h1>
+      <PageHeader
+        title="图片"
+        description="生成的图片按时间倒序排列，过期的图片会被定时清理。"
+        actions={
+          <>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline">
+                  <HardDrive className="size-4" />
+                  存储
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-56 p-1">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-ink-2 hover:bg-surface-hover hover:text-ink"
+                  onClick={async () => {
+                    try {
+                      const r = await compressAllImages();
+                      toast.success(`已压缩，节省 ${r.saved_mb} MB`);
+                      void loadStorage();
+                    } catch {
+                      toast.error("压缩失败");
+                    }
+                  }}
+                >
+                  压缩优化
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-bad hover:bg-bad-soft"
+                  onClick={() => setDeleteMode("byDate")}
+                >
+                  按日期删除…
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-bad hover:bg-bad-soft"
+                  onClick={() => {
+                    setCleanupPreview(null);
+                    setCleanupOpen(true);
+                  }}
+                >
+                  清理到剩余空间…
+                </button>
+              </PopoverContent>
+            </Popover>
+            <Button variant="outline" onClick={() => { void loadStorage(); void loadImages({ refresh: true }); }} disabled={isLoading}>
+              <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
+              刷新
+            </Button>
+          </>
+        }
+      />
+
+      {storage ? (
+        <div className="flex flex-wrap items-center gap-7 rounded-[10px] border border-line bg-surface px-[18px] py-3.5">
+          <div>
+            <div className="text-xs text-ink-3">图片</div>
+            <div className="font-serif text-xl text-ink">{storage.image_count.toLocaleString("en-US")}</div>
+          </div>
+          <div>
+            <div className="text-xs text-ink-3">占用</div>
+            <div className="font-serif text-xl text-ink">{formatMb(storage.image_size_mb)}</div>
+          </div>
+          <div className="min-w-[200px] flex-1">
+            <div className="text-xs text-ink-3">
+              磁盘 {formatMb(storage.disk_used_mb)} / {formatMb(storage.disk_total_mb)} · 剩余{" "}
+              <span className={storage.disk_free_mb < 500 ? "text-bad" : undefined}>{formatMb(storage.disk_free_mb)}</span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sunken">
+              <i className="block h-full bg-ink" style={{ width: `${Math.min(100, (storage.disk_used_mb / Math.max(1, storage.disk_total_mb)) * 100)}%` }} />
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); setPage(1); }} />
-          <Button variant="outline" onClick={clearFilters} className="h-10 rounded-xl border-stone-200 bg-white px-4 text-stone-700">
-            清除筛选条件
-          </Button>
-          <Button onClick={() => void loadImages()} disabled={isLoading} className="h-10 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800">
-            {isLoading ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
-            查询
-          </Button>
-          <Button variant="outline" onClick={() => setDeleteMode("filtered")} disabled={isDeleting || total === 0 || (!startDate && !endDate)} className="h-10 rounded-xl border-rose-200 bg-white px-4 text-rose-600 hover:bg-rose-50">
-            <Trash2 className="size-4" />
-            删除匹配日期
-          </Button>
+      ) : (
+        <div className="rounded-[10px] border border-line bg-surface px-[18px] py-3.5 text-[13px] text-ink-3">
+          {storageLoading ? "正在读取存储信息…" : "存储信息加载失败"}
         </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); setPage(1); }} />
+        <Button variant="ghost" onClick={clearFilters}>
+          清除筛选
+        </Button>
+        <span className="flex-1" />
+        <Button variant="outline" className="text-bad" onClick={() => setDeleteMode("filtered")} disabled={isDeleting || total === 0 || (!startDate && !endDate)}>
+          <Trash2 className="size-4" />
+          删除所选日期的图片
+        </Button>
       </div>
 
       {allTags.length > 0 ? (
@@ -368,65 +448,80 @@ function ImageManagerContent() {
         </div>
       ) : null}
 
-      {/* Storage Stats Panel */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
-        {storage ? (
-          <>
-            <div className="rounded-xl border border-stone-200 bg-white/80 p-3">
-              <div className="text-xs text-stone-500">磁盘总量</div>
-              <div className="text-lg font-bold text-stone-800">{storage.disk_total_mb >= 1024 ? `${(storage.disk_total_mb / 1024).toFixed(1)} GB` : `${storage.disk_total_mb} MB`}</div>
-            </div>
-            <div className="rounded-xl border border-stone-200 bg-white/80 p-3">
-              <div className="text-xs text-stone-500">剩余空间</div>
-              <div className={`text-lg font-bold ${storage.disk_free_mb < 200 ? "text-red-500" : storage.disk_free_mb < 500 ? "text-yellow-500" : "text-green-600"}`}>{storage.disk_free_mb >= 1024 ? `${(storage.disk_free_mb / 1024).toFixed(1)} GB` : `${storage.disk_free_mb} MB`}</div>
-            </div>
-            <div className="rounded-xl border border-stone-200 bg-white/80 p-3">
-              <div className="text-xs text-stone-500">图片数量</div>
-              <div className="text-lg font-bold text-stone-800">{storage.image_count}</div>
-            </div>
-            <div className="rounded-xl border border-stone-200 bg-white/80 p-3">
-              <div className="text-xs text-stone-500">图片占用</div>
-              <div className="text-lg font-bold text-stone-800">{storage.image_size_mb >= 1024 ? `${(storage.image_size_mb / 1024).toFixed(1)} GB` : `${storage.image_size_mb} MB`}</div>
-            </div>
-            <div className="rounded-xl border border-stone-200 bg-white/80 p-3 col-span-2 flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-stone-500 w-full">快捷操作</span>
-              <Button size="sm" variant="outline" className="h-7 text-xs" disabled={storageLoading} onClick={() => { void loadStorage(); }}>
-                <RefreshCw className={`size-3 mr-1 ${storageLoading ? "animate-spin" : ""}`} />刷新
-              </Button>
-              <Button size="sm" variant="outline" className="h-7 text-xs"
-                onClick={async () => {
-                  try { const r = await compressAllImages(); setCompressResult(`已压缩${r.saved_mb}MB`); void loadStorage(); }
-                  catch { setCompressResult("压缩失败"); }
-                }}>
-                🗜️ 压缩优化
-              </Button>
-              <Button size="sm" variant="outline" className="h-7 text-xs border-rose-200 text-rose-600"
-                onClick={() => setDeleteMode("byDate")}>
-                🗑️ 按日期删除
-              </Button>
-              <form onSubmit={async (e) => { e.preventDefault();
-                try {
-                  const r = await deleteToTarget(targetFreeMb);
-                  toast.success(`已删除 ${r.removed} 张图片，释放 ${r.freed_mb ?? 0}MB`);
-                  void loadStorage();
-                } catch { toast.error("清理失败"); }
-              }} className="flex items-center gap-1">
-                <Button size="sm" variant="outline" className="h-7 text-xs border-amber-200 text-amber-700" type="submit">
-                  🧹 清理至
-                </Button>
-                <Input className="h-7 w-14 text-xs text-center px-1" type="number" min={50} value={targetFreeMb}
-                  onChange={(e) => setTargetFreeMb(Number(e.target.value) || 500)} />
-                <span className="text-xs text-stone-400">MB 剩余</span>
-              </form>
-              {compressResult ? <span className="text-xs text-green-600 ml-1">{compressResult}</span> : null}
-            </div>
-          </>
-        ) : (
-          <div className="rounded-xl border border-stone-200 bg-white/80 p-3 col-span-full text-center text-sm text-stone-400">
-            {storageLoading ? "加载存储信息..." : "存储信息加载失败"}
+      <Dialog open={cleanupOpen} onOpenChange={(open) => (!cleanupBusy ? setCleanupOpen(open) : null)}>
+        <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
+          <DialogHeader className="gap-1.5">
+            <DialogTitle className="font-serif text-[22px] font-medium">清理到剩余空间</DialogTitle>
+            <p className="text-[13px] leading-6 text-ink-2">从最旧的图片开始删除，直到磁盘剩余空间达到目标。删除前会先预览影响范围，删除后无法恢复。</p>
+          </DialogHeader>
+          <div className="flex items-center gap-2 text-[13px] text-ink-2">
+            目标剩余
+            <Input
+              className="h-[34px] w-28 rounded-[7px] text-right"
+              type="number"
+              min={50}
+              value={targetFreeMb}
+              onChange={(e) => {
+                setTargetFreeMb(Number(e.target.value) || 500);
+                setCleanupPreview(null);
+              }}
+            />
+            MB
+            {storage ? <span className="text-xs text-ink-3">（当前剩余 {formatMb(storage.disk_free_mb)}）</span> : null}
           </div>
-        )}
-      </div>
+          {cleanupPreview ? (
+            <div className={`rounded-[7px] px-3 py-2.5 text-[13px] ${cleanupPreview.removed > 0 ? "bg-bad-soft text-bad" : "bg-sunken text-ink-2"}`}>
+              {cleanupPreview.removed > 0
+                ? `将删除最旧的 ${cleanupPreview.removed.toLocaleString("en-US")} 张图片，释放约 ${cleanupPreview.freed_mb} MB。`
+                : "剩余空间已经达到目标，不会删除任何图片。"}
+            </div>
+          ) : null}
+          <DialogFooter className="pt-2">
+            <Button variant="ghost" onClick={() => setCleanupOpen(false)} disabled={cleanupBusy}>取消</Button>
+            {!cleanupPreview ? (
+              <Button
+                disabled={cleanupBusy}
+                onClick={async () => {
+                  setCleanupBusy(true);
+                  try {
+                    const r = await deleteToTarget(targetFreeMb, true);
+                    setCleanupPreview({ removed: r.removed, freed_mb: r.freed_mb ?? 0 });
+                  } catch {
+                    toast.error("预览失败");
+                  } finally {
+                    setCleanupBusy(false);
+                  }
+                }}
+              >
+                {cleanupBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                预览
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={cleanupBusy || cleanupPreview.removed === 0}
+                onClick={async () => {
+                  setCleanupBusy(true);
+                  try {
+                    const r = await deleteToTarget(targetFreeMb);
+                    toast.success(`已删除 ${r.removed} 张图片，释放 ${r.freed_mb ?? 0} MB`);
+                    setCleanupOpen(false);
+                    void loadStorage();
+                    void loadImages({ refresh: true });
+                  } catch {
+                    toast.error("清理失败");
+                  } finally {
+                    setCleanupBusy(false);
+                  }
+                }}
+              >
+                {cleanupBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                删除 {cleanupPreview.removed.toLocaleString("en-US")} 张
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete by date dialog */}
       <Dialog open={deleteMode === "byDate"} onOpenChange={() => setDeleteMode(null)}>

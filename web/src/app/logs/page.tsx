@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, ImageIcon, LoaderCircle, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/page-header";
+import { StatusDot } from "@/components/ui/status-dot";
 
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { ImageLightbox } from "@/components/image-lightbox";
@@ -135,19 +138,29 @@ function LogsContent() {
 
   return (
     <section className="space-y-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="space-y-1">
-          <div className="text-xs font-semibold tracking-[0.18em] text-stone-500 uppercase">Logs</div>
-          <h1 className="text-2xl font-semibold tracking-tight">日志管理</h1>
+      <PageHeader title="日志" description="调用记录与账号操作记录。" />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="inline-flex w-fit gap-0.5 rounded-[9px] bg-sunken p-[3px]">
+          {(
+            [
+              [LogType.Call, "调用"],
+              [LogType.Account, "账号"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setType(value)}
+              className={cn(
+                "h-7 rounded-[7px] px-3 text-[13px] transition",
+                type === value ? "bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,.06)]" : "text-ink-2 hover:text-ink",
+              )}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Select value={type} onValueChange={setType}>
-            <SelectTrigger className="h-10 w-[150px] rounded-xl border-stone-200 bg-white"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={LogType.Call}>调用日志</SelectItem>
-              <SelectItem value={LogType.Account}>账号管理日志</SelectItem>
-            </SelectContent>
-          </Select>
           <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); }} />
           <Button variant="outline" onClick={clearFilters} className="h-10 rounded-xl border-stone-200 bg-white px-4 text-stone-700">
             清除筛选条件
@@ -207,8 +220,8 @@ function LogsContent() {
                 {currentRows.map((item) => {
                   const urls = getUrls(item);
                   return (
-                    <TableRow key={item.id} className="text-stone-600">
-                      <TableCell>
+                    <TableRow key={item.id} className="text-ink-2">
+                      <TableCell className={item.detail?.status === "failed" ? "shadow-[inset_2px_0_0_var(--bad)]" : undefined}>
                         <Checkbox checked={selectedSet.has(item.id)} onCheckedChange={(checked) => toggleIds([item.id], Boolean(checked))} />
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{item.time}</TableCell>
@@ -217,9 +230,7 @@ function LogsContent() {
                       {isCallLog ? <TableCell>{formatDuration(item)}</TableCell> : null}
                       {isCallLog ? (
                         <TableCell>
-                          <Badge variant={item.detail?.status === "failed" ? "danger" : "success"} className="rounded-md">
-                            {getStatus(item)}
-                          </Badge>
+                          <StatusDot tone={item.detail?.status === "failed" ? "bad" : "ok"}>{getStatus(item)}</StatusDot>
                         </TableCell>
                       ) : null}
                       {isCallLog ? (

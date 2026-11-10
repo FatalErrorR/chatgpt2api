@@ -1064,7 +1064,50 @@ function AccountsPageContent() {
                 ))}
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* 手机：卡片列表 */}
+              <div className="divide-y divide-line md:hidden">
+                {currentRows.map((account) => {
+                  const statusError =
+                    account.status === "异常" ? (account.last_refresh_error || account.last_token_refresh_error || "").trim() : "";
+                  const proxy = (account.proxy || "").trim() ? proxyForAccount(proxyByKey, account) : undefined;
+                  const restore = formatRestoreAt(account.restore_at);
+                  return (
+                    <div key={account.access_token} className="flex items-start gap-3 px-3.5 py-3">
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={selectedIds.includes(account.access_token)}
+                        onCheckedChange={(checked) =>
+                          setSelectedIds((prev) =>
+                            checked ? Array.from(new Set([...prev, account.access_token])) : prev.filter((item) => item !== account.access_token),
+                          )
+                        }
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-[13px] text-ink">{account.email ?? "—"}</span>
+                          <StatusDot tone={STATUS_TONE[account.status]}>{account.status}</StatusDot>
+                        </div>
+                        <div className={cn("mt-0.5 truncate text-xs", statusError ? "text-bad" : "text-ink-3")}>
+                          {statusError ||
+                            [proxy ? proxy.name || proxy.masked_url : "", displayAccountType(account), `额度 ${formatQuota(account)}`, restore.relative]
+                              .filter(Boolean)
+                              .join(" · ")}
+                        </div>
+                      </div>
+                      <RowMenu
+                        items={[
+                          { label: "复制 token", icon: Copy, onSelect: () => { void navigator.clipboard.writeText(account.access_token); toast.success("已复制 token"); } },
+                          { label: "编辑", icon: Pencil, onSelect: () => openEditDialog(account), disabled: isUpdating },
+                          { label: "刷新额度", icon: RefreshCw, onSelect: () => void handleRefreshAccounts([account.access_token]) },
+                          { label: "删除", icon: Trash2, danger: true, onSelect: () => confirmDelete([account.access_token], "删除这个账号？") },
+                        ]}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full min-w-[760px] text-left text-[13px]">
                   <thead className="border-b border-line text-xs text-ink-3">
                     <tr>
@@ -1191,6 +1234,7 @@ function AccountsPageContent() {
                   </div>
                 ) : null}
               </div>
+              </>
             )}
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-3.5 py-2.5 text-xs text-ink-3">
               <span>

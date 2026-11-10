@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -75,15 +75,29 @@ function SettingsDataController() {
 }
 
 function SettingsPageContent() {
+  const [isWide, setIsWide] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsWide(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
   return (
     <>
       <SettingsDataController />
       <SettingsHeader />
-      <Tabs defaultValue="basic" className="space-y-4">
-        <div className="sticky top-3 z-20 overflow-x-auto rounded-xl border border-white/80 bg-white/90 px-3 py-2 shadow-sm backdrop-blur">
-          <TabsList variant="line" className="min-w-max justify-start">
+      {/* 宽屏：左侧目录 + 右侧内容；窄屏：横向页签 */}
+      <Tabs defaultValue="basic" orientation={isWide ? "vertical" : "horizontal"} className="mt-6 gap-6 lg:gap-10">
+        <div className="z-20 shrink-0 overflow-x-auto border-b border-line lg:sticky lg:top-8 lg:w-[200px] lg:self-start lg:overflow-visible lg:border-b-0">
+          <TabsList variant="line" className="min-w-max justify-start gap-0.5 lg:w-full lg:min-w-0">
             {settingsTabs.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value} className="px-4">
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                className="px-3 py-1.5 text-[13px] font-normal lg:justify-start lg:rounded-[6px] lg:after:hidden lg:data-[state=active]:!bg-surface lg:data-[state=active]:!shadow-[inset_0_0_0_1px_var(--line)] lg:data-[state=active]:font-medium"
+              >
                 {tab.title}
               </TabsTrigger>
             ))}

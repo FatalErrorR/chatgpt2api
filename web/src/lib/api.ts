@@ -822,9 +822,9 @@ export async function compressAllImages() {
   return httpRequest<{ compressed: number; saved_bytes: number; saved_mb: number }>("/api/images/storage/compress", { method: "POST" });
 }
 
-export async function deleteToTarget(targetFreeMb: number) {
+export async function deleteToTarget(targetFreeMb: number, dryRun = false) {
   return httpRequest<{ removed: number; freed_mb: number; done: boolean }>(
-    `/api/images/storage/cleanup-to-target?target_free_mb=${targetFreeMb}&dry_run=false`,
+    `/api/images/storage/cleanup-to-target?target_free_mb=${targetFreeMb}&dry_run=${dryRun}`,
     { method: "POST" },
   );
 }
