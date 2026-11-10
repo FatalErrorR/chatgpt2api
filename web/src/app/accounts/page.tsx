@@ -72,6 +72,9 @@ import { ProxyManagerDialog } from "./components/proxy-manager-dialog";
 
 type StatusFilter = AccountStatus | "all" | "edit_cooldown";
 
+const NO_PROXY = "__none__";
+const NEW_PROXY = "__new__";
+
 const accountStatusOptions: { label: string; value: StatusFilter }[] = [
   { label: "全部状态", value: "all" },
   { label: "正常", value: "正常" },
@@ -201,6 +204,8 @@ function AccountsPageContent() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editStatus, setEditStatus] = useState<AccountStatus>("正常");
   const [editProxy, setEditProxy] = useState("");
+  // 编辑代理：NO_PROXY 走全局代理，NEW_PROXY 手填，其余为代理清单的 key
+  const [editProxyChoice, setEditProxyChoice] = useState(NO_PROXY);
   const [isTestingProxy, setIsTestingProxy] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -740,11 +745,22 @@ function AccountsPageContent() {
   const openEditDialog = (account: Account) => {
     setEditingAccount(account);
     setEditStatus(account.status);
-    setEditProxy(account.proxy ?? "");
+    const proxy = (account.proxy ?? "").trim();
+    const listed = proxyForAccount(proxyByKey, account);
+    setEditProxyChoice(!proxy ? NO_PROXY : listed ? listed.key : NEW_PROXY);
+    setEditProxy(listed ? "" : proxy);
+  };
+
+  /** 编辑框最终要写到账号上的代理；选的还是账号原来那条时保留原写法。 */
+  const resolveEditProxy = () => {
+    if (editProxyChoice === NO_PROXY) return "";
+    if (editProxyChoice === NEW_PROXY) return editProxy.trim();
+    if (editingAccount?.proxy_key === editProxyChoice) return (editingAccount.proxy ?? "").trim();
+    return proxyByKey.get(editProxyChoice)?.url ?? "";
   };
 
   const handleTestAccountProxy = async () => {
-    const candidate = editProxy.trim();
+    const candidate = resolveEditProxy();
     if (!candidate) {
       toast.error("请先填写代理地址");
       return;
@@ -771,7 +787,7 @@ function AccountsPageContent() {
     try {
       const data = await updateAccount(editingAccount.access_token, {
         status: editStatus,
-        proxy: editProxy.trim(),
+        proxy: resolveEditProxy(),
       });
       setAccounts(data.items);
       setSelectedIds((prev) => prev.filter((id) => data.items.some((item) => item.access_token === id)));
@@ -898,12 +914,21 @@ function AccountsPageContent() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-stone-700">账号代理</label>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  value={editProxy}
-                  onChange={(event) => setEditProxy(event.target.value)}
-                  placeholder="留空走全局代理，例如 http://127.0.0.1:7890"
-                  className="h-11 rounded-xl border-stone-200 bg-white"
-                />
+                <Select value={editProxyChoice} onValueChange={setEditProxyChoice}>
+                  <SelectTrigger className="h-11 w-full min-w-0 flex-1 rounded-xl border-stone-200 bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_PROXY}>不指定，走全局代理</SelectItem>
+                    {proxies.map((proxy) => (
+                      <SelectItem key={proxy.key} value={proxy.key}>
+                        {proxyLabel(proxy)} · {proxy.account_count} 个账号
+                        {proxy.health.abnormal ? "（异常）" : ""}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={NEW_PROXY}>使用新代理</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button
                   variant="outline"
                   className="h-11 rounded-xl border-stone-200 bg-white px-4 text-stone-700 sm:w-24"
@@ -914,6 +939,14 @@ function AccountsPageContent() {
                   测试
                 </Button>
               </div>
+              {editProxyChoice === NEW_PROXY ? (
+                <Input
+                  value={editProxy}
+                  onChange={(event) => setEditProxy(event.target.value)}
+                  placeholder="http://user:pass@host:port"
+                  className="h-11 rounded-xl border-stone-200 bg-white"
+                />
+              ) : null}
             </div>
           </div>
           <DialogFooter className="pt-2">
