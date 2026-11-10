@@ -1,9 +1,8 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
-
 import { PageHeader } from "@/components/page-header";
 import { segmentedItemClass, segmentedListClass } from "@/components/ui/segmented";
+import { SkeletonLines } from "@/components/ui/states";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAuthGuard } from "@/lib/use-auth-guard";
@@ -26,11 +25,7 @@ export default function DebugPage() {
   const { isCheckingAuth, session } = useAuthGuard(["admin"]);
 
   if (isCheckingAuth || !session || session.role !== "admin") {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <SkeletonLines lines={6} className="pt-6" />;
   }
 
   return (

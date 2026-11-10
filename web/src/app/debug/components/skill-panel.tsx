@@ -142,11 +142,11 @@ ${skillEn}
   return (
     <section className="grid items-stretch gap-4 lg:grid-cols-2">
       {versions.map((item) => (
-        <div key={item.title} className="flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-200/70 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+        <div key={item.title} className="flex flex-col overflow-hidden rounded-lg border border-line bg-surface   ">
+          <div className="flex items-center justify-between gap-3 border-b border-line bg-sunken p-4  ">
             <div>
-              <h2 className="font-medium text-slate-900 dark:text-slate-100">{item.title}</h2>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.desc}</p>
+              <h2 className="font-medium text-ink ">{item.title}</h2>
+              <p className="mt-1 text-sm text-ink-3 ">{item.desc}</p>
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" className="cursor-pointer" onClick={() => downloadSkill(item.skill)}>
@@ -159,7 +159,7 @@ ${skillEn}
               </Button>
             </div>
           </div>
-          <pre className="flex-1 whitespace-pre-wrap p-4 font-mono text-sm leading-6">
+          <pre className="m-4 flex-1 overflow-auto rounded-[7px] border border-line bg-sunken p-3 font-mono text-xs leading-7 whitespace-pre-wrap text-ink-2">
             {item.prompt}
           </pre>
         </div>
