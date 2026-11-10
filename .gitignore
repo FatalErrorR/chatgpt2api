@@ -34,3 +34,7 @@ git_cache/
 loginwithpassword_*/
 logwithemailverifycode_*/
 test_batch_output/
+tmp-*/
+
+# macOS
+.DS_Store
