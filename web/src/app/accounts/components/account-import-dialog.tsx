@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
   ChevronRight,
@@ -53,6 +53,7 @@ import {
   type ProtocolLoginProgress,
   type ProxyEntry,
 } from "@/lib/api";
+import { previewProxyDistribution } from "@/lib/proxy-distribution";
 import { cn } from "@/lib/utils";
 
 type ImportMethod = "menu" | "token" | "session" | "codex-auth" | "account-json" | "oauth" | "protocol";
@@ -242,6 +243,36 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
       protocolAbortRef.current = true;
     };
   }, []);
+
+  const newAccountCount = useMemo(() => {
+    if (method === "token") return splitTokens(tokenInput).length;
+    if (method === "protocol") return protocolInput.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length;
+    if (method === "account-json") return pendingAccountJsonImport?.parsedAccountCount ?? 0;
+    if (method === "session") {
+      try {
+        return getSessionAccessToken(JSON.parse(sessionInput)) ? 1 : 0;
+      } catch {
+        return 0;
+      }
+    }
+    if (method === "codex-auth") {
+      try {
+        return getCodexAuthAccount(JSON.parse(codexAuthInput)) ? 1 : 0;
+      } catch {
+        return 0;
+      }
+    }
+    if (method === "oauth") return oauthSession ? 1 : 0;
+    return 0;
+  }, [method, tokenInput, protocolInput, pendingAccountJsonImport, sessionInput, codexAuthInput, oauthSession]);
+
+  const distributionPreview = useMemo(() => {
+    const selected = distributeUrls.flatMap((url) => {
+      const proxy = proxies.find((item) => item.url === url);
+      return proxy ? [{ url: proxy.url, accountCount: proxy.account_count, abnormal: Boolean(proxy.health.abnormal) }] : [];
+    });
+    return previewProxyDistribution(selected, newAccountCount);
+  }, [distributeUrls, proxies, newAccountCount]);
 
   const txtInputRef = useRef<HTMLInputElement | null>(null);
   const accountJsonInputRef = useRef<HTMLInputElement | null>(null);
@@ -609,32 +640,32 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             <button
               type="button"
               onClick={() => setMethod("menu")}
-              className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
+              className="inline-flex items-center gap-1 text-sm text-ink-3 transition hover:text-ink"
             >
               <ArrowLeft className="size-4" />
               返回导入方式
             </button>
-            <span className="text-xs text-stone-400">当前识别 {tokenCount} 个 Token</span>
+            <span className="text-xs text-ink-3">当前识别 {tokenCount} 个 Token</span>
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">Access Token 列表</label>
+            <label className="text-sm font-medium text-ink-2">Access Token 列表</label>
             <Textarea
               placeholder="每行一个 Access Token..."
               value={tokenInput}
               onChange={(event) => setTokenInput(event.target.value)}
-              className="min-h-56 resize-none rounded-xl border-stone-200"
+              className="min-h-56 resize-none rounded-[7px] border-line"
             />
           </div>
-          <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 p-4">
+          <div className="rounded-[10px] border border-dashed border-line bg-sunken p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
-                <div className="text-sm font-medium text-stone-800">从 TXT 文件导入</div>
-                <div className="text-sm leading-6 text-stone-500">支持 `.txt`，文件内容也是一行一个 Token。</div>
+                <div className="text-sm font-medium text-ink">从 TXT 文件导入</div>
+                <div className="text-sm leading-6 text-ink-3">支持 `.txt`，文件内容也是一行一个 Token。</div>
               </div>
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-xl border-stone-200 bg-white"
+                className="rounded-[7px] border-line bg-surface"
                 onClick={() => txtInputRef.current?.click()}
                 disabled={isSubmitting}
               >
@@ -660,38 +691,38 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
           <button
             type="button"
             onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
+            className="inline-flex items-center gap-1 text-sm text-ink-3 transition hover:text-ink"
           >
             <ArrowLeft className="size-4" />
             返回导入方式
           </button>
-          <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm leading-6 text-stone-600">
+          <div className="rounded-[10px] border border-line bg-sunken p-4 text-sm leading-6 text-ink-2">
             打开
             {" "}
             <a
               href={sessionUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 font-medium text-stone-900 underline underline-offset-4"
+              className="inline-flex items-center gap-1 font-medium text-ink underline underline-offset-4"
             >
               {sessionUrl}
               <ExternalLink className="size-3.5" />
             </a>
             ，复制页面返回的完整 JSON，系统会自动提取其中的 `accessToken` 导入。
           </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+          <div className="rounded-[10px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
             <div className="font-medium">风险提示</div>
             <div>
               不要使用自己的大号，尽量使用不常用的小号进行导入，避免出现封号风险。本项目不承担任何封号风险责任。
             </div>
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">Session JSON</label>
+            <label className="text-sm font-medium text-ink-2">Session JSON</label>
             <Textarea
               placeholder='粘贴完整 JSON，例如包含 "accessToken" 的对象...'
               value={sessionInput}
               onChange={(event) => setSessionInput(event.target.value)}
-              className="min-h-56 resize-none rounded-xl border-stone-200 font-mono text-xs"
+              className="min-h-56 resize-none rounded-[7px] border-line font-mono text-xs"
             />
           </div>
         </div>
@@ -710,43 +741,43 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
               type="button"
               onClick={() => setMethod("menu")}
               disabled={protocolRunning}
-              className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800 disabled:opacity-50"
+              className="inline-flex items-center gap-1 text-sm text-ink-3 transition hover:text-ink disabled:opacity-50"
             >
               <ArrowLeft className="size-4" />
               返回导入方式
             </button>
-            <span className="text-xs text-stone-400">当前识别 {lineCount} 行</span>
+            <span className="text-xs text-ink-3">当前识别 {lineCount} 行</span>
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">账号列表</label>
+            <label className="text-sm font-medium text-ink-2">账号列表</label>
             <Textarea
               placeholder={"邮箱----密码----TOTP密钥\n没开二步验证的账号可省略 TOTP 密钥：邮箱----密码"}
               value={protocolInput}
               onChange={(event) => setProtocolInput(event.target.value)}
               disabled={protocolRunning}
-              className="min-h-40 resize-none rounded-xl border-stone-200 font-mono text-xs"
+              className="min-h-40 resize-none rounded-[7px] border-line font-mono text-xs"
             />
-            <p className="text-xs leading-5 text-stone-500">
+            <p className="text-xs leading-5 text-ink-3">
               后台直接走授权协议登录，成功后写入号池并自动刷新额度；同邮箱的账号会更新 token，不会重复添加。一次最多 200 个。
             </p>
           </div>
           {protocolProgress ? (
-            <div className="space-y-2 rounded-2xl border border-stone-200 bg-stone-50 p-3">
-              <div className="text-sm font-medium text-stone-800">
+            <div className="space-y-2 rounded-[10px] border border-line bg-sunken p-3">
+              <div className="text-sm font-medium text-ink">
                 进度 {protocolProgress.completed}/{protocolProgress.total}，成功 {protocolProgress.success}，失败{" "}
                 {protocolProgress.failed}
               </div>
               <div className="max-h-44 space-y-1 overflow-y-auto text-xs">
                 {protocolProgress.items.map((item) => (
                   <div key={item.email} className="flex items-start justify-between gap-3">
-                    <span className="truncate text-stone-700">{item.email}</span>
+                    <span className="truncate text-ink-2">{item.email}</span>
                     <span
                       className={cn(
                         "shrink-0",
                         item.status === "成功" ? "text-emerald-600" : "",
-                        item.status === "失败" ? "text-rose-600" : "",
+                        item.status === "失败" ? "text-bad" : "",
                         item.status === "登录中" ? "text-amber-600" : "",
-                        item.status === "等待" ? "text-stone-400" : "",
+                        item.status === "等待" ? "text-ink-3" : "",
                       )}
                     >
                       {item.status}
@@ -755,7 +786,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                   </div>
                 ))}
                 {protocolProgress.invalid.map((item) => (
-                  <div key={`invalid-${item.line}`} className="flex items-start justify-between gap-3 text-rose-600">
+                  <div key={`invalid-${item.line}`} className="flex items-start justify-between gap-3 text-bad">
                     <span className="truncate">第 {item.line} 行{item.email ? ` ${item.email}` : ""}</span>
                     <span className="shrink-0">{item.error}</span>
                   </div>
@@ -773,35 +804,35 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
           <button
             type="button"
             onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
+            className="inline-flex items-center gap-1 text-sm text-ink-3 transition hover:text-ink"
           >
             <ArrowLeft className="size-4" />
             返回导入方式
           </button>
-          <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm leading-6 text-stone-600 space-y-2">
-            <div className="font-medium text-stone-800">操作步骤</div>
+          <div className="rounded-[10px] border border-line bg-sunken p-4 text-sm leading-6 text-ink-2 space-y-2">
+            <div className="font-medium text-ink">操作步骤</div>
             <ol className="list-decimal pl-5 space-y-1">
               <li>（可选）填写你 ChatGPT 账号的邮箱，登录页会预填。</li>
               <li>点击下方"打开授权页面"，在新标签里登录自己的 ChatGPT 账号。</li>
-              <li>登录完成后浏览器会跳到 <code className="rounded bg-stone-200 px-1">platform.openai.com/auth/callback?code=...</code>。立刻从地址栏复制整段 URL（或开 F12 在 Network 里抓到 callback 那一行，右键 Copy → Copy URL）。</li>
+              <li>登录完成后浏览器会跳到 <code className="rounded bg-sunken px-1">platform.openai.com/auth/callback?code=...</code>。立刻从地址栏复制整段 URL（或开 F12 在 Network 里抓到 callback 那一行，右键 Copy → Copy URL）。</li>
               <li>把 callback URL 粘到下面输入框，点"完成导入"。</li>
             </ol>
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">邮箱（可选预填）</label>
+            <label className="text-sm font-medium text-ink-2">邮箱（可选预填）</label>
             <input
               type="email"
               placeholder="you@example.com"
               value={oauthEmailHint}
               onChange={(event) => setOauthEmailHint(event.target.value)}
               disabled={Boolean(oauthSession) || oauthStarting}
-              className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-stone-400"
+              className="w-full rounded-[7px] border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-clay"
             />
           </div>
           {!oauthSession ? (
             <Button
               type="button"
-              className="h-10 rounded-xl bg-ink text-page hover:bg-ink/85"
+              className="h-10 rounded-[7px] bg-ink text-page hover:bg-ink/85"
               onClick={() => void handleStartOAuth()}
               disabled={oauthStarting}
             >
@@ -810,14 +841,14 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             </Button>
           ) : (
             <div className="space-y-3">
-              <div className="rounded-2xl border border-stone-200 bg-white p-3 text-xs leading-6 text-stone-600 break-all font-mono">
+              <div className="rounded-[10px] border border-line bg-surface p-3 text-xs leading-6 text-ink-2 break-all font-mono">
                 {oauthSession.authorize_url}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-xl border-stone-200 bg-white"
+                  className="rounded-[7px] border-line bg-surface"
                   onClick={() => void handleCopyAuthorizeUrl()}
                 >
                   <Copy className="size-4" />
@@ -826,7 +857,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-xl border-stone-200 bg-white"
+                  className="rounded-[7px] border-line bg-surface"
                   onClick={() => window.open(oauthSession.authorize_url, "_blank", "noopener,noreferrer")}
                 >
                   <ExternalLink className="size-4" />
@@ -835,7 +866,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                 <Button
                   type="button"
                   variant="outline"
-                  className="rounded-xl border-stone-200 bg-white"
+                  className="rounded-[7px] border-line bg-surface"
                   onClick={() => {
                     setOauthSession(null);
                     setOauthCallbackInput("");
@@ -845,17 +876,17 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                 </Button>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-stone-700">粘贴 callback URL（或仅 code）</label>
+                <label className="text-sm font-medium text-ink-2">粘贴 callback URL（或仅 code）</label>
                 <Textarea
                   placeholder={"https://platform.openai.com/auth/callback?code=...&state=..."}
                   value={oauthCallbackInput}
                   onChange={(event) => setOauthCallbackInput(event.target.value)}
-                  className="min-h-24 resize-none rounded-xl border-stone-200 font-mono text-xs"
+                  className="min-h-24 resize-none rounded-[7px] border-line font-mono text-xs"
                 />
               </div>
             </div>
           )}
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+          <div className="rounded-[10px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
             <div className="font-medium">注意</div>
             <div>
               授权码（code）只能使用一次。如果浏览器的 callback 页加载完成、显示了 OpenAI 的错误页，那 code 大概率已经被消耗，
@@ -872,22 +903,22 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
           <button
             type="button"
             onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
+            className="inline-flex items-center gap-1 text-sm text-ink-3 transition hover:text-ink"
           >
             <ArrowLeft className="size-4" />
             返回导入方式
           </button>
-          <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 p-5">
+          <div className="rounded-[10px] border border-dashed border-line bg-sunken p-5">
             <div className="space-y-2">
-              <div className="text-sm font-medium text-stone-800">选择本地账号 JSON 文件</div>
-              <div className="text-sm leading-6 text-stone-500">
+              <div className="text-sm font-medium text-ink">选择本地账号 JSON 文件</div>
+              <div className="text-sm leading-6 text-ink-3">
                 支持本项目导出的单账号对象或全部账号数组，也兼容每个文件一个账号对象的 CPA JSON。
                 系统会自动提取 `access_token` 或 `accessToken`。
               </div>
             </div>
             <Button
               type="button"
-              className="mt-4 rounded-xl bg-ink text-page hover:bg-ink/85"
+              className="mt-4 rounded-[7px] bg-ink text-page hover:bg-ink/85"
               onClick={() => accountJsonInputRef.current?.click()}
               disabled={isSubmitting}
             >
@@ -904,7 +935,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             onChange={(event) => void handleAccountJsonSelected(event)}
           />
           {pendingAccountJsonImport ? (
-            <div className="rounded-2xl border border-stone-200 bg-white p-4 text-sm leading-6 text-stone-600">
+            <div className="rounded-[10px] border border-line bg-surface p-4 text-sm leading-6 text-ink-2">
               最近一次读取到 {pendingAccountJsonImport.parsedAccountCount} 个 Token
               {pendingAccountJsonImport.errorCount > 0 ? `，另有 ${pendingAccountJsonImport.errorCount} 个文件未提取成功` : ""}。
             </div>
@@ -919,18 +950,18 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
           <button
             type="button"
             onClick={() => setMethod("menu")}
-            className="inline-flex items-center gap-1 text-sm text-stone-500 transition hover:text-stone-800"
+            className="inline-flex items-center gap-1 text-sm text-ink-3 transition hover:text-ink"
           >
             <ArrowLeft className="size-4" />
             返回导入方式
           </button>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">Codex 认证 JSON</label>
+            <label className="text-sm font-medium text-ink-2">Codex 认证 JSON</label>
             <Textarea
               placeholder='粘贴包含 "access_token"、"refresh_token"、"id_token" 的 Codex 认证 JSON...'
               value={codexAuthInput}
               onChange={(event) => setCodexAuthInput(event.target.value)}
-              className="min-h-64 resize-none rounded-xl border-stone-200 font-mono text-xs"
+              className="min-h-64 resize-none rounded-[7px] border-line font-mono text-xs"
             />
           </div>
         </div>
@@ -999,7 +1030,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                         ? "批量协议登录"
                         : "导入账号 JSON"}
             </DialogTitle>
-            <DialogDescription className="text-sm leading-6">
+            <DialogDescription className="text-[13px] leading-6 text-ink-2">
               {method === "menu"
                 ? "选择一种导入方式。导入成功后会自动拉取邮箱、类型和额度。"
                 : method === "token"
@@ -1023,7 +1054,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
           <div className="space-y-2">
             <label className="text-[13px] text-ink-2">代理</label>
             <Select value={proxyChoice} onValueChange={handleProxyChoiceChange}>
-              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white">
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1039,22 +1070,38 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
               </SelectContent>
             </Select>
             {proxyChoice === "distribute" ? (
-              <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-3">
+              <div className="space-y-2 rounded-[7px] border border-line bg-surface p-3">
                 {proxies.map((proxy) => (
-                  <label key={proxy.url} className="flex items-center gap-2 text-sm text-stone-700">
+                  <label key={proxy.url} className="flex items-center gap-2 text-sm text-ink-2">
                     <Checkbox
                       checked={distributeUrls.includes(proxy.url)}
                       onCheckedChange={(checked) => toggleDistributeUrl(proxy.url, checked === true)}
                     />
                     <span className="min-w-0 flex-1 truncate">{proxyLabel(proxy)}</span>
-                    <span className={cn("shrink-0 text-xs", proxy.health.abnormal ? "text-rose-500" : "text-stone-400")}>
+                    <span className={cn("shrink-0 text-xs", proxy.health.abnormal ? "text-bad" : "text-ink-3")}>
                       {proxy.health.abnormal ? "异常 · " : ""}
                       {proxy.account_count} 个账号
                     </span>
                   </label>
                 ))}
-                <p className="text-xs text-stone-500">
-                  新账号依次分给账号数最少的代理；已在号池里的账号保留原代理。异常代理会被跳过。
+                <div className="rounded-[7px] border border-line">
+                  {distributionPreview.map((item) => {
+                    const proxy = proxies.find((entry) => entry.url === item.url);
+                    return (
+                      <div key={item.url} className="grid grid-cols-[1fr_auto] gap-3 border-t border-line px-3 py-2 text-[13px] first:border-t-0">
+                        <span className="truncate text-ink">{proxy?.name || proxy?.masked_url || item.url}</span>
+                        <span className="text-ink-3 tabular-nums">
+                          {item.abnormal && distributionPreview.some((entry) => !entry.abnormal) ? "跳过" : `现有 ${item.accountCount} · 本次 +${item.assigned}`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs leading-5 text-ink-3">
+                  {newAccountCount > 0
+                    ? `这 ${newAccountCount} 个新账号分给负载最少的代理，平手按上面的顺序。已在号池里的账号保留原代理。`
+                    : "填入要导入的账号后，这里会显示每个代理分到几个。"}
+                  异常代理不参与，除非选中的代理全部异常。
                 </p>
               </div>
             ) : proxyChoice === "new" ? (
@@ -1062,10 +1109,10 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
                 value={newProxy}
                 onChange={(event) => setNewProxy(event.target.value)}
                 placeholder="http://user:pass@host:port"
-                className="h-10 rounded-xl border-stone-200 bg-white"
+               
               />
             ) : (
-              <p className="text-xs text-stone-500">
+              <p className="text-xs text-ink-3">
                 {proxyChoice === "none"
                   ? "不写专属代理，这些账号继续走全局代理。"
                   : "这个地址会写到这次导入的账号上，不改全局代理。"}
@@ -1076,8 +1123,8 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
 
           <DialogFooter className="pt-2">
             <Button
-              variant="secondary"
-              className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
+              variant="ghost"
+             
               onClick={() => setOpen(false)}
               disabled={footerDisabled}
             >
@@ -1085,7 +1132,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             </Button>
             {method === "token" ? (
               <Button
-                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
+               
                 onClick={() => void handleImportTokenText()}
                 disabled={footerDisabled}
               >
@@ -1095,7 +1142,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             ) : null}
             {method === "session" ? (
               <Button
-                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
+               
                 onClick={() => void handleImportSessionJson()}
                 disabled={footerDisabled}
               >
@@ -1105,7 +1152,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             ) : null}
             {method === "codex-auth" ? (
               <Button
-                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
+               
                 onClick={() => void handleImportCodexAuthJson()}
                 disabled={footerDisabled}
               >
@@ -1116,7 +1163,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             {method === "oauth" ? (
               <Button
                 className={cn(
-                  "h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85",
+                  "",
                   !oauthSession ? "hidden" : "",
                 )}
                 onClick={() => void handleFinishOAuth()}
@@ -1128,7 +1175,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             ) : null}
             {method === "protocol" ? (
               <Button
-                className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
+               
                 onClick={() => void handleStartProtocolLogin()}
                 disabled={footerDisabled || protocolRunning || !protocolInput.trim()}
               >
@@ -1139,7 +1186,7 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
             {method === "account-json" ? (
               <Button
                 className={cn(
-                  "h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85",
+                  "",
                   !pendingAccountJsonImport ? "hidden" : "",
                 )}
                 onClick={() => setConfirmOpen(true)}
@@ -1153,10 +1200,10 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
       </Dialog>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="rounded-2xl p-6">
-          <DialogHeader className="gap-2">
-            <DialogTitle>确认导入账号 Token</DialogTitle>
-            <DialogDescription className="text-sm leading-6">
+        <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
+          <DialogHeader className="gap-1.5">
+            <DialogTitle className="font-serif text-[22px] font-medium">确认导入账号</DialogTitle>
+            <DialogDescription className="text-[13px] leading-6 text-ink-2">
               {pendingAccountJsonImport
                 ? `确认识别到 ${pendingAccountJsonImport.parsedAccountCount} 个 Token，是否确认导入？`
                 : "尚未读取到可导入的 Token。"}
@@ -1167,15 +1214,15 @@ export function AccountImportDialog({ disabled, proxies = [], onImported }: Acco
           </DialogHeader>
           <DialogFooter className="pt-2">
             <Button
-              variant="secondary"
-              className="h-10 rounded-xl bg-stone-100 px-5 text-stone-700 hover:bg-stone-200"
+              variant="ghost"
+             
               onClick={() => setConfirmOpen(false)}
               disabled={isSubmitting}
             >
               返回
             </Button>
             <Button
-              className="h-10 rounded-xl bg-ink px-5 text-page hover:bg-ink/85"
+             
               onClick={() =>
                 void submitTokens(
                   pendingAccountJsonImport?.tokens ?? [],
