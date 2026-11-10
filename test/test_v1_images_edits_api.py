@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import unittest
 from unittest import mock
 
@@ -17,6 +18,10 @@ DATA_IMAGE_URL = f"data:image/png;base64,{base64.b64encode(PNG_BYTES).decode('as
 
 class ImagesEditsApiTests(unittest.TestCase):
     def setUp(self):
+        # 密钥按调用时的环境变量取；别的测试模块会 setdefault 成别的值，这里固定住
+        env = mock.patch.dict(os.environ, {"CHATGPT2API_AUTH_KEY": "chatgpt2api"})
+        env.start()
+        self.addCleanup(env.stop)
         self.handle_calls = []
 
         def fake_handle(payload):

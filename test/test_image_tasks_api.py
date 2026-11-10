@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import unittest
 from unittest import mock
 
@@ -61,6 +62,10 @@ class FakeImageTaskService:
 
 class ImageTasksApiTests(unittest.TestCase):
     def setUp(self):
+        # 密钥按调用时的环境变量取；别的测试模块会 setdefault 成别的值，这里固定住
+        env = mock.patch.dict(os.environ, {"CHATGPT2API_AUTH_KEY": "chatgpt2api"})
+        env.start()
+        self.addCleanup(env.stop)
         self.fake_service = FakeImageTaskService()
         self.service_patcher = mock.patch.object(image_tasks_module, "image_task_service", self.fake_service)
         self.service_patcher.start()

@@ -5,6 +5,7 @@ import time
 import unittest
 
 import requests
+from test.integration import live
 
 AUTH_KEY = "chatgpt2api"
 BASE_URL = "http://localhost:8000"
@@ -19,6 +20,7 @@ class AnthropicMessagesTests(unittest.TestCase):
             "anthropic-version": "2023-06-01",
         }
 
+    @live
     def test_message_http(self):
         """测试 Anthropic Messages 的非流式 HTTP 调用。"""
         response = requests.post(
@@ -40,6 +42,7 @@ class AnthropicMessagesTests(unittest.TestCase):
         except Exception:
             print(response.text)
 
+    @live
     def test_message_stream_http(self):
         """测试 Anthropic Messages 的流式 HTTP 调用。"""
         started_at = time.time()

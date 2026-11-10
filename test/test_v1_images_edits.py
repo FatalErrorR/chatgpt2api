@@ -9,6 +9,7 @@ import requests
 
 from test.utils import save_image
 from utils.log import logger
+from test.integration import live
 
 AUTH_KEY = "chatgpt2api"
 BASE_URL = "http://localhost:8000"
@@ -36,6 +37,7 @@ def summarize_chunk(chunk: dict[str, object]) -> dict[str, object]:
 
 
 class ImageEditsTests(unittest.TestCase):
+    @live
     def test_image_edit_http(self):
         """测试图片编辑的非流式 HTTP 调用。"""
         response = requests.post(
@@ -66,6 +68,7 @@ class ImageEditsTests(unittest.TestCase):
             "image_count": len(saved_paths),
         })
 
+    @live
     def test_image_edit_stream_http(self):
         """测试图片编辑的流式 HTTP 调用。"""
         response = requests.post(

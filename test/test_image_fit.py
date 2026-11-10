@@ -205,7 +205,7 @@ class Conversation413RetryTests(unittest.TestCase):
         backend._upload_image = upload  # type: ignore[method-assign]
         backend._bootstrap = lambda: None  # type: ignore[method-assign]
         backend._get_chat_requirements = lambda: object()  # type: ignore[method-assign]
-        backend._prepare_image_conversation = lambda *args, **kwargs: "conduit"  # type: ignore[method-assign]
+        backend._prepare_image_conversation = lambda *args, **kwargs: ("conduit", "trace")  # type: ignore[method-assign]
         backend._start_image_generation = start  # type: ignore[method-assign]
         backend._iter_sse_payloads_capped = lambda response, _timeout: iter((response,))  # type: ignore[method-assign]
         backend._report_progress = lambda _step: None  # type: ignore[method-assign]

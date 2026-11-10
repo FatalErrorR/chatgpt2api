@@ -19,6 +19,10 @@ JPEG_DATA_URL = "data:image/jpeg;base64," + base64.b64encode(b"fake-jpeg").decod
 
 class ImageEditsJsonApiTests(unittest.TestCase):
     def setUp(self):
+        # 密钥按调用时的环境变量取；别的测试模块会 setdefault 成别的值，这里固定住
+        env = mock.patch.dict(os.environ, {"CHATGPT2API_AUTH_KEY": "chatgpt2api"})
+        env.start()
+        self.addCleanup(env.stop)
         self.calls = []
 
         def fake_handle(payload):
@@ -65,7 +69,7 @@ class ImageEditsJsonApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         payload = self.calls[0]
-        self.assertEqual(payload["images"], [(b"fake-png", "image_1.png", "image/png")])
+        self.assertEqual(payload["images"], [(b"fake-png", "image_url.png", "image/png")])
         self.assertEqual(payload["size"], "1024x1536")
 
     def test_image_edit_accepts_json_multiple_images_and_b64_json(self):
@@ -83,9 +87,9 @@ class ImageEditsJsonApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.calls[0]["images"], [
-            (b"fake-png", "image_1.png", "image/png"),
+            (b"fake-png", "image_url.png", "image/png"),
             (b"raw-jpeg", "two.jpg", "image/jpeg"),
-            (b"fake-jpeg", "image_3.jpg", "image/jpeg"),
+            (b"fake-jpeg", "image_url.jpg", "image/jpeg"),
         ])
 
     def test_image_edit_keeps_original_multipart_multiple_image_logic(self):
@@ -109,16 +113,19 @@ class ImageEditsJsonApiTests(unittest.TestCase):
     def test_image_edit_rejects_json_without_image(self):
         response = self.client.post("/v1/images/edits", headers=AUTH_HEADERS, json={"prompt": "缺少图片"})
         self.assertEqual(response.status_code, 400, response.text)
-        self.assertIn("image file is required", response.text)
+        self.assertIn("image file or image_url is required", response.text)
 
-    def test_image_edit_rejects_remote_json_url(self):
-        response = self.client.post(
-            "/v1/images/edits",
-            headers=AUTH_HEADERS,
-            json={"prompt": "不允许远程拉图", "images": [{"image_url": "https://example.com/a.png"}]},
-        )
-        self.assertEqual(response.status_code, 400, response.text)
-        self.assertIn("remote image URLs are not supported", response.text)
+    def test_image_edit_downloads_remote_json_url(self):
+        remote = (b"remote-png", "a.png", "image/png")
+        with mock.patch("api.image_inputs._download_image_url", return_value=remote) as download:
+            response = self.client.post(
+                "/v1/images/edits",
+                headers=AUTH_HEADERS,
+                json={"prompt": "远程拉图", "images": [{"image_url": "https://example.com/a.png"}]},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        download.assert_called_once_with("https://example.com/a.png")
+        self.assertEqual(self.calls[0]["images"], [remote])
 
     def test_image_edit_rejects_json_n_out_of_range(self):
         response = self.client.post("/v1/images/edits", headers=AUTH_HEADERS, json={"prompt": "n 越界", "n": 5, "image": PNG_DATA_URL})

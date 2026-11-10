@@ -7,12 +7,14 @@ import unittest
 import requests
 
 from test.utils import save_image
+from test.integration import live
 
 AUTH_KEY = "chatgpt2api"
 BASE_URL = "http://localhost:8000"
 
 
 class ImageGenerationsTests(unittest.TestCase):
+    @live
     def test_image_generation_http(self):
         """测试图片生成的非流式 HTTP 调用。"""
         response = requests.post(
@@ -40,6 +42,7 @@ class ImageGenerationsTests(unittest.TestCase):
         for path in saved_paths:
             print(path)
 
+    @live
     def test_image_generation_stream_http(self):
         """测试图片生成的流式 HTTP 调用。"""
         response = requests.post(

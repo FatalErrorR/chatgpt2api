@@ -1,6 +1,11 @@
 import json
 
-import pytest
+import unittest
+
+try:
+    import pytest
+except ImportError:  # 这些是 pytest 风格的用例，unittest 跑不了
+    raise unittest.SkipTest("需要 pytest：pip install pytest 后用 pytest test/test_database_storage.py 运行")
 
 from services.storage.database_storage import (
     AccountModel,
