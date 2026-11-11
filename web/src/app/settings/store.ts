@@ -171,6 +171,8 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     refresh_account_interval_minute: Number(config.refresh_account_interval_minute || 5),
     image_retention_days: Number(config.image_retention_days || 30),
     image_poll_timeout_secs: Number(config.image_poll_timeout_secs || 120),
+    image_failover_enabled: Boolean(config.image_failover_enabled),
+    image_failover_secs: Number(config.image_failover_secs || 60),
     image_account_concurrency: Number(config.image_account_concurrency || 3),
     image_settle_enabled: Boolean(config.image_settle_enabled !== false),
     image_ref_fit_enabled: Boolean(config.image_ref_fit_enabled !== false),
@@ -304,6 +306,8 @@ type SettingsStore = {
   setRefreshAccountIntervalMinute: (value: string) => void;
   setImageRetentionDays: (value: string) => void;
   setImagePollTimeoutSecs: (value: string) => void;
+  setImageFailoverEnabled: (value: boolean) => void;
+  setImageFailoverSecs: (value: string) => void;
   setImageAccountConcurrency: (value: string) => void;
   setImageSettleEnabled: (value: boolean) => void;
   setImageRefFitEnabled: (value: boolean) => void;
@@ -444,6 +448,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         refresh_account_interval_minute: Math.max(1, Number(config.refresh_account_interval_minute) || 1),
         image_retention_days: Math.max(1, Number(config.image_retention_days) || 30),
         image_poll_timeout_secs: Math.max(1, Number(config.image_poll_timeout_secs) || 120),
+        image_failover_enabled: Boolean(config.image_failover_enabled),
+        image_failover_secs: Math.min(600, Math.max(15, Number(config.image_failover_secs) || 60)),
         image_account_concurrency: Math.max(1, Number(config.image_account_concurrency) || 3),
         image_settle_enabled: Boolean(config.image_settle_enabled !== false),
         image_ref_fit_enabled: Boolean(config.image_ref_fit_enabled !== false),
@@ -557,6 +563,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setImagePollTimeoutSecs: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_poll_timeout_secs: value } } : {});
+  },
+
+  setImageFailoverEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_failover_enabled: value } } : {});
+  },
+
+  setImageFailoverSecs: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_failover_secs: value } } : {});
   },
 
   setImageAccountConcurrency: (value) => {

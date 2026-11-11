@@ -419,6 +419,19 @@ class ConfigStore:
             return 120
 
     @property
+    def image_failover_enabled(self) -> bool:
+        """出图等待超过 image_failover_secs 仍没有图片时，放弃当前账号换号重新生成。"""
+        return _normalize_bool(self.data.get("image_failover_enabled"), False)
+
+    @property
+    def image_failover_secs(self) -> int:
+        """换号前每个账号最多等多少秒（从开始等图算起）；总等待仍受 image_poll_timeout_secs 限制。"""
+        try:
+            return min(600, max(15, int(self.data.get("image_failover_secs", 60))))
+        except (TypeError, ValueError):
+            return 60
+
+    @property
     def image_poll_interval_secs(self) -> float:
         try:
             return max(0.5, float(self.data.get("image_poll_interval_secs", 10.0)))
@@ -652,6 +665,8 @@ class ConfigStore:
         data["image_retention_days"] = self.image_retention_days
         data["image_poll_timeout_secs"] = self.image_poll_timeout_secs
         data["image_poll_interval_secs"] = self.image_poll_interval_secs
+        data["image_failover_enabled"] = self.image_failover_enabled
+        data["image_failover_secs"] = self.image_failover_secs
         data["image_poll_initial_wait_secs"] = self.image_poll_initial_wait_secs
         data["image_account_concurrency"] = self.image_account_concurrency
         data["image_parallel_generation"] = self.image_parallel_generation

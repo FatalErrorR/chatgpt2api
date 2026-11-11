@@ -174,6 +174,10 @@ export type SettingsConfig = {
   refresh_account_interval_minute?: number | string;
   image_retention_days?: number | string;
   image_poll_timeout_secs?: number | string;
+  /** 出图等太久就换号重新生成 */
+  image_failover_enabled?: boolean;
+  /** 换号前每个账号最多等多少秒（15–600） */
+  image_failover_secs?: number | string;
   image_account_concurrency?: number | string;
   image_parallel_generation?: boolean;
   image_settle_enabled?: boolean;

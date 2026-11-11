@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -138,3 +139,103 @@ class ImageForbiddenTests(ImageRetryTestCase):
             self.assertEqual(service.same_proxy_tokens('a'), {'a', 'b'})
             self.assertEqual(service.same_proxy_tokens('c'), {'c'})
             self.assertEqual(service.same_proxy_tokens('d'), set())
+
+
+class ImageFailoverTests(unittest.TestCase):
+    """换号生成：每个号最多等 image_failover_secs 出图，超时换号；合计不超过 image_poll_timeout_secs。"""
+
+    TIMEOUT = conversation.ImagePollTimeoutError("ChatGPT 生图超时（已等待 60 秒）。", "conv-stuck")
+
+    def run_case(self, stuck_tokens, *, enabled=True, failover_secs=60, total_secs=600, poll_timeout_secs=None,
+                 tokens=("one", "two", "three", "four", "five", "six", "seven")):
+        request = conversation.ConversationRequest(model="gpt-image-2", prompt="cat", poll_timeout_secs=poll_timeout_secs)
+        service = mock.Mock()
+        service.get_available_access_token.side_effect = list(tokens)
+        service.get_account.side_effect = lambda token: {"email": f"{token}@example.com"}
+        seen = []  # (token, failover_timeout_secs)
+
+        def stream(backend, attempt_request, index, total):
+            token = backend.token
+            seen.append((token, attempt_request.failover_timeout_secs))
+            # 和生产一致：先收到对话进度，再在等图阶段超时
+            yield conversation.ImageOutput(kind="progress", model="gpt-image-2", index=index, total=total, conversation_id="conv")
+            if token in stuck_tokens:
+                raise self.TIMEOUT
+            yield conversation.ImageOutput(kind="result", model="gpt-image-2", index=index, total=total, data=[{"url": "x"}])
+
+        def backend_for(access_token):
+            backend = mock.Mock()
+            backend.token = access_token
+            return backend
+
+        settings = {
+            "image_failover_enabled": enabled,
+            "image_failover_secs": failover_secs,
+            "image_poll_timeout_secs": total_secs,
+        }
+        patches = [mock.patch.object(type(conversation.config), name, new_callable=mock.PropertyMock, return_value=value)
+                   for name, value in settings.items()]
+        patches += [
+            mock.patch.object(conversation, "account_service", service),
+            mock.patch.object(conversation, "OpenAIBackendAPI", side_effect=backend_for),
+            mock.patch.object(conversation, "stream_image_outputs", side_effect=stream),
+            mock.patch.object(conversation, "_remove_image_conversation_later"),
+        ]
+        with contextlib.ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            try:
+                result, error = conversation._generate_single_image(request, 1, 1), None
+            except conversation.ImagePollTimeoutError as exc:
+                result, error = None, exc
+        return result, error, seen, service
+
+    def test_switches_account_when_one_is_stuck_after_progress(self):
+        result, error, seen, service = self.run_case({"one"})
+        self.assertIsNone(error)
+        self.assertEqual(result[-1].kind, "result")
+        self.assertEqual(seen, [("one", 60), ("two", 60)])
+        excluded = service.get_available_access_token.call_args_list[1].kwargs["excluded_tokens"]
+        self.assertIn("one", excluded)  # 不会又挑回卡住的号
+        self.assertNotIn(mock.call("one", False), service.mark_image_result.call_args_list)  # 卡住不算账号失败
+
+    def test_off_by_default_keeps_the_single_long_wait(self):
+        result, error, seen, _ = self.run_case({"one"}, enabled=False)
+        self.assertIsNotNone(error)
+        self.assertEqual(seen, [("one", None)])  # 用原来的总时限，不换号
+
+    def test_total_wait_is_capped_by_the_poll_timeout(self):
+        result, error, seen, _ = self.run_case({"one", "two", "three"}, failover_secs=60, total_secs=100)
+        # 60 + 40 = 100，剩下的不够再试
+        self.assertEqual(seen, [("one", 60), ("two", 40)])
+        self.assertIn("换了 2 个账号", str(error))
+        self.assertNotIn("image_poll_timeout_secs", str(error))
+
+    def test_switches_at_most_four_times(self):
+        stuck = {"one", "two", "three", "four", "five", "six", "seven"}
+        result, error, seen, service = self.run_case(stuck, failover_secs=30, total_secs=600)
+        self.assertEqual([token for token, _ in seen], ["one", "two", "three", "four", "five"])
+        self.assertIn("换了 5 个账号", str(error))
+        self.assertEqual(service.mark_image_result.call_args_list[-1], mock.call("five", False))
+
+    def test_explicit_poll_timeout_disables_failover(self):
+        # 账号测试等显式给了等待时间的调用不换号
+        result, error, seen, _ = self.run_case({"one"}, poll_timeout_secs=90)
+        self.assertIsNotNone(error)
+        self.assertEqual(seen, [("one", None)])
+
+
+class ImageFailoverConfigTests(unittest.TestCase):
+    def test_defaults_and_bounds(self):
+        from services.config import ConfigStore
+        store = ConfigStore.__new__(ConfigStore)
+        for raw, enabled, secs in (
+            ({}, False, 60),
+            ({"image_failover_enabled": "true", "image_failover_secs": "45"}, True, 45),
+            ({"image_failover_enabled": True, "image_failover_secs": 3}, True, 15),
+            ({"image_failover_secs": 9999}, False, 600),
+            ({"image_failover_secs": "abc"}, False, 60),
+        ):
+            store.data = raw
+            with self.subTest(raw=raw):
+                self.assertEqual((store.image_failover_enabled, store.image_failover_secs), (enabled, secs))

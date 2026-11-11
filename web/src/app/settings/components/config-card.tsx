@@ -28,6 +28,8 @@ export function ConfigCard() {
   const setRefreshAccountIntervalMinute = useSettingsStore((state) => state.setRefreshAccountIntervalMinute);
   const setImageRetentionDays = useSettingsStore((state) => state.setImageRetentionDays);
   const setImagePollTimeoutSecs = useSettingsStore((state) => state.setImagePollTimeoutSecs);
+  const setImageFailoverEnabled = useSettingsStore((state) => state.setImageFailoverEnabled);
+  const setImageFailoverSecs = useSettingsStore((state) => state.setImageFailoverSecs);
   const setImageAccountConcurrency = useSettingsStore((state) => state.setImageAccountConcurrency);
   const setImageSettleEnabled = useSettingsStore((state) => state.setImageSettleEnabled);
   const setImageRefFitEnabled = useSettingsStore((state) => state.setImageRefFitEnabled);
@@ -210,7 +212,35 @@ export function ConfigCard() {
               placeholder="120"
              
             />
-            <p className="text-xs text-ink-3">单位秒，等待上游图片结果的最长时间。</p>
+            <p className="text-xs text-ink-3">单位秒，等待上游图片结果的最长时间。打开下面的换号生成后，这是所有账号合计的上限。</p>
+          </div>
+          <div className="space-y-2 sm:col-span-2">
+            <div className="grid gap-3 rounded-[7px] border border-line bg-surface px-3.5 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+              <label className="flex items-center gap-3 text-sm text-ink-2">
+                <Checkbox
+                  checked={Boolean(config?.image_failover_enabled)}
+                  onCheckedChange={(checked) => setImageFailoverEnabled(Boolean(checked))}
+                />
+                出图慢就换号重新生成
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-2">
+                等
+                <Input
+                  className="w-20 text-right disabled:cursor-not-allowed disabled:opacity-50"
+                  inputMode="numeric"
+                  value={String(config?.image_failover_secs ?? "60")}
+                  onChange={(event) => setImageFailoverSecs(event.target.value)}
+                  placeholder="60"
+                  disabled={!config?.image_failover_enabled}
+                  aria-label="换号前等待秒数"
+                />
+                秒没出图就换号
+              </label>
+            </div>
+            <p className="text-xs text-ink-3">
+              从开始等图算起，这个号超过设定秒数还没出图，就放弃它换一个号重新生成，最多换 4 次，合计不超过上面的轮询超时。被放弃的那次上游可能仍会扣额度。
+              正常出图约 30 秒，九成在 45 秒内；多张一次出图或 gpt-image-2.6 会更慢，设得太短会误换。可填 15–600。
+            </p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-ink-2">单账号图片并发</label>

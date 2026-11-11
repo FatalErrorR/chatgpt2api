@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Iterator
 
 import tiktoken
@@ -382,6 +382,8 @@ class ConversationRequest:
     base_url: str | None = None
     message_as_error: bool = False
     poll_timeout_secs: int | None = None
+    # 换号生成：这次尝试最多等多少秒出图，超时就抛 ImagePollTimeoutError 让上层换号（由 _generate_single_image 设置）
+    failover_timeout_secs: int | None = None
     progress_callback: Any = None  # Callable[[str], None] | None
 
 
@@ -1043,8 +1045,8 @@ def stream_image_outputs(
     # 当检测到文本回复（含 referenced_image_ids）时，使用更长的超时来轮询图片结果。
     # 因为上游可能将图片生成作为异步任务执行，SSE 流在工具完成前就断开了，
     # 导致对话文档中尚未写入图片工具的响应记录。
-    poll_timeout = request.poll_timeout_secs or config.image_poll_timeout_secs
-    if is_text_reply and conversation_id and not request.poll_timeout_secs:
+    poll_timeout = request.failover_timeout_secs or request.poll_timeout_secs or config.image_poll_timeout_secs
+    if is_text_reply and conversation_id and not request.poll_timeout_secs and not request.failover_timeout_secs:
         # 文本回复场景下图片可能仍在异步生成，使用更长超时（默认 120s → 额外 180s = 300s）
         poll_timeout = max(poll_timeout, 300)
         logger.info({
@@ -1132,7 +1134,7 @@ def stream_image_outputs(
             })
             # 文本回复场景下，图片可能需要 4-5 分钟才能异步生成完成。
             # 使用 300s 超时并允许多次重试，避免因临时网络问题提前退出。
-            retry_poll_timeout = max(config.image_poll_timeout_secs, 300)
+            retry_poll_timeout = request.failover_timeout_secs or max(config.image_poll_timeout_secs, 300)
             MAX_POLL_RETRIES = 3
             for poll_attempt in range(1, MAX_POLL_RETRIES + 1):
                 try:
@@ -1146,6 +1148,8 @@ def stream_image_outputs(
                     sediment_ids.extend(item for item in polled_sediment_ids if item and item not in sediment_ids)
                     break  # 轮询成功，退出重试循环
                 except Exception as exc:
+                    if request.failover_timeout_secs and isinstance(exc, ImagePollTimeoutError):
+                        raise  # 换号生成：交给上层换账号
                     error_str = str(exc)
                     is_transient = (
                         isinstance(exc, ImagePollTimeoutError)
@@ -1237,7 +1241,7 @@ def stream_image_outputs(
     if should_poll_for_image and conversation_id:
         # 图片可能仍在异步处理中（上游 SSE 流在图片生成完成前就结束了）。
         # 使用 300s 超时并允许多次重试，避免因临时网络问题或图片尚未提交而提前退出。
-        retry_poll_timeout = max(config.image_poll_timeout_secs, 300)
+        retry_poll_timeout = request.failover_timeout_secs or max(config.image_poll_timeout_secs, 300)
         MAX_FALLBACK_POLL_RETRIES = 3
         for poll_attempt in range(1, MAX_FALLBACK_POLL_RETRIES + 1):
             retry_wait_secs = min(30.0 * poll_attempt, config.image_poll_initial_wait_secs * poll_attempt)
@@ -1259,6 +1263,8 @@ def stream_image_outputs(
                 sediment_ids.extend(item for item in polled_sediment_ids if item and item not in sediment_ids)
                 break  # 轮询成功，退出重试循环
             except Exception as exc:
+                if request.failover_timeout_secs and isinstance(exc, ImagePollTimeoutError):
+                    raise  # 换号生成：交给上层换账号
                 error_str = str(exc)
                 is_transient = (
                     isinstance(exc, ImagePollTimeoutError)
@@ -1397,6 +1403,8 @@ def _generate_single_image(
     MAX_CONN_TIMEOUT_RETRIES = 3
     # 轮询超时错误最大重试次数（换账号重试）
     MAX_POLL_TIMEOUT_RETRIES = 4
+    # 换号生成：总时限剩下不到这么多秒就不再换号
+    MIN_FAILOVER_SECS = 15
     # 图生图上传上限：冻当前号后换下一个，最多再试 5 个不同号
     MAX_EDIT_UPLOAD_THROTTLE_RETRIES = 5
     # 上游 403：冷却当前号，换其他出口的号重试
@@ -1410,6 +1418,10 @@ def _generate_single_image(
     model_not_found_retry_count = 0
     forbidden_retry_count = 0
     tried_upload_tokens: set[str] = set()
+    # 换号生成：每个号最多等 image_failover_secs 出图，超时换号；所有尝试合计不超过总的等图时限。
+    # 调用方显式给了 poll_timeout_secs（如账号测试）时不换号。
+    failover_enabled = config.image_failover_enabled and not request.poll_timeout_secs
+    failover_budget_secs = config.image_poll_timeout_secs
     # 403 后本次请求暂避与该号同出口的账号（只影响本次请求）
     avoided_tokens: set[str] = set()
     for_edits = bool(request.images)
@@ -1438,6 +1450,11 @@ def _generate_single_image(
         emitted_for_token = False
         returned_message = False
         returned_result = False
+        attempt_request = request
+        attempt_wait_secs = 0
+        if failover_enabled:
+            attempt_wait_secs = max(1, min(config.image_failover_secs, failover_budget_secs))
+            attempt_request = replace(request, failover_timeout_secs=attempt_wait_secs)
         account = account_service.get_account(token) or {}
         account_email = str(account.get("email") or "").strip()
         logger.debug({
@@ -1456,7 +1473,7 @@ def _generate_single_image(
             outputs: list[ImageOutput] = []
             last_conversation_id = ""
             try:
-                for output in stream_fn(backend, request, index, total):
+                for output in stream_fn(backend, attempt_request, index, total):
                     last_conversation_id = output.conversation_id or last_conversation_id
                     if account_email and not output.account_email:
                         output.account_email = account_email
@@ -1498,9 +1515,46 @@ def _generate_single_image(
             account_service.mark_image_result(token, True)
             return outputs
         except ImagePollTimeoutError as exc:
-            account_service.mark_image_result(token, False)
             if account_email:
                 setattr(exc, "account_email", account_email)
+            if failover_enabled:
+                # 换号生成：超时是这次对话卡住，不算账号失败；换一个号重新生成
+                failover_budget_secs -= attempt_wait_secs
+                can_retry = (
+                    not (returned_message or returned_result)
+                    and failover_budget_secs >= MIN_FAILOVER_SECS
+                    and poll_timeout_retry_count < MAX_POLL_TIMEOUT_RETRIES
+                )
+                if can_retry:
+                    poll_timeout_retry_count += 1
+                    avoided_tokens.add(token)
+                    logger.warning({
+                        "event": "image_failover_retry",
+                        "request_token": token,
+                        "account_email": account_email,
+                        "waited_secs": attempt_wait_secs,
+                        "budget_left_secs": failover_budget_secs,
+                        "retry_count": poll_timeout_retry_count,
+                        "index": index,
+                    })
+                    continue
+                account_service.mark_image_result(token, False)
+                logger.warning({
+                    "event": "image_failover_exhausted",
+                    "request_token": token,
+                    "account_email": account_email,
+                    "retry_count": poll_timeout_retry_count,
+                    "index": index,
+                })
+                failover_error = ImagePollTimeoutError(
+                    f"ChatGPT 生图超时：换了 {poll_timeout_retry_count + 1} 个账号，"
+                    f"每个最多等 {config.image_failover_secs} 秒都没有出图，上游可能正拥堵，请稍后重试。",
+                    exc.conversation_id,
+                )
+                if account_email:
+                    setattr(failover_error, "account_email", account_email)
+                raise failover_error from exc
+            account_service.mark_image_result(token, False)
             # 轮询超时：换账号重试
             if not emitted_for_token:
                 poll_timeout_retry_count += 1
