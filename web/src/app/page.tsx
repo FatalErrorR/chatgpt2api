@@ -1,24 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle, RefreshCw } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
+import { SkeletonLines } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import {
-  fetchAccounts,
   fetchImageOutputCounts,
   fetchImageStorage,
-  fetchProxies,
   fetchSystemLogs,
   type ImageOutputCounts,
+  type ImageStorageStats,
+  type SystemLog,
 } from "@/lib/api";
 import { getValidatedAuthSession } from "@/lib/auth-session";
 import { shortError } from "@/lib/log-detail";
-import { buildTodos, failedSources, formatSize, settle, type OverviewSources } from "@/lib/overview";
+import { buildTodos, formatSize, settle, type Loaded, type OverviewSources, type Todo } from "@/lib/overview";
+import { ABNORMAL_PROXY_FILTER } from "@/lib/proxy-match";
 import { cn } from "@/lib/utils";
 import { getDefaultRouteForRole } from "@/store/auth";
+
+import { AccountsWorkspace, type AccountsWorkspaceContext } from "./accounts/components/accounts-workspace";
 
 const PERIODS: Array<{ key: keyof ImageOutputCounts["generations"]; label: string }> = [
   { key: "today", label: "今日" },
@@ -26,6 +30,9 @@ const PERIODS: Array<{ key: keyof ImageOutputCounts["generations"]; label: strin
   { key: "d7", label: "近 7 天" },
   { key: "d30", label: "近 30 天" },
 ];
+
+// 下方「今日生图与失败调用」面板是否收起，按浏览器记住
+const TODAY_PANEL_KEY = "chatgpt2api-overview-today-collapsed";
 
 function formatNumber(value: number) {
   return value.toLocaleString("en-US");
@@ -37,279 +44,304 @@ function today() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+type ExtraSources = Pick<OverviewSources, "counts" | "storage" | "logs">;
+const PENDING = { ok: false as const, error: "" };
+
+/** 一个指标：可以点（筛选账号表或跳页面）。加载失败时不显示数值，免得 0 /「全部正常」被当真。 */
 function Kpi({
+  className: extraClassName,
   label,
   value,
   note,
   tone,
   error,
+  loading,
+  onClick,
+  href,
+  hint,
 }: {
   label: string;
   value: React.ReactNode;
-  note: string;
+  note: React.ReactNode;
   tone?: "bad" | "good";
-  /** 这块数据加载失败：不显示数值，免得 0 / 「全部正常」被当成真的 */
   error?: string;
+  loading?: boolean;
+  onClick?: () => void;
+  href?: string;
+  hint?: string;
+  className?: string;
 }) {
-  return (
-    <div className="rounded-[10px] border border-line bg-surface px-[18px] py-4">
+  const body = (
+    <>
       <div className="text-xs text-ink-3">{label}</div>
-      <div className={cn("mt-1 mb-0.5 font-serif text-[30px] leading-tight", error ? "text-ink-3" : "text-ink")}>{error ? "—" : value}</div>
+      <div className={cn("mt-0.5 font-serif text-[26px] leading-tight", error || loading ? "text-ink-3" : "text-ink")}>
+        {loading ? "…" : error ? "—" : value}
+      </div>
       <div
         className={cn("truncate text-xs", error || tone === "bad" ? "text-bad" : tone === "good" ? "text-ok" : "text-ink-2")}
         title={error || undefined}
       >
-        {error ? "加载失败" : note}
+        {loading ? " " : error ? "加载失败" : note}
       </div>
-    </div>
+    </>
+  );
+  const className = cn("block min-w-0 rounded-[10px] border border-line bg-surface px-4 py-3 text-left", extraClassName);
+  if (href) {
+    return (
+      <Link href={href} title={hint} className={cn(className, "transition hover:bg-surface-hover")}>
+        {body}
+      </Link>
+    );
+  }
+  if (onClick) {
+    return (
+      <button type="button" title={hint} onClick={onClick} className={cn(className, "transition hover:bg-surface-hover")}>
+        {body}
+      </button>
+    );
+  }
+  return <div className={className}>{body}</div>;
+}
+
+function useExtraSources() {
+  const [sources, setSources] = useState<ExtraSources>({ counts: PENDING, storage: PENDING, logs: PENDING });
+  const [loaded, setLoaded] = useState(false);
+  const load = useCallback(async () => {
+    const [counts, storage, logs] = await Promise.allSettled([
+      fetchImageOutputCounts(),
+      fetchImageStorage(),
+      fetchSystemLogs({ type: "call", start_date: today() }).then((result) => result.items),
+    ]);
+    setSources({ counts: settle(counts), storage: settle(storage), logs: settle(logs) });
+    setLoaded(true);
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return { sources, loaded, reload: load };
+}
+
+function OverviewTop({ ctx, extra, extraLoaded, reloadExtra }: { ctx: AccountsWorkspaceContext; extra: ExtraSources; extraLoaded: boolean; reloadExtra: () => void }) {
+  const accountsLoading = ctx.isLoading && ctx.accounts.length === 0 && !ctx.accountsError;
+  const accountsSource: Loaded<typeof ctx.accounts> = ctx.accountsError ? { ok: false, error: ctx.accountsError } : { ok: true, value: ctx.accounts };
+  const proxiesSource: Loaded<typeof ctx.proxies> = ctx.proxiesError ? { ok: false, error: ctx.proxiesError } : { ok: true, value: ctx.proxies };
+  const { summary } = ctx;
+  const badProxies = ctx.proxies.filter((proxy) => proxy.health.abnormal).length;
+  const counts = extra.counts.ok ? extra.counts.value : null;
+  const storage: ImageStorageStats | null = extra.storage.ok ? extra.storage.value : null;
+  const todayTotal = counts ? counts.generations.today + counts.edits.today : 0;
+  const yesterdayTotal = counts ? counts.generations.yesterday + counts.edits.yesterday : 0;
+  const todos =
+    accountsLoading || !extraLoaded
+      ? []
+      : buildTodos({ accounts: accountsSource, proxies: proxiesSource, ...extra });
+
+  const runTodo = (todo: Todo) => {
+    if (todo.filter) ctx.applyFilter(todo.filter);
+    else if (todo.retry === "accounts" || todo.retry === "proxies") ctx.reload();
+    else if (todo.retry) reloadExtra();
+  };
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <Kpi
+          label="可用账号"
+          loading={accountsLoading}
+          error={ctx.accountsError || undefined}
+          value={
+            <>
+              {summary.active} <span className="font-sans text-sm text-ink-3">/ {summary.total}</span>
+            </>
+          }
+          note={summary.abnormal > 0 ? `${summary.abnormal} 个异常` : "全部正常"}
+          tone={summary.abnormal > 0 ? "bad" : "good"}
+          onClick={() => ctx.applyFilter(summary.abnormal > 0 ? { status: "异常" } : { status: "正常" })}
+          hint={summary.abnormal > 0 ? "筛选异常账号" : "筛选正常账号"}
+        />
+        <Kpi
+          label="可用额度"
+          loading={accountsLoading}
+          error={ctx.accountsError || undefined}
+          value={summary.quota}
+          note={`在途 ${summary.inflight} 张`}
+          hint="正常账号剩余额度合计；在途是正在生成、尚未结束的图片数"
+        />
+        <Kpi
+          label="今日生图"
+          loading={!extraLoaded}
+          error={extra.counts.ok ? undefined : extra.counts.error || undefined}
+          value={formatNumber(todayTotal)}
+          note={`昨日 ${formatNumber(yesterdayTotal)}`}
+        />
+        <Kpi
+          label="代理"
+          loading={ctx.isLoading && ctx.proxies.length === 0 && !ctx.proxiesError}
+          error={ctx.proxiesError || undefined}
+          value={ctx.proxies.length}
+          note={badProxies > 0 ? `${badProxies} 个异常` : "全部正常"}
+          tone={badProxies > 0 ? "bad" : "good"}
+          onClick={badProxies > 0 ? () => ctx.applyFilter({ proxy: ABNORMAL_PROXY_FILTER }) : undefined}
+          hint={badProxies > 0 ? "筛选异常代理上的账号" : undefined}
+        />
+        <Kpi
+          label="图片存储"
+          loading={!extraLoaded}
+          error={extra.storage.ok ? undefined : extra.storage.error || undefined}
+          value={storage ? formatSize(storage.image_size_mb) : "—"}
+          note={storage ? `${formatNumber(storage.image_count)} 张 · 剩余 ${formatSize(storage.disk_free_mb)}` : ""}
+          tone={storage && storage.disk_free_mb < 2048 ? "bad" : undefined}
+          href="/image-manager"
+          hint="打开图片管理"
+          className="col-span-2 sm:col-span-1"
+        />
+      </div>
+
+      {todos.length > 0 ? (
+        <div className="flex flex-wrap gap-2" role="list" aria-label="需要处理">
+          {todos.map((todo) => {
+            const content = (
+              <>
+                <i className={cn("size-[7px] flex-none rounded-full", todo.tone === "bad" ? "bg-bad" : "bg-warn")} />
+                <span className="text-ink">{todo.title}</span>
+                <span className="hidden max-w-[260px] truncate text-ink-3 sm:inline" title={todo.note}>
+                  {todo.note}
+                </span>
+                <span className="text-clay-hover">{todo.action}</span>
+              </>
+            );
+            const className =
+              "inline-flex min-w-0 max-w-full items-center gap-2 rounded-[7px] border border-line bg-surface px-3 py-1.5 text-[13px] transition hover:bg-surface-hover";
+            return todo.href ? (
+              <Link key={todo.title} href={todo.href} className={className} role="listitem">
+                {content}
+              </Link>
+            ) : (
+              <button key={todo.title} type="button" className={className} onClick={() => runTodo(todo)} role="listitem">
+                {content}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </>
   );
 }
 
-function LoadError({ label, error }: { label: string; error: string }) {
-  return (
-    <div className="flex items-center gap-3 py-2 text-sm text-bad" title={error}>
-      <i className="size-[7px] flex-none rounded-full bg-bad" />
-      <span className="min-w-0 truncate">{label}加载失败：{error}</span>
-    </div>
-  );
-}
+function TodayPanel({ extra, extraLoaded }: { extra: ExtraSources; extraLoaded: boolean }) {
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(TODAY_PANEL_KEY) === "1");
+    } catch {
+      /* 读不到就默认展开 */
+    }
+  }, []);
+  const toggle = () => {
+    setCollapsed((value) => {
+      try {
+        localStorage.setItem(TODAY_PANEL_KEY, value ? "0" : "1");
+      } catch {
+        /* 记不住也没关系 */
+      }
+      return !value;
+    });
+  };
 
-function Panel({ title, action, children, className }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+  const counts = extra.counts.ok ? extra.counts.value : null;
+  const total = (key: keyof ImageOutputCounts["generations"]) => (counts ? counts.generations[key] + counts.edits[key] : 0);
+  const maxTotal = Math.max(1, ...PERIODS.map((period) => total(period.key)));
+  const failures: SystemLog[] = extra.logs.ok
+    ? extra.logs.value.filter((item) => (item.detail as { status?: string } | undefined)?.status === "failed").slice(0, 5)
+    : [];
+
   return (
-    <section className={cn("rounded-[10px] border border-line bg-surface", className)}>
-      <div className="flex items-center justify-between px-[18px] pt-3.5 pb-2.5">
-        <h2 className="text-[17px] font-medium text-ink">{title}</h2>
-        {action}
-      </div>
-      <div className="px-[18px] pb-4">{children}</div>
+    <section className="rounded-[10px] border border-line bg-surface">
+      <button type="button" className="flex w-full items-center justify-between px-[18px] py-3 text-left" onClick={toggle} aria-expanded={!collapsed}>
+        <h2 className="text-[17px] font-medium text-ink">今日生图与失败调用</h2>
+        <ChevronDown className={cn("size-4 text-ink-3 transition-transform", collapsed && "-rotate-90")} />
+      </button>
+      {collapsed ? null : !extraLoaded ? (
+        <SkeletonLines lines={4} className="px-[18px] pb-4" />
+      ) : (
+        <div className="grid gap-6 border-t border-line px-[18px] py-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-[13px] font-medium text-ink-2">生图量</h3>
+              <div className="flex gap-3.5 text-xs text-ink-3">
+                <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-ink" />文生图</span>
+                <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-clay" />图生图</span>
+              </div>
+            </div>
+            {!extra.counts.ok ? (
+              <div className="text-[13px] text-bad">生图统计加载失败：{extra.counts.error}</div>
+            ) : (
+              <div className="grid gap-3">
+                {PERIODS.map((period) => {
+                  const generations = counts?.generations[period.key] ?? 0;
+                  const edits = counts?.edits[period.key] ?? 0;
+                  return (
+                    <div key={period.key} className="grid grid-cols-[56px_1fr_60px] items-center gap-3 text-xs text-ink-2">
+                      <span>{period.label}</span>
+                      <div className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
+                        <i className="h-full bg-ink" style={{ width: `${(generations / maxTotal) * 100}%` }} />
+                        <i className="h-full bg-clay" style={{ width: `${(edits / maxTotal) * 100}%` }} />
+                      </div>
+                      <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-[13px] font-medium text-ink-2">今天失败的调用</h3>
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/logs">全部日志 →</Link>
+              </Button>
+            </div>
+            {!extra.logs.ok ? (
+              <div className="text-[13px] text-bad">调用日志加载失败：{extra.logs.error}</div>
+            ) : failures.length === 0 ? (
+              <div className="py-1 text-[13px] text-ink-3">今天还没有失败的调用。</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[13px]">
+                  <tbody>
+                    {failures.map((item) => {
+                      const detail = (item.detail ?? {}) as { endpoint?: string; error?: string; account_email?: string };
+                      return (
+                        <tr key={item.id} className="border-t border-line first:border-t-0">
+                          <td className="py-2 pr-3 pl-3 font-mono text-xs whitespace-nowrap text-ink-2 shadow-[inset_2px_0_0_var(--bad)]">{String(item.time).slice(11)}</td>
+                          <td className="py-2 pr-3 whitespace-nowrap text-ink">{detail.endpoint || "—"}</td>
+                          <td className="max-w-[320px] truncate py-2 text-ink-3" title={detail.error}>
+                            {detail.error ? shortError(detail.error) : item.summary}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
 function Overview() {
-  const [data, setData] = useState<OverviewSources | null>(null);
-  const [reloading, setReloading] = useState(false);
-
-  const load = useCallback(async () => {
-    // 各块互不依赖：某个接口失败只影响对应的块，并且要显示成失败，不能当成 0 / 正常
-    const [accounts, proxies, counts, storage, logs] = await Promise.allSettled([
-      fetchAccounts().then((result) => result.items),
-      fetchProxies().then((result) => result.items),
-      fetchImageOutputCounts(),
-      fetchImageStorage(),
-      fetchSystemLogs({ type: "call", start_date: today() }).then((result) => result.items),
-    ]);
-    return {
-      accounts: settle(accounts),
-      proxies: settle(proxies),
-      counts: settle(counts),
-      storage: settle(storage),
-      logs: settle(logs),
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void load().then((sources) => {
-      if (active) setData(sources);
-    });
-    return () => {
-      active = false;
-    };
-  }, [load]);
-
-  const reload = async () => {
-    setReloading(true);
-    try {
-      setData(await load());
-    } finally {
-      setReloading(false);
-    }
-  };
-
-  const stats = useMemo(() => {
-    const accounts = data?.accounts.ok ? data.accounts.value : [];
-    const normal = accounts.filter((item) => item.status === "正常");
-    return {
-      total: accounts.length,
-      normal: normal.length,
-      abnormal: accounts.filter((item) => item.status === "异常").length,
-      badProxies: data?.proxies.ok ? data.proxies.value.filter((proxy) => proxy.health.abnormal) : [],
-    };
-  }, [data]);
-
-  if (!data) {
-    return (
-      <div className="grid min-h-[50vh] place-items-center">
-        <LoaderCircle className="size-5 animate-spin text-ink-3" />
-      </div>
-    );
-  }
-
-  const counts = data.counts.ok ? data.counts.value : null;
-  const storage = data.storage.ok ? data.storage.value : null;
-  const total = (key: keyof ImageOutputCounts["generations"]) => (counts ? counts.generations[key] + counts.edits[key] : 0);
-  const maxTotal = Math.max(1, ...PERIODS.map((period) => total(period.key)));
-  const todos = buildTodos(data);
-  const failed = failedSources(data);
-  const failures = data.logs.ok
-    ? data.logs.value.filter((item) => (item.detail as { status?: string } | undefined)?.status === "failed").slice(0, 5)
-    : [];
-
+  const { sources: extra, loaded: extraLoaded, reload: reloadExtra } = useExtraSources();
   return (
-    <section className="space-y-[18px]">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-[30px] font-medium text-ink">概览</h1>
-          <p className="mt-1 text-sm text-ink-2">
-            {new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/accounts">号池</Link>
-          </Button>
-          <Button variant="clay" asChild>
-            <Link href="/image">去生图</Link>
-          </Button>
-        </div>
-      </div>
-
-      {failed.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">
-          <span className="min-w-0 flex-1">
-            部分数据加载失败：{failed.map((item) => item.label).join("、")}。下面对应的数字不可信。
-          </span>
-          <Button variant="ghost" size="sm" className="h-7 text-bad hover:bg-bad/10 hover:text-bad" disabled={reloading} onClick={() => void reload()}>
-            <RefreshCw className={cn("size-3.5", reloading && "animate-spin")} />
-            重试
-          </Button>
-        </div>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-        <Kpi
-          label="可用账号"
-          value={
-            <>
-              {stats.normal} <span className="font-sans text-sm text-ink-3">/ {stats.total}</span>
-            </>
-          }
-          note={stats.abnormal > 0 ? `${stats.abnormal} 个异常` : "全部正常"}
-          tone={stats.abnormal > 0 ? "bad" : "good"}
-          error={data.accounts.ok ? undefined : data.accounts.error}
-        />
-        <Kpi
-          label="今日生图"
-          value={formatNumber(total("today"))}
-          note={`昨日 ${formatNumber(total("yesterday"))}`}
-          error={data.counts.ok ? undefined : data.counts.error}
-        />
-        <Kpi
-          label="代理"
-          value={data.proxies.ok ? data.proxies.value.length : 0}
-          note={stats.badProxies.length > 0 ? `${stats.badProxies.length} 个异常` : "全部正常"}
-          tone={stats.badProxies.length > 0 ? "bad" : "good"}
-          error={data.proxies.ok ? undefined : data.proxies.error}
-        />
-        <Kpi
-          label="图片存储"
-          value={storage ? formatSize(storage.image_size_mb) : "—"}
-          note={storage ? `${formatNumber(storage.image_count)} 张 · 磁盘剩余 ${formatSize(storage.disk_free_mb)}` : ""}
-          error={data.storage.ok ? undefined : data.storage.error}
-        />
-      </div>
-
-      <div className="grid gap-3.5 lg:grid-cols-[1.35fr_1fr]">
-        <Panel
-          title="生图量"
-          action={
-            <div className="flex gap-3.5 text-xs text-ink-3">
-              <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-ink" />文生图</span>
-              <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-clay" />图生图</span>
-            </div>
-          }
-        >
-          {!data.counts.ok ? (
-            <LoadError label="生图统计" error={data.counts.error} />
-          ) : (
-            <div className="grid gap-3">
-              {PERIODS.map((period) => {
-                const generations = counts?.generations[period.key] ?? 0;
-                const edits = counts?.edits[period.key] ?? 0;
-                return (
-                  <div key={period.key} className="grid grid-cols-[56px_1fr_70px] items-center gap-3 text-xs text-ink-2">
-                    <span>{period.label}</span>
-                    <div className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
-                      <i className="h-full bg-ink" style={{ width: `${(generations / maxTotal) * 100}%` }} />
-                      <i className="h-full bg-clay" style={{ width: `${(edits / maxTotal) * 100}%` }} />
-                    </div>
-                    <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="需要处理">
-          {todos.length === 0 ? (
-            <div className="flex items-center gap-3 py-2 text-sm text-ink-2">
-              <i className="size-[7px] rounded-full bg-ok" />
-              一切正常
-            </div>
-          ) : (
-            <div>
-              {todos.map((todo) => (
-                <div key={todo.title} className="grid grid-cols-[8px_1fr_auto] items-center gap-3 border-t border-line py-2.5 text-sm first:border-t-0">
-                  <i className={cn("size-[7px] rounded-full", todo.tone === "bad" ? "bg-bad" : "bg-warn")} />
-                  <div className="min-w-0">
-                    <div className="text-ink">{todo.title}</div>
-                    <div className="truncate text-xs text-ink-3" title={todo.note}>{todo.note}</div>
-                  </div>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={todo.href}>{todo.action}</Link>
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-      </div>
-
-      <Panel
-        title="今天失败的调用"
-        action={
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/logs">全部日志 →</Link>
-          </Button>
-        }
-      >
-        {!data.logs.ok ? (
-          <LoadError label="调用日志" error={data.logs.error} />
-        ) : failures.length === 0 ? (
-          <div className="py-2 text-sm text-ink-3">今天还没有失败的调用。</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
-              <tbody>
-                {failures.map((item) => {
-                  const detail = (item.detail ?? {}) as { endpoint?: string; error?: string; account_email?: string };
-                  return (
-                    <tr key={item.id} className="border-t border-line first:border-t-0">
-                      <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap text-ink-2 shadow-[inset_2px_0_0_var(--bad)] pl-3">{String(item.time).slice(11)}</td>
-                      <td className="py-2.5 pr-4 whitespace-nowrap text-ink">{detail.endpoint || "—"}</td>
-                      <td className="py-2.5 pr-4 whitespace-nowrap text-ink-3">{detail.account_email || "—"}</td>
-                      <td className="max-w-[420px] truncate py-2.5 text-ink-3" title={detail.error}>{detail.error ? shortError(detail.error) : item.summary}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
-    </section>
+    <AccountsWorkspace
+      title="总览"
+      description={new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}
+      onReload={() => void reloadExtra()}
+      top={(ctx) => <OverviewTop ctx={ctx} extra={extra} extraLoaded={extraLoaded} reloadExtra={() => void reloadExtra()} />}
+      bottom={() => <TodayPanel extra={extra} extraLoaded={extraLoaded} />}
+    />
   );
 }
 
@@ -336,5 +368,5 @@ export default function HomePage() {
     };
   }, [router]);
 
-  return isAdmin ? <Overview /> : null;
+  return isAdmin ? <Overview /> : <SkeletonLines lines={6} className="pt-6" />;
 }

@@ -1,4 +1,6 @@
+import { isEditUploadCooled, type StatusFilter } from "./account-format.ts";
 import type { Account, ImageOutputCounts, ImageStorageStats, ProxyEntry, SystemLog } from "./api";
+import { ABNORMAL_PROXY_FILTER } from "./proxy-match.ts";
 
 /** 一块数据的加载结果：失败时不能拿空数组/0 冒充“没有问题”。 */
 export type Loaded<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -32,43 +34,57 @@ export function failedSources(sources: OverviewSources) {
   });
 }
 
-export type Todo = { tone: "bad" | "warn"; title: string; note: string; href: string; action: string };
+/** 「需要处理」的一项：filter 在总览里直接筛选下面的账号表；href 跳到别的页面；retry 重新加载失败的那块。 */
+export type Todo = {
+  tone: "bad" | "warn";
+  title: string;
+  note: string;
+  action: string;
+  filter?: { status?: StatusFilter; proxy?: string };
+  href?: string;
+  retry?: keyof OverviewSources;
+};
 
 const LOW_DISK_MB = 2048;
-
-function isEditCooled(account: Account, now: number) {
-  const until = account.edit_upload_blocked_until ? Date.parse(account.edit_upload_blocked_until) : NaN;
-  return Number.isFinite(until) && until > now;
-}
 
 export function formatSize(mb: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
 }
 
-/** 「需要处理」：加载失败的块排最前；只有全部加载成功且没有待办时才是空列表（显示「一切正常」）。 */
+/** 「需要处理」：加载失败的块排最前，可重试；只有全部加载成功且没有待办时才是空列表。 */
 export function buildTodos(sources: OverviewSources, now = Date.now()): Todo[] {
   const todos: Todo[] = failedSources(sources).map((failure) => ({
     tone: "bad",
     title: `${failure.label}加载失败`,
     note: failure.error,
-    href: failure.key === "logs" ? "/logs" : failure.key === "storage" ? "/image-manager" : "/accounts",
-    action: "查看",
+    action: "重试",
+    retry: failure.key,
   }));
   if (sources.proxies.ok) {
     const bad = sources.proxies.value.filter((proxy) => proxy.health.abnormal);
     if (bad.length > 0) {
       const firstError = bad.find((proxy) => proxy.health.last_error)?.health.last_error ?? "";
-      todos.push({ tone: "bad", title: `${bad.length} 个代理异常`, note: firstError || "连续请求失败", href: "/accounts", action: "查看代理" });
+      todos.push({
+        tone: "bad",
+        title: `${bad.length} 个代理异常`,
+        note: firstError || "连续请求失败",
+        action: "筛选账号",
+        filter: { proxy: ABNORMAL_PROXY_FILTER },
+      });
     }
   }
   if (sources.accounts.ok) {
     const abnormal = sources.accounts.value.filter((item) => item.status === "异常").length;
-    const cooled = sources.accounts.value.filter((item) => isEditCooled(item, now)).length;
-    if (abnormal > 0) todos.push({ tone: "bad", title: `${abnormal} 个账号异常`, note: "可在号池里尝试恢复", href: "/accounts", action: "查看" });
-    if (cooled > 0) todos.push({ tone: "warn", title: `${cooled} 个账号图生图冷却`, note: "冷却结束后自动恢复", href: "/accounts", action: "查看" });
+    const cooled = sources.accounts.value.filter((item) => isEditUploadCooled(item, now)).length;
+    if (abnormal > 0) {
+      todos.push({ tone: "bad", title: `${abnormal} 个账号异常`, note: "可选中后尝试恢复，或批量移除", action: "筛选", filter: { status: "异常" } });
+    }
+    if (cooled > 0) {
+      todos.push({ tone: "warn", title: `${cooled} 个账号图生图冷却`, note: "冷却结束后自动恢复", action: "筛选", filter: { status: "edit_cooldown" } });
+    }
   }
   if (sources.storage.ok && sources.storage.value.disk_free_mb < LOW_DISK_MB) {
-    todos.push({ tone: "warn", title: "磁盘空间不足", note: `剩余 ${formatSize(sources.storage.value.disk_free_mb)}`, href: "/image-manager", action: "去清理" });
+    todos.push({ tone: "warn", title: "磁盘空间不足", note: `剩余 ${formatSize(sources.storage.value.disk_free_mb)}`, action: "去清理", href: "/image-manager" });
   }
   return todos;
 }

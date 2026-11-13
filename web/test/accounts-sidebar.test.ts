@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const page = readFileSync(new URL("../src/app/accounts/page.tsx", import.meta.url), "utf8");
+const page = readFileSync(new URL("../src/app/accounts/components/account-filters.tsx", import.meta.url), "utf8");
 
 test("代理筛选列表限高 10 行并可滚动", () => {
   const list = page.match(/<div className="([^"]*)">\s*\{proxies\.map\(/);

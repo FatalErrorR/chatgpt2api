@@ -2,11 +2,18 @@ import type { Account, ProxyEntry } from "./api";
 
 type AccountProxy = Pick<Account, "proxy" | "proxy_key">;
 
-/** 代理筛选："all" 全部，"none" 未指定代理，其余为代理清单的 key（同一代理不同写法共用）。 */
-export function accountMatchesProxyFilter(account: AccountProxy, filter: string): boolean {
+/** 代理筛选的特殊值：账号所在代理被标记为异常。 */
+export const ABNORMAL_PROXY_FILTER = "abnormal";
+
+/**
+ * 代理筛选："all" 全部，"none" 未指定代理，"abnormal" 所在代理异常（需传 abnormalKeys），
+ * 其余为代理清单的 key（同一代理不同写法共用）。
+ */
+export function accountMatchesProxyFilter(account: AccountProxy, filter: string, abnormalKeys?: ReadonlySet<string>): boolean {
   const proxy = (account.proxy || "").trim();
   if (filter === "all") return true;
   if (filter === "none") return !proxy;
+  if (filter === ABNORMAL_PROXY_FILTER) return !!proxy && !!account.proxy_key && !!abnormalKeys?.has(account.proxy_key);
   return !!proxy && account.proxy_key === filter;
 }
 

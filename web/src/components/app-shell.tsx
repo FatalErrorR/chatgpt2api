@@ -13,7 +13,6 @@ import {
   MoreHorizontal,
   ScrollText,
   Settings,
-  Users,
 } from "lucide-react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -33,11 +32,10 @@ type NavItem = { href: string; label: string; icon: ComponentType<{ className?: 
 // 管理员导航：分组之间画分隔线
 const ADMIN_NAV: NavItem[][] = [
   [
-    { href: "/", label: "概览", icon: LayoutGrid },
+    { href: "/", label: "总览", icon: LayoutGrid },
     { href: "/image", label: "生图", icon: ImageIcon },
   ],
   [
-    { href: "/accounts", label: "号池", icon: Users },
     { href: "/image-manager", label: "图片", icon: Images },
     { href: "/logs", label: "日志", icon: ScrollText },
   ],
@@ -47,8 +45,8 @@ const ADMIN_NAV: NavItem[][] = [
   ],
 ];
 
-// 手机底栏放最常用的四个，其余进「更多」
-const MOBILE_TABS = ["/", "/image", "/accounts", "/image-manager"];
+// 手机底栏放最常用的四个，其余进「更多」（号池已并进总览）
+const MOBILE_TABS = ["/", "/image", "/image-manager", "/logs"];
 
 function buildThirdPartyHref(appUrl: string, baseUrl: string, apiKey: string) {
   const url = appUrl.trim();

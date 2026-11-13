@@ -37,9 +37,9 @@ test("没有写死 stone-950/900 底 + 白字的按钮（深色下会和页面�
 });
 
 test("号池窄屏下拉里有类型筛选", () => {
-  const page = readFileSync(join(SRC, "app/accounts/page.tsx"), "utf8");
-  const narrow = page.slice(page.indexOf("lg:hidden"));
-  assert.match(narrow.slice(0, 2000), /value=\{typeFilter\}[\s\S]*accountTypeOptions\.map/);
+  const filters = readFileSync(join(SRC, "app/accounts/components/account-filters.tsx"), "utf8");
+  const narrow = filters.slice(filters.indexOf("lg:hidden"));
+  assert.match(narrow.slice(0, 2000), /value=\{filters\.type\}[\s\S]*typeOptions\.map/);
 });
 
 test("批量操作条（bg-ink）上的按钮不写死浅色，深色下条是浅底", () => {
