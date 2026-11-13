@@ -77,7 +77,7 @@
 - 4.5 加载 / 空 / 出错用 `states.tsx`。4.7 版本更新对话框和 `badge.tsx` 已换成设计变量。
 - 4.6 `globals.css` 里 `.dark .bg-white` / `.dark .text-stone-*` 等 `!important` 兜底和顶部「第 4 批再逐页改」注释已删除。深色去阴影规则仍保留，并且只跳过 `shadow-[inset…]`。
 
-2026-11-13：概览和号池合并成「总览」（`/`）。上面是指标和「需要处理」，点了直接筛选下面的账号表；中间是号池；下面是可折叠的今日生图与失败调用。`/accounts` 跳回 `/`，导航只剩「总览」，手机底栏换成总览 / 生图 / 图片 / 日志。号池拆成 `app/accounts/components/accounts-workspace.tsx`（状态与操作，留 `top` / `bottom` 插槽）、`account-table.tsx`、`account-filters.tsx`、`account-edit-dialog.tsx`，显示与筛选规则在 `lib/account-format.ts`。
+2026-11-13：概览和号池合并成「总览」（`/`）。从上到下：指标、可折叠的今日生图、「需要处理」（点了直接筛选下面的账号表）、号池、可折叠的今天失败的调用；两块折叠状态分开记住。`/accounts` 跳回 `/`，导航只剩「总览」，手机底栏换成总览 / 生图 / 图片 / 日志。号池拆成 `app/accounts/components/accounts-workspace.tsx`（状态与操作，留 `top` / `bottom` 插槽）、`account-table.tsx`、`account-filters.tsx`、`account-edit-dialog.tsx`，显示与筛选规则在 `lib/account-format.ts`。
 
 共享部件，新页面直接用，不要再各写一份：
 

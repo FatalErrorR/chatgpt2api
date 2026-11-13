@@ -31,8 +31,10 @@ const PERIODS: Array<{ key: keyof ImageOutputCounts["generations"]; label: strin
   { key: "d30", label: "近 30 天" },
 ];
 
-// 下方「今日生图与失败调用」面板是否收起，按浏览器记住
-const TODAY_PANEL_KEY = "chatgpt2api-overview-today-collapsed";
+// 「今日生图」「今天失败的调用」两块各自是否收起，按浏览器记住
+const GENERATION_PANEL_KEY = "chatgpt2api-overview-generation-collapsed";
+const FAILED_PANEL_KEY = "chatgpt2api-overview-failed-collapsed";
+const FAILED_ROWS = 10;
 
 function formatNumber(value: number) {
   return value.toLocaleString("en-US");
@@ -197,6 +199,8 @@ function OverviewTop({ ctx, extra, extraLoaded, reloadExtra }: { ctx: AccountsWo
         />
       </div>
 
+      <GenerationPanel extra={extra} extraLoaded={extraLoaded} />
+
       {todos.length > 0 ? (
         <div className="flex flex-wrap gap-2" role="list" aria-label="需要处理">
           {todos.map((todo) => {
@@ -228,107 +232,138 @@ function OverviewTop({ ctx, extra, extraLoaded, reloadExtra }: { ctx: AccountsWo
   );
 }
 
-function TodayPanel({ extra, extraLoaded }: { extra: ExtraSources; extraLoaded: boolean }) {
+/** 可折叠的面板，收起状态按浏览器记住。 */
+function CollapsiblePanel({
+  storageKey,
+  title,
+  action,
+  children,
+}: {
+  storageKey: string;
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     try {
-      setCollapsed(localStorage.getItem(TODAY_PANEL_KEY) === "1");
+      setCollapsed(localStorage.getItem(storageKey) === "1");
     } catch {
       /* 读不到就默认展开 */
     }
-  }, []);
+  }, [storageKey]);
   const toggle = () => {
     setCollapsed((value) => {
       try {
-        localStorage.setItem(TODAY_PANEL_KEY, value ? "0" : "1");
+        localStorage.setItem(storageKey, value ? "0" : "1");
       } catch {
         /* 记不住也没关系 */
       }
       return !value;
     });
   };
+  return (
+    <section className="rounded-[10px] border border-line bg-surface">
+      <div className="flex items-center gap-2 pr-3">
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-2 px-[18px] py-3 text-left" onClick={toggle} aria-expanded={!collapsed}>
+          <ChevronDown className={cn("size-4 shrink-0 text-ink-3 transition-transform", collapsed && "-rotate-90")} />
+          <h2 className="text-[17px] font-medium text-ink">{title}</h2>
+        </button>
+        {action}
+      </div>
+      {collapsed ? null : <div className="border-t border-line px-[18px] py-4">{children}</div>}
+    </section>
+  );
+}
 
+/** 今日生图：今日 / 昨日 / 近 7 天 / 近 30 天，文生图和图生图分色。 */
+function GenerationPanel({ extra, extraLoaded }: { extra: ExtraSources; extraLoaded: boolean }) {
   const counts = extra.counts.ok ? extra.counts.value : null;
   const total = (key: keyof ImageOutputCounts["generations"]) => (counts ? counts.generations[key] + counts.edits[key] : 0);
   const maxTotal = Math.max(1, ...PERIODS.map((period) => total(period.key)));
-  const failures: SystemLog[] = extra.logs.ok
-    ? extra.logs.value.filter((item) => (item.detail as { status?: string } | undefined)?.status === "failed").slice(0, 5)
-    : [];
-
   return (
-    <section className="rounded-[10px] border border-line bg-surface">
-      <button type="button" className="flex w-full items-center justify-between px-[18px] py-3 text-left" onClick={toggle} aria-expanded={!collapsed}>
-        <h2 className="text-[17px] font-medium text-ink">今日生图与失败调用</h2>
-        <ChevronDown className={cn("size-4 text-ink-3 transition-transform", collapsed && "-rotate-90")} />
-      </button>
-      {collapsed ? null : !extraLoaded ? (
-        <SkeletonLines lines={4} className="px-[18px] pb-4" />
+    <CollapsiblePanel
+      storageKey={GENERATION_PANEL_KEY}
+      title="今日生图"
+      action={
+        <div className="flex gap-3.5 text-xs text-ink-3">
+          <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-ink" />文生图</span>
+          <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-clay" />图生图</span>
+        </div>
+      }
+    >
+      {!extraLoaded ? (
+        <SkeletonLines lines={2} />
+      ) : !extra.counts.ok ? (
+        <div className="text-[13px] text-bad">生图统计加载失败：{extra.counts.error}</div>
       ) : (
-        <div className="grid gap-6 border-t border-line px-[18px] py-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-[13px] font-medium text-ink-2">生图量</h3>
-              <div className="flex gap-3.5 text-xs text-ink-3">
-                <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-ink" />文生图</span>
-                <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-clay" />图生图</span>
+        <div className="grid gap-x-10 gap-y-3 lg:grid-cols-2">
+          {PERIODS.map((period) => {
+            const generations = counts?.generations[period.key] ?? 0;
+            const edits = counts?.edits[period.key] ?? 0;
+            return (
+              <div key={period.key} className="grid grid-cols-[56px_1fr_60px] items-center gap-3 text-xs text-ink-2">
+                <span>{period.label}</span>
+                <div className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
+                  <i className="h-full bg-ink" style={{ width: `${(generations / maxTotal) * 100}%` }} />
+                  <i className="h-full bg-clay" style={{ width: `${(edits / maxTotal) * 100}%` }} />
+                </div>
+                <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
               </div>
-            </div>
-            {!extra.counts.ok ? (
-              <div className="text-[13px] text-bad">生图统计加载失败：{extra.counts.error}</div>
-            ) : (
-              <div className="grid gap-3">
-                {PERIODS.map((period) => {
-                  const generations = counts?.generations[period.key] ?? 0;
-                  const edits = counts?.edits[period.key] ?? 0;
-                  return (
-                    <div key={period.key} className="grid grid-cols-[56px_1fr_60px] items-center gap-3 text-xs text-ink-2">
-                      <span>{period.label}</span>
-                      <div className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
-                        <i className="h-full bg-ink" style={{ width: `${(generations / maxTotal) * 100}%` }} />
-                        <i className="h-full bg-clay" style={{ width: `${(edits / maxTotal) * 100}%` }} />
-                      </div>
-                      <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div className="min-w-0">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[13px] font-medium text-ink-2">今天失败的调用</h3>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/logs">全部日志 →</Link>
-              </Button>
-            </div>
-            {!extra.logs.ok ? (
-              <div className="text-[13px] text-bad">调用日志加载失败：{extra.logs.error}</div>
-            ) : failures.length === 0 ? (
-              <div className="py-1 text-[13px] text-ink-3">今天还没有失败的调用。</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[13px]">
-                  <tbody>
-                    {failures.map((item) => {
-                      const detail = (item.detail ?? {}) as { endpoint?: string; error?: string; account_email?: string };
-                      return (
-                        <tr key={item.id} className="border-t border-line first:border-t-0">
-                          <td className="py-2 pr-3 pl-3 font-mono text-xs whitespace-nowrap text-ink-2 shadow-[inset_2px_0_0_var(--bad)]">{String(item.time).slice(11)}</td>
-                          <td className="py-2 pr-3 whitespace-nowrap text-ink">{detail.endpoint || "—"}</td>
-                          <td className="max-w-[320px] truncate py-2 text-ink-3" title={detail.error}>
-                            {detail.error ? shortError(detail.error) : item.summary}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+            );
+          })}
         </div>
       )}
-    </section>
+    </CollapsiblePanel>
+  );
+}
+
+/** 今天失败的调用：单独放在最下面，最近 FAILED_ROWS 条。 */
+function FailedCallsPanel({ extra, extraLoaded }: { extra: ExtraSources; extraLoaded: boolean }) {
+  const failed: SystemLog[] = extra.logs.ok
+    ? extra.logs.value.filter((item) => (item.detail as { status?: string } | undefined)?.status === "failed")
+    : [];
+  return (
+    <CollapsiblePanel
+      storageKey={FAILED_PANEL_KEY}
+      title={extra.logs.ok && extraLoaded ? `今天失败的调用（${failed.length}）` : "今天失败的调用"}
+      action={
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/logs">全部日志 →</Link>
+        </Button>
+      }
+    >
+      {!extraLoaded ? (
+        <SkeletonLines lines={3} />
+      ) : !extra.logs.ok ? (
+        <div className="text-[13px] text-bad">调用日志加载失败：{extra.logs.error}</div>
+      ) : failed.length === 0 ? (
+        <div className="text-[13px] text-ink-3">今天还没有失败的调用。</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[13px]">
+            <tbody>
+              {failed.slice(0, FAILED_ROWS).map((item) => {
+                const detail = (item.detail ?? {}) as { endpoint?: string; error?: string; account_email?: string; model?: string };
+                return (
+                  <tr key={item.id} className="border-t border-line first:border-t-0">
+                    <td className="py-2 pr-4 pl-3 font-mono text-xs whitespace-nowrap text-ink-2 shadow-[inset_2px_0_0_var(--bad)]">{String(item.time).slice(11)}</td>
+                    <td className="py-2 pr-4 whitespace-nowrap text-ink">{detail.endpoint || "—"}</td>
+                    <td className="hidden max-w-[240px] truncate py-2 pr-4 text-ink-3 md:table-cell" title={detail.account_email}>{detail.account_email || "—"}</td>
+                    <td className="max-w-[420px] truncate py-2 text-ink-3" title={detail.error}>
+                      {detail.error ? shortError(detail.error) : item.summary}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {failed.length > FAILED_ROWS ? (
+            <div className="pt-2 text-xs text-ink-3">另外还有 {failed.length - FAILED_ROWS} 条，在日志里查看。</div>
+          ) : null}
+        </div>
+      )}
+    </CollapsiblePanel>
   );
 }
 
@@ -340,7 +375,7 @@ function Overview() {
       description={new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}
       onReload={() => void reloadExtra()}
       top={(ctx) => <OverviewTop ctx={ctx} extra={extra} extraLoaded={extraLoaded} reloadExtra={() => void reloadExtra()} />}
-      bottom={() => <TodayPanel extra={extra} extraLoaded={extraLoaded} />}
+      bottom={() => <FailedCallsPanel extra={extra} extraLoaded={extraLoaded} />}
     />
   );
 }
