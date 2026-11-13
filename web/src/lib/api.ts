@@ -486,9 +486,11 @@ export async function fetchProtocolLoginProgress(progressId: string) {
   return httpRequest<ProtocolLoginProgress>(`/api/accounts/protocol-login/progress/${progressId}`);
 }
 
+/** 今日 / 昨日 / 近 N 天 / 全部（有记录以来）成功出图张数，按北京时间。 */
+export type ImageCountPeriod = "today" | "yesterday" | "d7" | "d14" | "d15" | "d30" | "all";
 export type ImageOutputCounts = {
-  edits: Record<"today" | "yesterday" | "d7" | "d14" | "d30", number>;
-  generations: Record<"today" | "yesterday" | "d7" | "d14" | "d30", number>;
+  edits: Record<ImageCountPeriod, number>;
+  generations: Record<ImageCountPeriod, number>;
 };
 
 export async function fetchImageOutputCounts() {

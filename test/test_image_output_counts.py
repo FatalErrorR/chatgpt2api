@@ -21,6 +21,8 @@ class ImageOutputCountsTest(unittest.TestCase):
             _call(stamp(datetime(2026, 9, 23, 1, 0, tzinfo=CST)), "/v1/images/edits", ["a", "b"]),
             _call(stamp(datetime(2026, 9, 22, 23, 0, tzinfo=CST)), "/v1/images/generations", ["c"]),
             _call(stamp(datetime(2026, 9, 10, 12, 0, tzinfo=CST)), "/v1/images/edits", ["d"]),
+            # 14 天前：在近 15 天里，不在近 14 天里
+            _call(stamp(datetime(2026, 9, 9, 12, 0, tzinfo=CST)), "/v1/images/edits", ["e"]),
             _call(stamp(datetime(2026, 8, 1, 12, 0, tzinfo=CST)), "/v1/images/edits", ["old"]),
             _call(stamp(datetime(2026, 9, 23, 2, 0, tzinfo=CST)), "/v1/images/edits", ["x"], status="failed"),
             _call(stamp(datetime(2026, 9, 23, 3, 0, tzinfo=CST)), "/v1/images/generations", []),
@@ -30,8 +32,9 @@ class ImageOutputCountsTest(unittest.TestCase):
             path = Path(directory) / "logs.jsonl"
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
             counts = LogService(path).image_output_counts(now)
-            self.assertEqual(counts["edits"], {"today": 2, "yesterday": 0, "d7": 2, "d14": 3, "d30": 3})
-            self.assertEqual(counts["generations"], {"today": 0, "yesterday": 1, "d7": 1, "d14": 1, "d30": 1})
+            # 8 月那条只在「全部」里
+            self.assertEqual(counts["edits"], {"today": 2, "yesterday": 0, "d7": 2, "d14": 3, "d15": 4, "d30": 4, "all": 5})
+            self.assertEqual(counts["generations"], {"today": 0, "yesterday": 1, "d7": 1, "d14": 1, "d15": 1, "d30": 1, "all": 1})
             self.assertTrue((path.parent / "image_output_counts.json").exists())
             self.assertEqual(LogService(path).image_output_counts(now), counts)
 

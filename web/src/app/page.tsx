@@ -11,6 +11,7 @@ import {
   fetchImageOutputCounts,
   fetchImageStorage,
   fetchSystemLogs,
+  type ImageCountPeriod,
   type ImageOutputCounts,
   type ImageStorageStats,
   type SystemLog,
@@ -24,11 +25,18 @@ import { getDefaultRouteForRole } from "@/store/auth";
 
 import { AccountsWorkspace, type AccountsWorkspaceContext } from "./accounts/components/accounts-workspace";
 
-const PERIODS: Array<{ key: keyof ImageOutputCounts["generations"]; label: string }> = [
-  { key: "today", label: "今日" },
-  { key: "yesterday", label: "昨日" },
-  { key: "d7", label: "近 7 天" },
-  { key: "d30", label: "近 30 天" },
+// 今日生图：左栏短期，右栏长期；每栏按本栏最大值画条，免得「全部」把今日压成一条线
+const PERIOD_COLUMNS: Array<Array<{ key: ImageCountPeriod; label: string }>> = [
+  [
+    { key: "today", label: "今日" },
+    { key: "yesterday", label: "昨日" },
+    { key: "d7", label: "近 7 天" },
+  ],
+  [
+    { key: "d15", label: "近 15 天" },
+    { key: "d30", label: "近 30 天" },
+    { key: "all", label: "全部" },
+  ],
 ];
 
 // 「今日生图」「今天失败的调用」两块各自是否收起，按浏览器记住
@@ -279,8 +287,7 @@ function CollapsiblePanel({
 /** 今日生图：今日 / 昨日 / 近 7 天 / 近 30 天，文生图和图生图分色。 */
 function GenerationPanel({ extra, extraLoaded }: { extra: ExtraSources; extraLoaded: boolean }) {
   const counts = extra.counts.ok ? extra.counts.value : null;
-  const total = (key: keyof ImageOutputCounts["generations"]) => (counts ? counts.generations[key] + counts.edits[key] : 0);
-  const maxTotal = Math.max(1, ...PERIODS.map((period) => total(period.key)));
+  const total = (key: ImageCountPeriod) => (counts ? (counts.generations[key] ?? 0) + (counts.edits[key] ?? 0) : 0);
   return (
     <CollapsiblePanel
       storageKey={GENERATION_PANEL_KEY}
@@ -293,22 +300,32 @@ function GenerationPanel({ extra, extraLoaded }: { extra: ExtraSources; extraLoa
       }
     >
       {!extraLoaded ? (
-        <SkeletonLines lines={2} />
+        <SkeletonLines lines={3} />
       ) : !extra.counts.ok ? (
         <div className="text-[13px] text-bad">生图统计加载失败：{extra.counts.error}</div>
       ) : (
         <div className="grid gap-x-10 gap-y-3 lg:grid-cols-2">
-          {PERIODS.map((period) => {
-            const generations = counts?.generations[period.key] ?? 0;
-            const edits = counts?.edits[period.key] ?? 0;
+          {PERIOD_COLUMNS.map((column, columnIndex) => {
+            const columnMax = Math.max(1, ...column.map((period) => total(period.key)));
             return (
-              <div key={period.key} className="grid grid-cols-[56px_1fr_60px] items-center gap-3 text-xs text-ink-2">
-                <span>{period.label}</span>
-                <div className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
-                  <i className="h-full bg-ink" style={{ width: `${(generations / maxTotal) * 100}%` }} />
-                  <i className="h-full bg-clay" style={{ width: `${(edits / maxTotal) * 100}%` }} />
-                </div>
-                <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
+              <div key={columnIndex} className="grid content-start gap-3">
+                {column.map((period) => {
+                  const generations = counts?.generations[period.key] ?? 0;
+                  const edits = counts?.edits[period.key] ?? 0;
+                  return (
+                    <div key={period.key} className="grid grid-cols-[56px_1fr_72px] items-center gap-3 text-xs text-ink-2">
+                      <span>{period.label}</span>
+                      <div
+                        className="flex h-2.5 overflow-hidden rounded-full bg-sunken"
+                        title={`文生图 ${formatNumber(generations)} · 图生图 ${formatNumber(edits)}`}
+                      >
+                        <i className="h-full bg-ink" style={{ width: `${(generations / columnMax) * 100}%` }} />
+                        <i className="h-full bg-clay" style={{ width: `${(edits / columnMax) * 100}%` }} />
+                      </div>
+                      <span className="text-right font-mono tabular-nums">{formatNumber(generations + edits)}</span>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}

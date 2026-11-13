@@ -7,7 +7,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
@@ -133,7 +133,10 @@ class LogService:
             "yesterday": (today - timedelta(days=1), today - timedelta(days=1)),
             "d7": (today - timedelta(days=6), today),
             "d14": (today - timedelta(days=13), today),
+            "d15": (today - timedelta(days=14), today),
             "d30": (today - timedelta(days=29), today),
+            # 每日合计从不删除，「全部」就是有记录以来的总数
+            "all": (date.min, today),
         }
         counts = {kind: {key: 0 for key in windows} for kind in ("edits", "generations")}
         for day_text, kinds in days.items():
