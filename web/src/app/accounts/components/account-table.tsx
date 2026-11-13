@@ -74,7 +74,9 @@ export function AccountTable({
     );
 
   return (
-    <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
+    // 宽屏：卡片撑满父容器（与左侧筛选栏等高），表头和分页固定，中间行在卡片内滚动
+    <div className="flex flex-col overflow-hidden rounded-[10px] border border-line bg-surface lg:h-full lg:min-h-0">
+      <div className="thin-scrollbar min-h-0 overflow-x-auto lg:flex-1 lg:overflow-y-auto">
       {isLoading && totalAccounts === 0 ? (
         <div className="space-y-3 p-5" aria-busy="true">
           {[80, 95, 60, 88, 72].map((width) => (
@@ -121,9 +123,10 @@ export function AccountTable({
               );
             })}
           </div>
-          <div className="hidden overflow-x-auto md:block">
+          <div className="hidden md:block">
             <table className="w-full min-w-[760px] text-left text-[13px]">
-              <thead className="border-b border-line text-xs text-ink-3">
+              {/* 表头吸顶：用 inset 阴影画底线，滚动时线跟着表头走 */}
+              <thead className="text-xs text-ink-3 [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-surface [&_th]:shadow-[inset_0_-1px_0_var(--line)]">
                 <tr>
                   <th className="w-10 py-2.5 pr-1 pl-3.5 font-normal">
                     <Checkbox aria-label="选择本页" checked={allCurrentSelected} onCheckedChange={(checked) => togglePage(Boolean(checked))} />
@@ -237,7 +240,8 @@ export function AccountTable({
           ) : null}
         </>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-3.5 py-2.5 text-xs text-ink-3">
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line px-3.5 py-2.5 text-xs text-ink-3">
         <span>{filteredCount === totalAccounts ? `全部 ${totalAccounts} 个` : `筛选后 ${filteredCount} 个，共 ${totalAccounts} 个`}</span>
         <div className="flex items-center gap-1">
           <button

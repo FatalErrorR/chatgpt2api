@@ -96,7 +96,10 @@ export function AccountsWorkspace({
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<AccountFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState("10");
+  // 宽屏账号表和左侧筛选栏等高、在框内滚动，一页多放一些；手机没有框内滚动，保持 10 条
+  const [pageSize, setPageSize] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches ? "50" : "10",
+  );
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -506,8 +509,10 @@ export function AccountsWorkspace({
       <div ref={tableRef} className="grid scroll-mt-4 gap-[22px] lg:grid-cols-[210px_minmax(0,1fr)]">
         <AccountFilterSidebar filters={filters} counts={counts} total={accounts.length} proxies={proxies} onChange={changeFilters} />
 
-        <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
+        {/* 宽屏：右栏高度跟左侧筛选栏走（至少 560px），账号表占满剩余高度、在框内滚动 */}
+        <div className="min-w-0 lg:relative lg:min-h-[560px]">
+        <div className="space-y-3 lg:absolute lg:inset-0 lg:flex lg:flex-col lg:gap-3 lg:space-y-0">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <div className="relative min-w-[200px] flex-1">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
               <Input
@@ -539,7 +544,7 @@ export function AccountsWorkspace({
           </div>
 
           {selectedIds.length > 0 ? (
-            <div className={batchBarClass}>
+            <div className={cn(batchBarClass, "shrink-0")}>
               <span>已选 {selectedIds.length} 个账号</span>
               <span className="flex-1" />
               {(
@@ -577,7 +582,7 @@ export function AccountsWorkspace({
           ) : null}
 
           {accountsError ? (
-            <div className="flex flex-wrap items-center gap-3 rounded-[7px] bg-bad-soft px-3 py-2 text-[13px] text-bad">
+            <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-[7px] bg-bad-soft px-3 py-2 text-[13px] text-bad">
               <span className="min-w-0 flex-1">
                 加载账号失败：{accountsError}
                 {accounts.length > 0 ? "（下面是上次的结果）" : ""}
@@ -589,6 +594,7 @@ export function AccountsWorkspace({
             </div>
           ) : null}
 
+          <div className="lg:min-h-0 lg:flex-1">
           <AccountTable
             rows={currentRows}
             isLoading={isLoading}
@@ -608,6 +614,8 @@ export function AccountsWorkspace({
               disabled: isDeleting,
             }}
           />
+          </div>
+        </div>
         </div>
       </div>
 
