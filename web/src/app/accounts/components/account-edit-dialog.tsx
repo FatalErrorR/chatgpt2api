@@ -119,10 +119,10 @@ export function AccountEditDialog({
               <SelectTrigger className="h-[38px] w-full min-w-0 rounded-[7px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NO_PROXY}>不指定，走全局代理</SelectItem>
-                {proxies.map((proxy) => (
+                {proxies.filter((proxy) => !proxy.disabled || proxy.key === account?.proxy_key).map((proxy) => (
                   <SelectItem key={proxy.key} value={proxy.key}>
                     {proxyLabel(proxy)} · {proxy.account_count} 个账号
-                    {proxy.health.abnormal ? "（异常）" : ""}
+                    {proxy.disabled ? "（已停用）" : proxy.health.abnormal ? "（异常）" : ""}
                   </SelectItem>
                 ))}
                 <SelectItem value={NEW_PROXY}>使用新代理</SelectItem>

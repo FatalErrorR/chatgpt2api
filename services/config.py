@@ -419,6 +419,14 @@ class ConfigStore:
             return 120
 
     @property
+    def proxy_max_accounts(self) -> int:
+        """每个代理最多挂几个账号：导入平均分配、清理失败代理、重新分配代理都遵守。"""
+        try:
+            return min(1000, max(1, int(self.data.get("proxy_max_accounts", 4))))
+        except (TypeError, ValueError):
+            return 4
+
+    @property
     def image_failover_enabled(self) -> bool:
         """出图等待超过 image_failover_secs 仍没有图片时，放弃当前账号换号重新生成。"""
         return _normalize_bool(self.data.get("image_failover_enabled"), False)
@@ -666,6 +674,7 @@ class ConfigStore:
         data["image_poll_timeout_secs"] = self.image_poll_timeout_secs
         data["image_poll_interval_secs"] = self.image_poll_interval_secs
         data["image_failover_enabled"] = self.image_failover_enabled
+        data["proxy_max_accounts"] = self.proxy_max_accounts
         data["image_failover_secs"] = self.image_failover_secs
         data["image_poll_initial_wait_secs"] = self.image_poll_initial_wait_secs
         data["image_account_concurrency"] = self.image_account_concurrency

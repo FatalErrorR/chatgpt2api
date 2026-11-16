@@ -178,6 +178,8 @@ export type SettingsConfig = {
   image_failover_enabled?: boolean;
   /** 换号前每个账号最多等多少秒（15–600） */
   image_failover_secs?: number | string;
+  /** 每个代理最多挂几个账号：导入平均分配、停用迁移、重新分配都遵守 */
+  proxy_max_accounts?: number | string;
   image_account_concurrency?: number | string;
   image_parallel_generation?: boolean;
   image_settle_enabled?: boolean;
@@ -393,9 +395,60 @@ export type ProxyEntry = {
   masked_url: string;
   account_count: number;
   health: ProxyHealth;
+  /** 已停用：不再参与任何分配；停用前账号已迁走 */
+  disabled: boolean;
 };
 
 type ProxyListResponse = { items: ProxyEntry[] };
+
+/** 账号迁移方案：每个账号从哪个代理到哪个代理；error / shortfall 表示做不了（名额不足、没有可用代理）。 */
+export type ProxyMovePlan = {
+  moves: { email: string; from: string; to: string }[];
+  unchanged: number;
+  targets: { key: string; label: string; before: number; after: number }[];
+  max_per_proxy: number;
+  error?: string;
+  shortfall?: number;
+};
+
+export type ProxyRetirePlan = ProxyMovePlan & {
+  retiring: { key: string; label: string; account_count: number }[];
+};
+
+export type ProxyCheckResult = ProxyListResponse & {
+  tested: number;
+  passed: number;
+  failures: { key: string; label: string; status: number; error: string; account_count: number }[];
+  /** 大面积失败（超过一半，或都是 402）：多半是代理商的问题，不给停用方案 */
+  outage: boolean;
+  plan: ProxyRetirePlan | null;
+  results: Record<string, ProxyTestResult>;
+};
+
+/** 检测所有启用的代理一轮；失败的附上「停用并迁移账号」的方案（不执行）。 */
+export async function checkProxies() {
+  return httpRequest<ProxyCheckResult>("/api/proxies/check", { method: "POST", body: {} });
+}
+
+/** 把代理上的账号迁到其它可用代理，再停用代理；dryRun 只返回方案。urls 可以是地址或 key。 */
+export async function retireProxies(urls: string[], dryRun: boolean) {
+  return httpRequest<ProxyListResponse & ProxyRetirePlan & { moved?: number; disabled?: number }>("/api/proxies/retire", {
+    method: "POST",
+    body: { urls, dry_run: dryRun },
+  });
+}
+
+export async function enableProxies(urls: string[]) {
+  return httpRequest<ProxyListResponse & { enabled: number }>("/api/proxies/enable", { method: "POST", body: { urls } });
+}
+
+/** 把选中账号按平均分配规则重新分到 proxies（为空 = 所有可用代理）；dryRun 只返回方案。 */
+export async function reassignAccountProxies(tokens: string[], proxies: string[], dryRun: boolean) {
+  return httpRequest<ProxyMovePlan & { moved?: number; items?: Account[] }>("/api/accounts/reassign-proxy", {
+    method: "POST",
+    body: { tokens, proxies, dry_run: dryRun },
+  });
+}
 
 export async function fetchProxies() {
   return httpRequest<ProxyListResponse>("/api/proxies");

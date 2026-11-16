@@ -16,6 +16,7 @@ import api.proxies as proxies_module
 import services.openai_backend_api as backend_module
 import services.protocol_login_service as protocol_login_module
 from services.account_service import AccountService
+from services.config import ConfigStore
 from services.openai_backend_api import OpenAIBackendAPI
 from services.protocol_login_service import ProtocolLoginService
 from services.proxy_list_service import FAILURE_THRESHOLD, ProxyList, mask_proxy_url, proxy_key
@@ -165,6 +166,8 @@ class ImportDistributionTests(unittest.TestCase):
         patchers += [mock.patch.object(module, "require_admin", lambda *_: {"role": "admin"})
                      for module in (accounts_module, proxies_module)]
         patchers.append(mock.patch.object(self.accounts, "refresh_accounts", self.fake_refresh))
+        # 这组测试一个代理挂十几个账号，只验证分配和预留，不受「单代理最多账号数」影响
+        patchers.append(mock.patch.object(ConfigStore, "proxy_max_accounts", new_callable=mock.PropertyMock, return_value=1000))
         for patcher in patchers:
             patcher.start()
             self.addCleanup(patcher.stop)

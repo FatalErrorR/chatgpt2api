@@ -169,6 +169,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
   return {
     ...config,
     refresh_account_interval_minute: Number(config.refresh_account_interval_minute || 5),
+    proxy_max_accounts: Number(config.proxy_max_accounts || 4),
     image_retention_days: Number(config.image_retention_days || 30),
     image_poll_timeout_secs: Number(config.image_poll_timeout_secs || 120),
     image_failover_enabled: Boolean(config.image_failover_enabled),
@@ -304,6 +305,7 @@ type SettingsStore = {
   removeBackup: (key: string) => Promise<void>;
   testBackup: () => Promise<void>;
   setRefreshAccountIntervalMinute: (value: string) => void;
+  setProxyMaxAccounts: (value: string) => void;
   setImageRetentionDays: (value: string) => void;
   setImagePollTimeoutSecs: (value: string) => void;
   setImageFailoverEnabled: (value: boolean) => void;
@@ -446,6 +448,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const data = await updateSettingsConfig({
         ...config,
         refresh_account_interval_minute: Math.max(1, Number(config.refresh_account_interval_minute) || 1),
+        proxy_max_accounts: Math.min(1000, Math.max(1, Number(config.proxy_max_accounts) || 4)),
         image_retention_days: Math.max(1, Number(config.image_retention_days) || 30),
         image_poll_timeout_secs: Math.max(1, Number(config.image_poll_timeout_secs) || 120),
         image_failover_enabled: Boolean(config.image_failover_enabled),
@@ -555,6 +558,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         },
       };
     });
+  },
+
+  setProxyMaxAccounts: (value) => {
+    set((state) => (state.config ? { config: { ...state.config, proxy_max_accounts: value } } : {}));
   },
 
   setImageRetentionDays: (value) => {

@@ -26,10 +26,12 @@ from api.support import (
     sanitize_sub2api_servers,
 )
 from services.account_service import account_service
+from services.config import config
 from services.cpa_service import cpa_config, cpa_import_service, list_remote_files
 from services.oauth_login_service import OAuthLoginError, oauth_login_service
 from services.protocol_login_service import protocol_login_service
 from services.proxy_list_service import proxy_list
+from services.proxy_reassign_service import reassign_accounts
 from services.sub2api_service import (
     list_remote_accounts as sub2api_list_remote_accounts,
     list_remote_groups as sub2api_list_remote_groups,
@@ -55,6 +57,14 @@ class AccountCreateRequest(BaseModel):
     proxy: str = ""
     # 非空时把新账号平均分到这些代理，忽略 proxy；已存在的账号保留原代理
     distribute_proxies: list[str] = Field(default_factory=list)
+
+
+class AccountReassignProxyRequest(BaseModel):
+    tokens: list[str] = Field(default_factory=list)
+    # 目标代理（地址或 key）；为空表示所有可用代理（未停用、未异常）
+    proxies: list[str] = Field(default_factory=list)
+    # True 只返回方案，不改任何东西
+    dry_run: bool = True
 
 
 class AccountDeleteRequest(BaseModel):
@@ -147,7 +157,9 @@ def _import_proxies(tokens: list[str], proxy: str, distribute_proxies: list[str]
         return
     new_tokens = [token for token in tokens if account_service.get_account(token) is None]
     try:
-        assigned = proxy_list.reserve(distribute_proxies, len(new_tokens), account_service.proxy_account_counts)
+        assigned = proxy_list.reserve(
+            distribute_proxies, len(new_tokens), account_service.proxy_account_counts, config.proxy_max_accounts
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
     try:
@@ -289,6 +301,18 @@ def create_router() -> APIRouter:
             "errors": refresh_result.get("errors", []),
             "items": refresh_result.get("items", result.get("items", [])),
         }
+
+    @router.post("/api/accounts/reassign-proxy")
+    async def reassign_proxy(body: AccountReassignProxyRequest, authorization: str | None = Header(default=None)):
+        """把选中账号按平均分配规则重新分到目标代理；dry_run 只返回方案。"""
+        require_admin(authorization)
+        try:
+            result = await run_in_threadpool(reassign_accounts, body.tokens, body.proxies, body.dry_run)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        if body.dry_run:
+            return result
+        return {**result, "items": await run_in_threadpool(account_service.list_accounts)}
 
     @router.delete("/api/accounts")
     async def delete_accounts(body: AccountDeleteRequest, authorization: str | None = Header(default=None)):

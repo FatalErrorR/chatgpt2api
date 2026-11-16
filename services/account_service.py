@@ -1110,6 +1110,24 @@ class AccountService:
                     counts[proxy] = counts.get(proxy, 0) + 1
         return counts
 
+    def set_account_proxies(self, proxies_by_token: dict[str, str]) -> list[str]:
+        """一次改多个账号的代理（一次落盘），返回真正改动了的账号 token。"""
+        changed: list[str] = []
+        with self._lock:
+            for token, proxy in proxies_by_token.items():
+                token = self._resolve_access_token_locked(token)
+                account = self._accounts.get(token)
+                if account is None or str(account.get("proxy") or "").strip() == proxy.strip():
+                    continue
+                if proxy.strip():
+                    account["proxy"] = proxy.strip()
+                else:
+                    account.pop("proxy", None)
+                changed.append(token)
+            if changed:
+                self._save_accounts()
+        return changed
+
     def same_proxy_tokens(self, access_token: str) -> set[str]:
         """与该号走同一个单独配置的代理（同一出口 IP）的账号；没配代理时返回空集。"""
         with self._lock:

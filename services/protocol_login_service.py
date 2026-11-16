@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from services.account_service import account_service
+from services.config import config
 from services.proxy_list_service import proxy_list
 from utils.helper import anonymize_token
 from utils.totp import normalize_totp_secret
@@ -173,7 +174,9 @@ class ProtocolLoginService:
             for account in account_service.list_accounts()
         }
         new_entries = [entry for entry in entries if entry["email"].strip().lower() not in existing]
-        assigned = proxy_list.reserve(distribute_proxies, len(new_entries), account_service.proxy_account_counts)
+        assigned = proxy_list.reserve(
+            distribute_proxies, len(new_entries), account_service.proxy_account_counts, config.proxy_max_accounts
+        )
         for entry, url in zip(new_entries, assigned):
             entry["proxy"] = url
             entry["reserved"] = True

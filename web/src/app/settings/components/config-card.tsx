@@ -26,6 +26,7 @@ export function ConfigCard() {
   const loadConfig = useSettingsStore((state) => state.loadConfig);
   const isSavingConfig = useSettingsStore((state) => state.isSavingConfig);
   const setRefreshAccountIntervalMinute = useSettingsStore((state) => state.setRefreshAccountIntervalMinute);
+  const setProxyMaxAccounts = useSettingsStore((state) => state.setProxyMaxAccounts);
   const setImageRetentionDays = useSettingsStore((state) => state.setImageRetentionDays);
   const setImagePollTimeoutSecs = useSettingsStore((state) => state.setImagePollTimeoutSecs);
   const setImageFailoverEnabled = useSettingsStore((state) => state.setImageFailoverEnabled);
@@ -107,6 +108,16 @@ export function ConfigCard() {
              
             />
             <p className="text-xs text-ink-3">单位分钟，控制账号自动刷新频率。</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-ink-2">单代理最多账号数</label>
+            <Input
+              inputMode="numeric"
+              value={String(config?.proxy_max_accounts ?? "")}
+              onChange={(event) => setProxyMaxAccounts(event.target.value)}
+              placeholder="4"
+            />
+            <p className="text-xs text-ink-3">每个代理最多挂几个账号。导入时平均分配、停用失败代理迁移账号、重新分配代理都按这个上限，名额不够会提示先添加代理。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-ink-2">全局代理</label>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Download, Image as ImageIcon, LoaderCircle, LogIn, RefreshCw, Search, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { Download, Globe, Image as ImageIcon, LoaderCircle, LogIn, RefreshCw, Search, Shuffle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -41,7 +42,7 @@ import { AccountEditDialog } from "./account-edit-dialog";
 import { AccountFilterSelects, AccountFilterSidebar, type AccountFilters } from "./account-filters";
 import { AccountImportDialog } from "./account-import-dialog";
 import { AccountTable } from "./account-table";
-import { ProxyManagerDialog } from "./proxy-manager-dialog";
+import { AccountReassignProxyDialog } from "./account-reassign-proxy-dialog";
 
 export type AccountSummary = {
   total: number;
@@ -101,6 +102,7 @@ export function AccountsWorkspace({
     typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches ? "50" : "10",
   );
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [reassignTokens, setReassignTokens] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshingTokens, setRefreshingTokens] = useState<Set<string>>(new Set());
@@ -160,6 +162,8 @@ export function AccountsWorkspace({
 
   const abnormalProxyKeys = useMemo(() => new Set(proxies.filter((proxy) => proxy.health.abnormal).map((proxy) => proxy.key)), [proxies]);
   const proxyByKey = useMemo(() => new Map(proxies.map((proxy) => [proxy.key, proxy])), [proxies]);
+  // 筛选栏只列启用的代理和还挂着账号的停用代理
+  const filterProxies = useMemo(() => proxies.filter((proxy) => !proxy.disabled || proxy.account_count > 0), [proxies]);
   const counts = useMemo(() => {
     const base = facetCounts(accounts);
     const abnormalProxy = accounts.filter((account) => accountMatchesProxyFilter(account, "abnormal", abnormalProxyKeys)).length;
@@ -453,14 +457,19 @@ export function AccountsWorkspace({
           <Button variant="ghost" size="icon" onClick={reload} disabled={busy} title="重新加载">
             <RefreshCw className={cn("size-4", isLoading ? "animate-spin" : "")} />
           </Button>
-          <ProxyManagerDialog proxies={proxies} onChange={setProxies} />
+          <Button variant="outline" asChild>
+            <Link href="/proxies">
+              <Globe className="size-4" />
+              代理
+            </Link>
+          </Button>
           <Button variant="outline" onClick={() => void handleRefreshAccounts(accounts.map((item) => item.access_token))} disabled={busy || accounts.length === 0}>
             <RefreshCw className={cn("size-4", isRefreshing ? "animate-spin" : "")} />
             刷新全部额度
           </Button>
           <AccountImportDialog
             disabled={busy}
-            proxies={proxies}
+            proxies={proxies.filter((proxy) => !proxy.disabled)}
             onImported={(items) => {
               applyAccounts(items);
               void loadProxies();
@@ -507,7 +516,7 @@ export function AccountsWorkspace({
       ) : null}
 
       <div ref={tableRef} className="grid scroll-mt-4 gap-[22px] lg:grid-cols-[210px_minmax(0,1fr)]">
-        <AccountFilterSidebar filters={filters} counts={counts} total={accounts.length} proxies={proxies} onChange={changeFilters} />
+        <AccountFilterSidebar filters={filters} counts={counts} total={accounts.length} proxies={filterProxies} onChange={changeFilters} />
 
         {/* 宽屏：右栏高度跟左侧筛选栏走（至少 560px），账号表占满剩余高度、在框内滚动 */}
         <div className="min-w-0 lg:relative lg:min-h-[560px]">
@@ -525,7 +534,7 @@ export function AccountsWorkspace({
                 className="pl-9"
               />
             </div>
-            <AccountFilterSelects filters={filters} typeOptions={Array.from(counts.types.keys())} proxies={proxies} onChange={changeFilters} />
+            <AccountFilterSelects filters={filters} typeOptions={Array.from(counts.types.keys())} proxies={filterProxies} onChange={changeFilters} />
             <Select
               value={pageSize}
               onValueChange={(value) => {
@@ -552,6 +561,7 @@ export function AccountsWorkspace({
                   ["刷新额度", RefreshCw, isRefreshing, () => void handleRefreshAccounts(selectedTokens)],
                   ["测试生图", ImageIcon, isTestingImages, () => void handleTestImages(selectedTokens)],
                   ["尝试恢复", LogIn, isRelogining, () => void handleReLogin(selectedTokens)],
+                  ["重新分配代理", Shuffle, false, () => setReassignTokens(selectedTokens)],
                   ["导出", Download, false, () => downloadTokens(accounts.filter((item) => selectedTokens.includes(item.access_token)))],
                 ] as const
               ).map(([label, Icon, working, action]) => (
@@ -620,6 +630,16 @@ export function AccountsWorkspace({
       </div>
 
       {bottom?.(context)}
+
+      <AccountReassignProxyDialog
+        tokens={reassignTokens}
+        proxies={proxies}
+        onClose={() => setReassignTokens([])}
+        onDone={(items) => {
+          applyAccounts(items);
+          void loadProxies();
+        }}
+      />
 
       <AccountEditDialog
         account={editingAccount}

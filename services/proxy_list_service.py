@@ -75,6 +75,29 @@ def _next_vendor_number(names: list[str], vendor: str) -> int:
     return max(numbers, default=0) + 1
 
 
+class CapacityError(ValueError):
+    """代理名额不够：shortfall 是还差几个位置。"""
+
+    def __init__(self, shortfall: int, max_per_proxy: int):
+        super().__init__(f"代理名额不足：还差 {shortfall} 个位置。先添加代理，或在设置里调大「单代理最多账号数」（现在是 {max_per_proxy}）")
+        self.shortfall = shortfall
+
+
+def pick_least_loaded(options: list[str], loads: dict[str, int], count: int, max_per_proxy: int | None = None) -> list[str]:
+    """把 count 个账号依次给当前负载最少的代理（并列按 options 顺序），每个代理不超过 max_per_proxy。
+    loads 按 options 里的写法给出当前负载，不会被修改。名额不够时抛 CapacityError，不做部分分配。"""
+    current = {url: loads.get(url, 0) for url in options}
+    picks: list[str] = []
+    for _ in range(count):
+        room = [url for url in options if max_per_proxy is None or current[url] < max_per_proxy]
+        if not room:
+            raise CapacityError(count - len(picks), max_per_proxy or 0)
+        pick = min(room, key=current.__getitem__)
+        current[pick] += 1
+        picks.append(pick)
+    return picks
+
+
 def _counts_by_key(account_counts: dict[str, int]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for url, count in account_counts.items():
@@ -87,27 +110,30 @@ class ProxyList:
     def __init__(self, store_file: Path):
         self._store_file = store_file
         self._lock = Lock()
-        self._entries: list[dict[str, str]] = self._load()
+        self._entries: list[dict] = self._load()
         self._health: dict[str, dict] = {}  # 按 proxy_key
         self._reserved: dict[str, int] = {}  # 已分配、账号还没入库（协议登录进行中）的数量，按 proxy_key
 
-    def _load(self) -> list[dict[str, str]]:
+    def _load(self) -> list[dict]:
         try:
             raw = json.loads(self._store_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return []
-        entries: dict[str, dict[str, str]] = {}
+        entries: dict[str, dict] = {}
         for item in raw if isinstance(raw, list) else []:
             url = str(item.get("url") or "").strip() if isinstance(item, dict) else ""
             if url:
-                entries.setdefault(proxy_key(url), {"url": url, "name": str(item.get("name") or "").strip()})
+                entry: dict = {"url": url, "name": str(item.get("name") or "").strip()}
+                if item.get("disabled") is True:
+                    entry["disabled"] = True
+                entries.setdefault(proxy_key(url), entry)
         return list(entries.values())
 
     def _save_locked(self) -> None:
         self._store_file.parent.mkdir(parents=True, exist_ok=True)
         self._store_file.write_text(json.dumps(self._entries, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    def _find_locked(self, url: str) -> dict[str, str] | None:
+    def _find_locked(self, url: str) -> dict | None:
         key = proxy_key(url)
         return next((entry for entry in self._entries if proxy_key(entry["url"]) == key), None)
 
@@ -125,6 +151,7 @@ class ProxyList:
             return [
                 {
                     **entry,
+                    "disabled": bool(entry.get("disabled")),
                     "key": proxy_key(entry["url"]),
                     "masked_url": mask_proxy_url(entry["url"]),
                     "account_count": counts.get(proxy_key(entry["url"]), 0),
@@ -152,7 +179,7 @@ class ProxyList:
             raise ValueError("请填写代理，每行一个")
         if len(lines) > MAX_BATCH_LINES:
             raise ValueError(f"一次最多 {MAX_BATCH_LINES} 个代理")
-        added: list[dict[str, str]] = []
+        added: list[dict] = []
         skipped: list[dict] = []
         invalid: list[dict] = []
         with self._lock:
@@ -200,6 +227,34 @@ class ProxyList:
             self._health.pop(proxy_key(entry["url"]), None)
             self._save_locked()
 
+    # ── 停用 ──────────────────────────────────────────────
+    def set_disabled(self, urls: list[str], disabled: bool) -> int:
+        """停用 / 启用代理（按同一代理的识别值匹配）。停用的代理不再参与任何分配；账号要先迁走。返回改动条数。"""
+        keys = {proxy_key(url) for url in urls if url.strip()}
+        changed = 0
+        with self._lock:
+            for entry in self._entries:
+                if proxy_key(entry["url"]) not in keys or bool(entry.get("disabled")) == disabled:
+                    continue
+                if disabled:
+                    entry["disabled"] = True
+                else:
+                    entry.pop("disabled", None)
+                changed += 1
+            if changed:
+                self._save_locked()
+        return changed
+
+    def is_disabled(self, url: str) -> bool:
+        with self._lock:
+            entry = self._find_locked(url)
+            return bool(entry and entry.get("disabled"))
+
+    def reserved_counts(self) -> dict[str, int]:
+        """其它批次（协议登录进行中）预留的名额，按 proxy_key。"""
+        with self._lock:
+            return dict(self._reserved)
+
     # ── 健康 ──────────────────────────────────────────────
     def record_success(self, url: str) -> None:
         if not url:
@@ -240,9 +295,16 @@ class ProxyList:
         }
 
     # ── 平均分配 ──────────────────────────────────────────
-    def reserve(self, candidates: list[str], count: int, count_accounts: Callable[[], dict[str, int]]) -> list[str]:
+    def reserve(
+        self,
+        candidates: list[str],
+        count: int,
+        count_accounts: Callable[[], dict[str, int]],
+        max_per_proxy: int | None = None,
+    ) -> list[str]:
         """把 count 个新账号分到候选代理并预留名额：每次给“已入库账号 + 其它批次预留 + 本批已分配”最少的，
-        并列按候选顺序。异常代理先跳过；候选全部异常时仍在它们之间分配，不退回直连。
+        并列按候选顺序，每个代理不超过 max_per_proxy。停用的代理不参与；异常代理先跳过，候选全部异常时
+        仍在它们之间分配，不退回直连。名额不够抛 CapacityError，什么都不预留。
 
         返回候选里的原始写法。账号入库（或登录失败）后必须对每个结果调用 release，否则名额一直占着。
         count_accounts 在锁内调用：入库后再 release，最坏只是短暂多算，不会少算。
@@ -255,14 +317,14 @@ class ProxyList:
         if not options:
             raise ValueError("平均分配至少要选一个代理")
         with self._lock:
-            usable = [url for url in options if not self._is_abnormal_locked(url)] or options
+            enabled = [url for url in options if not (self._find_locked(url) or {}).get("disabled")]
+            if not enabled:
+                raise ValueError("所选代理都已停用")
+            usable = [url for url in enabled if not self._is_abnormal_locked(url)] or enabled
             counts = _counts_by_key(count_accounts())
             loads = {url: counts.get(proxy_key(url), 0) + self._reserved.get(proxy_key(url), 0) for url in usable}
-            assigned = []
-            for _ in range(count):
-                pick = min(usable, key=loads.__getitem__)
-                loads[pick] += 1
-                assigned.append(pick)
+            assigned = pick_least_loaded(usable, loads, count, max_per_proxy)
+            for pick in assigned:
                 self._reserved[proxy_key(pick)] = self._reserved.get(proxy_key(pick), 0) + 1
             return assigned
 

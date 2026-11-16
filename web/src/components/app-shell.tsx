@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Images,
   Infinity as InfinityIcon,
+  Globe,
   LayoutGrid,
   LogOut,
   MoreHorizontal,
@@ -33,6 +34,7 @@ type NavItem = { href: string; label: string; icon: ComponentType<{ className?: 
 const ADMIN_NAV: NavItem[][] = [
   [
     { href: "/", label: "总览", icon: LayoutGrid },
+    { href: "/proxies", label: "代理", icon: Globe },
     { href: "/image", label: "生图", icon: ImageIcon },
   ],
   [
