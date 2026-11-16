@@ -225,6 +225,42 @@ class ImageFailoverTests(unittest.TestCase):
         self.assertEqual(seen, [("one", None)])
 
 
+class ImageSlotReleaseTests(unittest.TestCase):
+    """每拿到一个账号（占 1 个并发名额），不管这次怎么结束，都要释放一次：mark_image_result 或 release_image_slot。
+    漏掉一条路径，名额就一直占着，账号被调度跳过（2026-11-16 生产上 71 个账号累计漏了 89 个）。"""
+
+    # 借用换号测试的场景搭建，不继承（否则会把那组用例再跑一遍）
+    TIMEOUT = ImageFailoverTests.TIMEOUT
+    run_case = ImageFailoverTests.run_case
+
+    def assert_every_slot_released(self, service, seen):
+        acquired = len(seen)
+        released = service.mark_image_result.call_count + service.release_image_slot.call_count
+        self.assertEqual(released, acquired, f"拿了 {acquired} 个名额，只还了 {released} 个")
+        returned = [call.args[0] for call in service.mark_image_result.call_args_list] + [
+            call.args[0] for call in service.release_image_slot.call_args_list
+        ]
+        self.assertEqual(sorted(returned), sorted(token for token, _ in seen))
+
+    def test_failover_switch_releases_the_stuck_accounts_slot(self):
+        result, error, seen, service = self.run_case({"one", "two"})
+        self.assertIsNone(error)
+        self.assert_every_slot_released(service, seen)
+        service.release_image_slot.assert_has_calls([mock.call("one"), mock.call("two")])
+        self.assertNotIn(mock.call("one", False), service.mark_image_result.call_args_list)  # 仍不记失败
+
+    def test_failover_exhausted_releases_every_slot(self):
+        result, error, seen, service = self.run_case({"one", "two", "three", "four", "five", "six", "seven"}, failover_secs=30)
+        self.assertIsNotNone(error)
+        self.assert_every_slot_released(service, seen)
+
+    def test_plain_timeout_and_success_release_every_slot(self):
+        for stuck, enabled in (({"one"}, False), (set(), True), (set(), False)):
+            with self.subTest(stuck=stuck, enabled=enabled):
+                result, error, seen, service = self.run_case(stuck, enabled=enabled)
+                self.assert_every_slot_released(service, seen)
+
+
 class ImageFailoverConfigTests(unittest.TestCase):
     def test_defaults_and_bounds(self):
         from services.config import ConfigStore

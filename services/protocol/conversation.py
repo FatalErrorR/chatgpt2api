@@ -1528,6 +1528,8 @@ def _generate_single_image(
                 if can_retry:
                     poll_timeout_retry_count += 1
                     avoided_tokens.add(token)
+                    # 不记账号失败，但并发名额必须还：mark_image_result 不调就只能在这里释放，否则名额一直占着
+                    account_service.release_image_slot(token)
                     logger.warning({
                         "event": "image_failover_retry",
                         "request_token": token,
