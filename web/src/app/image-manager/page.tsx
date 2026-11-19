@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { compressAllImages, deleteImageTag, deleteManagedImages, deleteToTarget, downloadImages, downloadSingleImage, fetchImageStorage, fetchImageTags, fetchManagedImagePaths, fetchManagedImages, setImageTags, type ImageStorageStats, type ManagedImage } from "@/lib/api";
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/ui/states";
+import { ChunkedDeleteError, deleteInChunks, type DeleteProgress } from "@/lib/chunked-delete";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +38,25 @@ function imageKey(item: ManagedImage) {
   return item.rel || item.url;
 }
 
+/** 批量删除的进度条：已删 / 总数。 */
+function DeleteProgressBar({ progress }: { progress: DeleteProgress | null }) {
+  if (!progress) return null;
+  const percent = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 100;
+  return (
+    <div className="grid gap-1.5" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
+      <div className="h-2 overflow-hidden rounded-full bg-sunken">
+        <div className="h-full rounded-full bg-bad transition-[width] duration-300" style={{ width: `${percent}%` }} />
+      </div>
+      <div className="flex justify-between text-xs text-ink-3 tabular-nums">
+        <span>
+          正在删除 {progress.done.toLocaleString("en-US")} / {progress.total.toLocaleString("en-US")} 张
+        </span>
+        <span>{percent}%</span>
+      </div>
+    </div>
+  );
+}
+
 function ImageManagerContent() {
   const [items, setItems] = useState<ManagedImage[]>([]); // 当前页
   const [total, setTotal] = useState(0);
@@ -52,6 +72,7 @@ function ImageManagerContent() {
   const [deleteStartDate, setDeleteStartDate] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ManagedImage | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<DeleteProgress | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [storage, setStorage] = useState<ImageStorageStats | null>(null);
   const [storageLoading, setStorageLoading] = useState(false);
@@ -240,20 +261,35 @@ function ImageManagerContent() {
     setSelectedPaths((current) => checked ? Array.from(new Set([...current, ...paths])) : current.filter((path) => !paths.includes(path)));
   };
 
-  const confirmDelete = async () => {
-    if (!deleteMode || selectedCount === 0) return;
+  /** 先取要删的路径，再分批删除并显示进度；结束后关掉弹窗、刷新列表和容量。 */
+  const runBatchDelete = async (getPaths: () => Promise<string[]>) => {
     setIsDeleting(true);
     try {
-      const data = await deleteManagedImages(deleteMode === "filtered" ? { start_date: startDate, end_date: endDate, all_matching: true } : { paths: selectedPaths });
-      toast.success(`已删除 ${data.removed} 张图片`);
-      setDeleteMode(null);
-      setSelectedPaths([]);
-      await loadImages();
+      const paths = await getPaths();
+      if (paths.length === 0) {
+        toast.info("没有符合条件的图片");
+        return;
+      }
+      const removed = await deleteInChunks(paths, (chunk) => deleteManagedImages({ paths: chunk }), setDeleteProgress);
+      toast.success(`已删除 ${removed.toLocaleString("en-US")} 张图片`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "删除图片失败");
+      const removed = error instanceof ChunkedDeleteError ? error.removed : 0;
+      const reason = error instanceof Error ? error.message : "删除图片失败";
+      toast.error(removed > 0 ? `已删除 ${removed.toLocaleString("en-US")} 张后中断：${reason}` : reason);
     } finally {
       setIsDeleting(false);
+      setDeleteProgress(null);
+      setDeleteMode(null);
+      setSelectedPaths([]);
+      void loadStorage();
+      void loadImages();
     }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteMode || selectedCount === 0) return;
+    // 「删除筛选结果」按页面上的日期和标签取路径，和列表里看到的一致
+    await runBatchDelete(async () => (deleteMode === "filtered" ? (await filterPaths()).paths : selectedPaths));
   };
 
   const handleBatchDownload = async () => {
@@ -371,7 +407,7 @@ function ImageManagerContent() {
         {startDate || endDate ? (
           <Button variant="outline" size="sm" className="text-bad hover:text-bad" onClick={() => setDeleteMode("filtered")} disabled={isDeleting || total === 0}>
             <Trash2 className="size-3.5" />
-            删除这个日期范围的 {total} 张
+            {selectedTags.length > 0 ? `删除筛选出的 ${total} 张` : `删除这个日期范围的 ${total} 张`}
           </Button>
         ) : null}
         <span className="flex-1" />
@@ -707,25 +743,15 @@ function ImageManagerContent() {
             <Input className="w-44" type="date" value={deleteStartDate} onChange={(event) => setDeleteStartDate(event.target.value)} />
             之前的图片
           </label>
+          <DeleteProgressBar progress={deleteProgress} />
           <DialogFooter className="pt-2">
             <Button variant="ghost" onClick={() => setDeleteMode(null)} disabled={isDeleting}>取消</Button>
             <Button
               variant="destructive"
               disabled={!deleteStartDate || isDeleting}
-              onClick={async () => {
+              onClick={() => {
                 if (!deleteStartDate) return;
-                try {
-                  setIsDeleting(true);
-                  const r = await deleteManagedImages({ end_date: deleteStartDate, all_matching: true });
-                  toast.success(`已删除 ${r.removed} 张图片`);
-                  setDeleteMode(null);
-                  void loadStorage();
-                  void loadImages();
-                } catch {
-                  toast.error("删除失败");
-                } finally {
-                  setIsDeleting(false);
-                }
+                void runBatchDelete(async () => (await fetchManagedImagePaths({ end_date: deleteStartDate })).paths);
               }}
             >
               {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -774,14 +800,16 @@ function ImageManagerContent() {
         title={`删除 ${selectedCount.toLocaleString("en-US")} 张图片？`}
         description={
           deleteMode === "filtered"
-            ? `删除 ${startDate || "最早"} 至 ${endDate || startDate || "今天"} 的全部图片和缩略图，无法恢复。`
+            ? `删除 ${startDate || "最早"} 至 ${endDate || startDate || "今天"}${selectedTags.length > 0 ? `、带标签「${selectedTags.join("」「")}」` : ""}的图片和缩略图，无法恢复。`
             : "所选图片和缩略图会从磁盘删除，无法恢复。"
         }
         confirmLabel="删除"
         danger
         busy={isDeleting}
         onConfirm={() => void confirmDelete()}
-      />
+      >
+        <DeleteProgressBar progress={deleteProgress} />
+      </ConfirmDialog>
       <ConfirmDialog
         open={Boolean(tagDeleteTarget)}
         onOpenChange={(open) => { if (!open) setTagDeleteTarget(null); }}

@@ -357,25 +357,40 @@ class ImageStorageService:
             self._save_index(indexed)
 
     def delete(self, rel: str) -> bool:
-        safe_rel = _safe_relative_path(rel)
-        removed = False
-        path = _local_image_path(safe_rel)
-        if path.is_file():
-            path.unlink()
-            removed = True
+        return self.delete_many([rel]) == 1
+
+    def delete_many(self, rels: list[str]) -> int:
+        """删除一批图片（本地文件 + WebDAV 副本），索引只读写一次。返回实际删掉的张数。"""
+        safe_rels = list(dict.fromkeys(_safe_relative_path(rel) for rel in rels))
+        removed: set[str] = set()
+        for safe_rel in safe_rels:
+            path = _local_image_path(safe_rel)
+            if path.is_file():
+                path.unlink()
+                removed.add(safe_rel)
         with self._index_lock:
             items = self._load_clean_index()
-            item = items.get(safe_rel, {})
-            if item.get("webdav"):
+            remote = [rel for rel in safe_rels if items.get(rel, {}).get("webdav")]
+            if remote:
+                client = WebDAVClient(self.settings())
                 try:
-                    removed = WebDAVClient(self.settings()).delete(safe_rel) or removed
-                except ImageStorageError:
-                    if not removed:
-                        raise
-            if safe_rel in items:
-                items.pop(safe_rel, None)
+                    for safe_rel in remote:
+                        try:
+                            if client.delete(safe_rel):
+                                removed.add(safe_rel)
+                        except ImageStorageError:
+                            if safe_rel not in removed:
+                                raise
+                finally:
+                    session = getattr(client, "session", None)
+                    if session is not None:
+                        session.close()
+            dropped = [rel for rel in safe_rels if rel in items]
+            for rel in dropped:
+                items.pop(rel, None)
+            if dropped:
                 self._save_index(items)
-        return removed
+        return len(removed)
 
     def sync_all(self) -> dict[str, int]:
         settings = self.settings()

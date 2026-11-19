@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 
 from services.config import config
 from services.image_storage_service import image_storage_service
-from services.image_tags_service import load_tags, remove_tags
+from services.image_tags_service import load_tags, remove_tags_many
 from utils.log import logger
 
 THUMBNAIL_SIZE = (320, 320)
@@ -211,28 +211,35 @@ def list_image_paths(start_date: str = "", end_date: str = "", tags: list[str] |
     return {"paths": [str(row["path"]) for row in rows]}
 
 
+def _delete_rels(rels: list[str]) -> int:
+    """批量删除图片及其缩略图、标签；索引和标签文件各只写一次。"""
+    if not rels:
+        return 0
+    removed = image_storage_service.delete_many(rels)
+    for rel in rels:
+        for thumbnail in (_thumbnail_path(rel), config.image_thumbnails_dir / _safe_relative_path(rel)):
+            if thumbnail.is_file():
+                thumbnail.unlink()
+    remove_tags_many(rels)
+    _cleanup_empty_dirs(config.images_dir.resolve())
+    _cleanup_empty_dirs(config.image_thumbnails_dir)
+    return removed
+
+
 def delete_images(paths: list[str] | None = None, start_date: str = "", end_date: str = "", all_matching: bool = False) -> dict[str, int]:
     root = config.images_dir.resolve()
     targets = [
         str(item["path"])
         for item in image_storage_service.list_items("", start_date=start_date, end_date=end_date)
     ] if all_matching else (paths or [])
-    removed = 0
+    rels = []
     for item in targets:
-        path = (root / item).resolve()
         try:
-            path.relative_to(root)
+            (root / item).resolve().relative_to(root)
         except ValueError:
             continue
-        if image_storage_service.delete(item):
-            removed += 1
-        for thumbnail in (_thumbnail_path(item), config.image_thumbnails_dir / _safe_relative_path(item)):
-            if thumbnail.is_file():
-                thumbnail.unlink()
-        remove_tags(item)
-    _cleanup_empty_dirs(root)
-    _cleanup_empty_dirs(config.image_thumbnails_dir)
-    return {"removed": removed}
+        rels.append(item)
+    return {"removed": _delete_rels(rels)}
 
 
 def download_images_zip(paths: list[str]) -> io.BytesIO:
@@ -333,23 +340,16 @@ def delete_to_target(target_free_mb: int, dry_run: bool = False) -> dict:
     )
     removed = 0
     freed = 0
+    doomed: list[str] = []
     for p in files:
         if current_free + freed // (1024 * 1024) >= target_free_mb:
             break
-        size = p.stat().st_size
-        if not dry_run:
-            rel = p.relative_to(config.images_dir).as_posix()
-            for tp in (_thumbnail_path(rel), config.image_thumbnails_dir / _safe_relative_path(rel)):
-                if tp.is_file():
-                    tp.unlink()
-            remove_tags(rel)
-            p.unlink()
-        freed += size
+        freed += p.stat().st_size
         removed += 1
+        doomed.append(p.relative_to(config.images_dir).as_posix())
 
     if not dry_run:
-        _cleanup_empty_dirs(config.images_dir)
-        _cleanup_empty_dirs(config.image_thumbnails_dir)
+        _delete_rels(doomed)
 
     return {
         "removed": removed,

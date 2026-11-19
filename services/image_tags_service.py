@@ -44,8 +44,12 @@ def set_tags(image_rel: str, tags: list[str]) -> list[str]:
 
 
 def remove_tags(image_rel: str) -> None:
+    remove_tags_many([image_rel])
+
+
+def remove_tags_many(image_rels: list[str]) -> None:
     data = load_tags()
-    if data.pop(image_rel, None) is not None:
+    if sum(data.pop(rel, None) is not None for rel in image_rels):
         save_tags(data)
 
 
