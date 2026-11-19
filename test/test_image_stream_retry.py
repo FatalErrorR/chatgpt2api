@@ -141,6 +141,48 @@ class ImageForbiddenTests(ImageRetryTestCase):
             self.assertEqual(service.same_proxy_tokens('d'), set())
 
 
+class ImageStreamResetTests(ImageRetryTestCase):
+    RESET = RuntimeError('Failed to perform, curl: (92) HTTP/2 stream 1 was not closed cleanly: PROTOCOL_ERROR (err 1).')
+
+    def setUp(self):
+        conversation._stream_reset_times.clear()
+        self.addCleanup(conversation._stream_reset_times.clear)
+
+    def _excluded(self, service, call_index):
+        return service.get_available_access_token.call_args_list[call_index].kwargs['excluded_tokens']
+
+    def test_detects_only_http2_stream_resets(self):
+        self.assertTrue(conversation.is_stream_reset_error(str(self.RESET)))
+        self.assertFalse(conversation.is_stream_reset_error('curl: (28) Operation timed out'))
+        self.assertEqual(conversation.image_stream_error_message(str(self.RESET)),
+                         'upstream connection was interrupted, please retry later')
+
+    def test_reset_switches_to_another_account(self):
+        result, service = self._generate([self.RESET])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(service.get_available_access_token.call_count, 2)
+        self.assertEqual(self._excluded(service, 1), {'one'})
+        service.mark_image_result.assert_any_call('one', False)
+
+    def test_reset_retries_at_most_twice(self):
+        result, service = self._generate([self.RESET for _ in range(5)])
+        self.assertIsNone(result)
+        self.assertEqual(service.get_available_access_token.call_count, 3)
+
+    def test_breaker_stops_retrying_during_a_wide_outage(self):
+        now = conversation.time.monotonic()
+        conversation._stream_reset_times.extend([now] * conversation.STREAM_RESET_BREAKER_LIMIT)
+        result, service = self._generate([self.RESET])
+        self.assertIsNone(result)
+        self.assertEqual(service.get_available_access_token.call_count, 1)
+
+    def test_old_resets_fall_out_of_the_breaker_window(self):
+        old = conversation.time.monotonic() - conversation.STREAM_RESET_BREAKER_WINDOW_SECS - 1
+        conversation._stream_reset_times.extend([old] * 50)
+        result, service = self._generate([self.RESET])
+        self.assertEqual(len(result), 1)
+
+
 class ImageFailoverTests(unittest.TestCase):
     """换号生成：每个号最多等 image_failover_secs 出图，超时换号；合计不超过 image_poll_timeout_secs。"""
 

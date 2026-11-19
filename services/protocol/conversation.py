@@ -33,6 +33,28 @@ from utils.log import logger
 
 IMAGE_MODEL_NOT_FOUND_COOLDOWN_SECS = 10 * 60
 IMAGE_FORBIDDEN_COOLDOWN_SECS = 10 * 60
+# HTTP/2 流被中途重置（curl 92）：换号重试，每张图最多 2 次。
+# 熔断：近 5 分钟全站断流超过 10 次多半是上游大面积故障，此时不再重试，免得白耗额度。
+MAX_STREAM_RESET_RETRIES = 2
+STREAM_RESET_BREAKER_WINDOW_SECS = 5 * 60
+STREAM_RESET_BREAKER_LIMIT = 10
+_stream_reset_times: list[float] = []
+_stream_reset_lock = threading.Lock()
+
+
+def is_stream_reset_error(message: str) -> bool:
+    """HTTP/2 流没有正常结束就被掐断（curl 92，如 PROTOCOL_ERROR / INTERNAL_ERROR）。"""
+    text = str(message or "").lower()
+    return "curl: (92)" in text or "was not closed cleanly" in text
+
+
+def _note_stream_reset() -> bool:
+    """记一次断流；返回熔断是否已打开（近窗口内断流次数超过上限）。"""
+    now = time.monotonic()
+    with _stream_reset_lock:
+        _stream_reset_times[:] = [t for t in _stream_reset_times if now - t < STREAM_RESET_BREAKER_WINDOW_SECS]
+        _stream_reset_times.append(now)
+        return len(_stream_reset_times) > STREAM_RESET_BREAKER_LIMIT
 
 
 def is_upstream_forbidden_error(error: Exception | str) -> bool:
@@ -140,6 +162,8 @@ def image_stream_error_message(message: str) -> str:
         return "upstream image connection failed, please retry later"
     if is_connection_timeout_error(text):
         return "upstream connection timed out, please retry later"
+    if is_stream_reset_error(text):
+        return "upstream connection was interrupted, please retry later"
     return text or "image generation failed"
 
 
@@ -1417,6 +1441,7 @@ def _generate_single_image(
     edit_upload_retry_count = 0
     model_not_found_retry_count = 0
     forbidden_retry_count = 0
+    stream_reset_retry_count = 0
     tried_upload_tokens: set[str] = set()
     # 换号生成：每个号最多等 image_failover_secs 出图，超时换号；所有尝试合计不超过总的等图时限。
     # 调用方显式给了 poll_timeout_secs（如账号测试）时不换号。
@@ -1676,6 +1701,27 @@ def _generate_single_image(
                         "error": last_error[:200],
                     })
                     continue
+            # HTTP/2 断流：换一个号重试（本次请求避开刚断的号）
+            if not emitted_for_token and is_stream_reset_error(last_error):
+                breaker_open = _note_stream_reset()
+                stream_reset_retry_count += 1
+                if not breaker_open and stream_reset_retry_count <= MAX_STREAM_RESET_RETRIES:
+                    avoided_tokens.add(token)
+                    logger.warning({
+                        "event": "image_stream_reset_retry",
+                        "request_token": token,
+                        "account_email": account_email,
+                        "retry_count": stream_reset_retry_count,
+                        "index": index,
+                        "error": last_error[:200],
+                    })
+                    continue
+                if breaker_open:
+                    logger.warning({
+                        "event": "image_stream_reset_breaker_open",
+                        "account_email": account_email,
+                        "index": index,
+                    })
             # TLS/SSL 连接错误：自动重试
             if not emitted_for_token and is_tls_connection_error(last_error):
                 tls_retry_count += 1
