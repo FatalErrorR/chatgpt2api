@@ -1,5 +1,6 @@
 import base64
 import json
+import math
 import mimetypes
 import os
 import random
@@ -187,6 +188,26 @@ class EditableFileExportResult:
     conversation_id: str
     primary_path: Path
     zip_path: Path
+
+
+# 网页端生图菜单可选的宽高比（与上游 v2.0.0 一致），按 log 比值取最接近的一个
+IMAGE_ASPECT_RATIOS = (("1:1", 1.0), ("4:3", 4 / 3), ("3:4", 3 / 4), ("16:9", 16 / 9), ("9:16", 9 / 16))
+
+
+def image_generation_settings(size: str | None) -> Dict[str, Any] | None:
+    """把 "1536x1024" 这类尺寸转成网页端 message.metadata.image_generation_settings；无法解析时返回 None。"""
+    parts = str(size or "").strip().lower().split("x")
+    if len(parts) != 2:
+        return None
+    try:
+        width, height = int(parts[0].strip()), int(parts[1].strip())
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    ratio = width / height
+    label = min(IMAGE_ASPECT_RATIOS, key=lambda option: abs(math.log(ratio / option[1])))[0]
+    return {"aspect_ratio": label, "image_count": 1}
 
 
 class OpenAIBackendAPI:
@@ -1099,7 +1120,8 @@ class OpenAIBackendAPI:
         }
 
     def _start_image_generation(self, prompt: str, requirements: ChatRequirements, conduit_token: str, model: str,
-                                references: Optional[list[Dict[str, Any]]] = None, trace_id: str = "") -> requests.Response:
+                                references: Optional[list[Dict[str, Any]]] = None, trace_id: str = "",
+                                size: str | None = None) -> requests.Response:
         """启动图片生成或编辑的 SSE 请求。"""
         upstream_model, thinking_effort = self._image_model_settings(model)
         references = references or []
@@ -1138,6 +1160,9 @@ class OpenAIBackendAPI:
                 "width": item["width"],
                 "height": item["height"],
             } for item in references]
+        settings = image_generation_settings(size)
+        if settings:
+            metadata["image_generation_settings"] = settings
         payload: Dict[str, Any] = {
             "turn_attribution": {"turn_trigger": "composer"},
             "action": "next",
@@ -2730,10 +2755,11 @@ class OpenAIBackendAPI:
             images: Optional[list[str]] = None,
             system_hints: Optional[list[str]] = None,
             thinking_effort: str = "",
+            size: str | None = None,
     ) -> Iterator[str]:
         system_hints = system_hints or []
         if "picture_v2" in system_hints:
-            yield from self._stream_picture_conversation(prompt, model, images or [])
+            yield from self._stream_picture_conversation(prompt, model, images or [], size=size)
             return
 
         normalized = messages or [{"role": "user", "content": prompt}]
@@ -2767,6 +2793,7 @@ class OpenAIBackendAPI:
             prompt: str,
             model: str,
             images: list[str],
+            size: str | None = None,
     ) -> Iterator[str]:
         if not self.access_token:
             raise RuntimeError("access_token is required for image endpoints")
@@ -2795,7 +2822,8 @@ class OpenAIBackendAPI:
         self._report_progress("preparing_conversation")
         conduit_token, trace_id = self._prepare_image_conversation(prompt, requirements, model)
         self._report_progress("starting_generation")
-        response = self._start_image_generation(prompt, requirements, conduit_token, model, references, trace_id=trace_id)
+        response = self._start_image_generation(prompt, requirements, conduit_token, model, references, trace_id=trace_id,
+                                                size=size)
         self._report_progress("generating")
         yield from self._iter_sse_payloads_capped(response, float(config.image_poll_timeout_secs))
 

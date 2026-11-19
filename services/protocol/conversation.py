@@ -809,6 +809,7 @@ def conversation_events(
         images=images if image_model else None,
         system_hints=["picture_v2"] if image_model else None,
         thinking_effort=thinking_effort if not image_model else "",
+        size=size if image_model else None,
     )
     yield from iter_conversation_payloads(payloads, history_text, history_messages)
 

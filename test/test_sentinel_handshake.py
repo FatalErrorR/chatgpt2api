@@ -212,6 +212,38 @@ class SentinelHandshakeTests(unittest.TestCase):
             self.assertEqual(message["metadata"]["serialization_metadata"]["custom_symbol_offsets"][0]["id"], "picture_v2")
             if references:
                 self.assertEqual(message["content"]["parts"][0]["asset_pointer"], "file-service://file-1")
+            self.assertNotIn("image_generation_settings", message["metadata"])
+
+    def test_size_becomes_the_web_aspect_ratio_setting(self):
+        settings = openai_backend_api.image_generation_settings
+        for size, expected in (
+            ("1024x1024", "1:1"), ("1536x1024", "4:3"), ("1024x1536", "3:4"),
+            ("1920x1088", "16:9"), ("1088x1920", "9:16"), (" 2048 X 1152 ", "16:9"),
+        ):
+            with self.subTest(size=size):
+                self.assertEqual(settings(size), {"aspect_ratio": expected, "image_count": 1})
+        for size in (None, "", "auto", "1024", "0x100", "axb", "1x2x3"):
+            with self.subTest(size=size):
+                self.assertIsNone(settings(size))
+
+        api = OpenAIBackendAPI("")
+        self.addCleanup(api.close)
+        with mock.patch.object(api.session, "post", return_value=mock.Mock(status_code=200)) as post:
+            api._start_image_generation("cat", ChatRequirements(token="t"), "conduit", "gpt-image-2", size="1536x1024")
+        message = post.call_args.kwargs["json"]["messages"][0]
+        self.assertEqual(message["metadata"]["image_generation_settings"], {"aspect_ratio": "4:3", "image_count": 1})
+
+    def test_picture_conversation_passes_size_through(self):
+        api = OpenAIBackendAPI("token")
+        self.addCleanup(api.close)
+        seen = {}
+        api._bootstrap = lambda: None
+        api._get_chat_requirements = lambda: ChatRequirements(token="t")
+        api._prepare_image_conversation = lambda *args, **kwargs: ("conduit", "trace")
+        api._start_image_generation = lambda *args, **kwargs: seen.update(kwargs) or "response"
+        api._iter_sse_payloads_capped = lambda response, _timeout: iter(())
+        list(api.stream_conversation(prompt="cat", model="gpt-image-2", system_hints=["picture_v2"], size="1088x1920"))
+        self.assertEqual(seen["size"], "1088x1920")
 
 
 if __name__ == "__main__":
