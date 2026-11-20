@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -99,11 +98,6 @@ export function VersionReleaseDialog({ className }: { className?: string }) {
               </div>
             ))}
           </div>
-          <Button variant="outline" size="sm" asChild>
-            <a href="https://github.com/basketikun/chatgpt2api" target="_blank" rel="noreferrer">
-              前往 GitHub 更新
-            </a>
-          </Button>
         </DialogContent>
       </Dialog>
     </>

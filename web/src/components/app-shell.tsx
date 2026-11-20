@@ -273,15 +273,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ))}
         <div className="mt-auto grid justify-items-center gap-2">
           <ThemeToggle />
-          <a
-            href="https://github.com/basketikun/chatgpt2api"
-            target="_blank"
-            rel="noreferrer"
-            className="grid size-8 place-items-center opacity-60 transition hover:opacity-100"
-            aria-label="GitHub repository"
-          >
-            <img src="/github.svg" alt="" className="size-4 dark:invert" />
-          </a>
           <VersionReleaseDialog />
           <AccountMenu session={session} onLogout={() => void handleLogout()} />
         </div>
