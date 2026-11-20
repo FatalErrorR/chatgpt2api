@@ -2,9 +2,10 @@
 //
 //	go run ./cmd/migrate -data /opt/chatgpt2api/data -database-url "$DATABASE_URL"
 //
-// The source files are only read. Run it again to bring the database back in line with the
-// files (snapshot tables are replaced, logs and daily counts are upserted). Exit status 1 when a
-// check fails.
+// The source files are only read. Everything is written in one transaction and verified against
+// the files before it commits: a malformed source or a failed check leaves the database as it
+// was, with exit status 1. Running it again mirrors the files again (it replaces what the Go
+// version wrote since; do not rerun after the Go version has taken writes).
 package main
 
 import (
@@ -41,27 +42,22 @@ func main() {
 	report, err := migrate.Run(repo.DB(), opts)
 	if report != nil {
 		for _, item := range report.Items {
-			if item.Skipped != "" {
-				fmt.Printf("%-24s 源 %6d  写入 %6d  %s\n", item.Name, item.Source, item.Written, item.Skipped)
-			} else {
-				fmt.Printf("%-24s 源 %6d  写入 %6d\n", item.Name, item.Source, item.Written)
+			fmt.Printf("%-24s 源 %6d  写入 %6d  %s\n", item.Name, item.Source, item.Written, item.Note)
+		}
+		if len(report.Checks) > 0 {
+			fmt.Println("\n对账（与源文件逐项比对，在同一个事务里，不一致则整体回滚）：")
+			for _, check := range report.Checks {
+				mark := "通过"
+				if !check.OK {
+					mark = "不一致"
+				}
+				fmt.Printf("  %-6s %-34s 期望 %6d  实际 %6d  %s\n", mark, check.Name, check.Expected, check.Actual, check.Detail)
 			}
 		}
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "迁移失败：", err)
+		fmt.Fprintln(os.Stderr, "\n迁移失败，目标库未改动：", err)
 		os.Exit(1)
 	}
-	fmt.Printf("迁移完成，用时 %s\n\n对账：\n", time.Since(started).Round(time.Millisecond))
-	failed := 0
-	for _, check := range migrate.Verify(repo.DB(), opts, report) {
-		mark := "通过"
-		if !check.OK {
-			mark, failed = "不一致", failed+1
-		}
-		fmt.Printf("  %-6s %-30s 期望 %6d  实际 %6d  %s\n", mark, check.Name, check.Expected, check.Actual, check.Detail)
-	}
-	if failed > 0 {
-		os.Exit(1)
-	}
+	fmt.Printf("\n迁移完成并已提交，用时 %s\n", time.Since(started).Round(time.Millisecond))
 }
