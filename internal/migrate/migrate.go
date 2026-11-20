@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -178,13 +179,26 @@ func readJSON(path string) (any, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	value, err := decodeJSONStrict(raw)
+	if err != nil {
+		return nil, true, &SourceError{filepath.Base(path), "不是有效的 JSON：" + err.Error()}
+	}
+	return value, true, nil
+}
+
+// decodeJSONStrict is json.loads: exactly one JSON value, with only whitespace after it. A bare
+// Decoder.Decode stops after the first value, so "[] garbage" or a second value would pass as [].
+func decodeJSONStrict(raw []byte) (any, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
-		return nil, true, &SourceError{filepath.Base(path), "不是有效的 JSON：" + err.Error()}
+		return nil, err
 	}
-	return value, true, nil
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, fmt.Errorf("第一个 JSON 值之后还有其他内容（偏移 %d）", decoder.InputOffset())
+	}
+	return value, nil
 }
 
 func str(value any) string {
@@ -695,11 +709,10 @@ func windowLogs(file string, opts Options, fn func(entry logs.Entry) error) erro
 		if line == "" {
 			return nil
 		}
-		decoder := json.NewDecoder(strings.NewReader(line))
-		decoder.UseNumber()
-		var item map[string]any
-		if decoder.Decode(&item) != nil || item == nil {
-			return nil // _parse_line drops it too
+		value, err := decodeJSONStrict([]byte(line))
+		item, _ := value.(map[string]any)
+		if err != nil || item == nil {
+			return nil // _parse_line (json.loads) drops it too
 		}
 		at := str(item["time"])
 		if from != "" && (len(at) < 10 || at[:10] < from) {

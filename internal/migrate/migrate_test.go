@@ -87,6 +87,7 @@ func fixture(t *testing.T) string {
 		`{"id":"old","time":"2026-09-01 10:00:00","type":"call","summary":"文生图调用完成","detail":{"endpoint":"/v1/images/generations","status":"success","urls":["u"]}}`,
 		legacy,
 		`not json`,
+		`{"id":"tail","time":"2026-11-20 09:00:00","type":"call","summary":"x"} trailing`, // json.loads rejects it, Python drops it
 		legacy, // the same line again: a separate event, must not be merged
 		`{"id":"new","time":"2026-11-20 08:00:00","type":"call","summary":"图生图调用完成","detail":{"endpoint":"/v1/images/edits","status":"success","urls":["a","b"]}}`,
 	}, "\n")+"\n")
@@ -206,13 +207,16 @@ func TestMalformedSourcesChangeNothing(t *testing.T) {
 	db.Model(&logs.Entry{}).Count(&logCount)
 
 	cases := map[string][2]string{
-		"accounts as an object":         {"accounts.json", `{"items": [{"access_token": "x"}]}`},
-		"accounts not JSON":             {"accounts.json", `[{"access_token": "x"`},
-		"accounts without any token":    {"accounts.json", `[{"email": "a@x"}, {"email": "b@x"}]`},
-		"later file broken":             {"image_tags.json", `{"broken"`},
-		"later file in the wrong shape": {"image_index.json", `{"rows": []}`},
-		"proxies not a list":            {"proxies.json", `{"url": "http://p:1"}`},
-		"counts in the wrong shape":     {"image_output_counts.json", `{"2026-11-20": 3}`},
+		"accounts as an object":            {"accounts.json", `{"items": [{"access_token": "x"}]}`},
+		"accounts with trailing garbage":   {"accounts.json", `[] trailing-invalid-content`},
+		"accounts with a second value":     {"accounts.json", `[{"access_token": "x"}] [{"access_token": "y"}]`},
+		"later file with trailing garbage": {"proxies.json", "[]\n}"},
+		"accounts not JSON":                {"accounts.json", `[{"access_token": "x"`},
+		"accounts without any token":       {"accounts.json", `[{"email": "a@x"}, {"email": "b@x"}]`},
+		"later file broken":                {"image_tags.json", `{"broken"`},
+		"later file in the wrong shape":    {"image_index.json", `{"rows": []}`},
+		"proxies not a list":               {"proxies.json", `{"url": "http://p:1"}`},
+		"counts in the wrong shape":        {"image_output_counts.json", `{"2026-11-20": 3}`},
 	}
 	for name, change := range cases {
 		broken := t.TempDir()
