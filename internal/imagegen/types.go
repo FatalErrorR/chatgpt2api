@@ -161,3 +161,5 @@ func (h Hooks) FormatImageResult(items []map[string]any, prompt, responseFormat,
 	}
 	return result
 }
+
+func nowUnix() int64 { return time.Now().Unix() }

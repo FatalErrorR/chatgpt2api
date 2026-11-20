@@ -93,7 +93,12 @@
   - `/api/accounts*`（除 CPA/sub2api/OAuth/协议登录）、`/health`（含 HTML 监控页）
   - 契约：**29/60 一致**，2 个已知差异（存储后端结构）。导入时按代理平均分配依赖第 5 步的代理清单
   - 测试对照：`docs/contract/test-map.md`
-- [ ] 4. 生图链路
+- [ ] 4. 生图链路（进行中）
+  - [x] `internal/imagegen`：单次尝试、换号重试主循环（6 类策略 + 并发位归还）、n 张并行、结果格式化、token 计数（105 组 Python 向量一致）；`test_image_stream_retry.py` 23 个测试全部移植通过
+  - [x] `internal/chatgptweb`：用上游 Go 客户端的传输发送 Python 版的请求体（上传、sentinel、prepare、picture_v2 对话、SSE 硬上限、轮询/二次确认/内容违规、下载重试、Cloudflare 重试与代理健康）
+  - [x] `/v1/images/generations`、`/v1/images/edits`（multipart/JSON/data URL/远程 URL/蒙版）、内容过滤与 AI 审核、调用日志、`/v1/*` 错误格式；假上游实测文生图、图生图 1/3/4 张参考图
+  - [ ] 参考图压缩（image_fit）、出图放大与精确尺寸（image_upscale）、Codex 线路、账号测试生图（ImageProbe）、GIF
+  - 契约：**44/60 一致**，2 个已知差异
 - [x] 5. 代理池
   - `internal/proxylist`（清单、健康、预留、按负载最少分配、批量添加与厂商命名）、`internal/proxyops`（检测、停用并迁移、启用、重新分配、代理商故障判定）、`internal/docstore`（proxies.json 等整份 JSON 文档）
   - `/api/proxies*`、`/api/accounts/reassign-proxy`、`/api/proxy/test`、`/api/proxy/runtime`；导入时按代理平均分配已接通

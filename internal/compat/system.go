@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/basketikun/chatgpt2api/internal/imagegen"
+	"github.com/basketikun/chatgpt2api/internal/logs"
 	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/proxyops"
 	"github.com/basketikun/chatgpt2api/internal/settings"
@@ -19,7 +21,10 @@ type Deps struct {
 	Pool        *pool.Service
 	Proxies     ProxyReserver // proxy list reservations for imports
 	ProxyOps    *proxyops.Ops
-	ImageProbe  pool.ImageProbe // one small test image per account (step 4); nil until wired
+	ImageProbe  pool.ImageProbe // one small test image per account
+	Images      *imagegen.Generator
+	Logs        *logs.Service
+	DataDir     string
 	Version     string
 	DatabaseURL string
 }
@@ -65,6 +70,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerUserKeys(admin, d)
 	registerAccounts(admin, d)
 	registerProxies(admin, d)
+	registerImages(engine, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

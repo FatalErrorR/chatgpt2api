@@ -4,12 +4,15 @@ package app
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/basketikun/chatgpt2api/internal/chatgptweb"
 	"github.com/basketikun/chatgpt2api/internal/compat"
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/docstore"
 	"github.com/basketikun/chatgpt2api/internal/handler"
+	"github.com/basketikun/chatgpt2api/internal/imagegen"
 	"github.com/basketikun/chatgpt2api/internal/logs"
 	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/proxylist"
@@ -17,6 +20,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/repository"
 	"github.com/basketikun/chatgpt2api/internal/service"
 	"github.com/basketikun/chatgpt2api/internal/settings"
+	"github.com/basketikun/chatgpt2api/internal/upstream"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -100,10 +104,28 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	}
 	proxyOps := &proxyops.Ops{List: proxyList, Pool: accountPool, Settings: store, Log: compatLogs,
 		Test: func(ctx context.Context, proxyURL string) map[string]any { return proxyService.Test(ctx, proxyURL) }}
+	dataDir := store.DataDir
+	if dataDir == "" {
+		dataDir = "data"
+	}
+	imagePipeline := imagegen.NewPipeline(store, imagegen.Hooks{Save: compat.LocalImageSaver(dataDir, store.BaseURL)})
+	images := &imagegen.Generator{
+		Pipeline: imagePipeline,
+		Accounts: accountPool,
+		NewBackend: func(token string, account pool.Account) (imagegen.Backend, error) {
+			proxy, _ := account["proxy"].(string)
+			api := upstream.NewOpenAIBackendAPI(token, strings.TrimSpace(proxy), proxyService, cfg)
+			if accountID, _ := account["account_id"].(string); accountID != "" {
+				api.WithAccountID(accountID)
+			}
+			return &chatgptweb.Backend{API: api, Settings: store, Health: proxyList}, nil
+		},
+	}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
+		Images: images, Logs: compatLogs, DataDir: dataDir,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

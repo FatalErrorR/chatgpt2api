@@ -1,0 +1,623 @@
+{
+ "text": [
+  {
+   "text": "",
+   "model": "gpt-image-2",
+   "tokens": 0
+  },
+  {
+   "text": "",
+   "model": "auto",
+   "tokens": 0
+  },
+  {
+   "text": "",
+   "model": "gpt-4o",
+   "tokens": 0
+  },
+  {
+   "text": "",
+   "model": "gpt-image-2.6-sunburst",
+   "tokens": 0
+  },
+  {
+   "text": "",
+   "model": "codex-gpt-image-2",
+   "tokens": 0
+  },
+  {
+   "text": "a cat",
+   "model": "gpt-image-2",
+   "tokens": 2
+  },
+  {
+   "text": "a cat",
+   "model": "auto",
+   "tokens": 2
+  },
+  {
+   "text": "a cat",
+   "model": "gpt-4o",
+   "tokens": 2
+  },
+  {
+   "text": "a cat",
+   "model": "gpt-image-2.6-sunburst",
+   "tokens": 2
+  },
+  {
+   "text": "a cat",
+   "model": "codex-gpt-image-2",
+   "tokens": 2
+  },
+  {
+   "text": "画一只橘猫，16:9 横版构图，简洁插画",
+   "model": "gpt-image-2",
+   "tokens": 19
+  },
+  {
+   "text": "画一只橘猫，16:9 横版构图，简洁插画",
+   "model": "auto",
+   "tokens": 19
+  },
+  {
+   "text": "画一只橘猫，16:9 横版构图，简洁插画",
+   "model": "gpt-4o",
+   "tokens": 19
+  },
+  {
+   "text": "画一只橘猫，16:9 横版构图，简洁插画",
+   "model": "gpt-image-2.6-sunburst",
+   "tokens": 19
+  },
+  {
+   "text": "画一只橘猫，16:9 横版构图，简洁插画",
+   "model": "codex-gpt-image-2",
+   "tokens": 19
+  },
+  {
+   "text": "Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! ",
+   "model": "gpt-image-2",
+   "tokens": 81
+  },
+  {
+   "text": "Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! ",
+   "model": "auto",
+   "tokens": 81
+  },
+  {
+   "text": "Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! ",
+   "model": "gpt-4o",
+   "tokens": 81
+  },
+  {
+   "text": "Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! ",
+   "model": "gpt-image-2.6-sunburst",
+   "tokens": 81
+  },
+  {
+   "text": "Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! Hello, world! ",
+   "model": "codex-gpt-image-2",
+   "tokens": 81
+  },
+  {
+   "text": "输出图片尺寸为 1024x1536。输出图片质量为 auto。",
+   "model": "gpt-image-2",
+   "tokens": 17
+  },
+  {
+   "text": "输出图片尺寸为 1024x1536。输出图片质量为 auto。",
+   "model": "auto",
+   "tokens": 17
+  },
+  {
+   "text": "输出图片尺寸为 1024x1536。输出图片质量为 auto。",
+   "model": "gpt-4o",
+   "tokens": 17
+  },
+  {
+   "text": "输出图片尺寸为 1024x1536。输出图片质量为 auto。",
+   "model": "gpt-image-2.6-sunburst",
+   "tokens": 17
+  },
+  {
+   "text": "输出图片尺寸为 1024x1536。输出图片质量为 auto。",
+   "model": "codex-gpt-image-2",
+   "tokens": 17
+  }
+ ],
+ "input": [
+  {
+   "w": 1024,
+   "h": 1024,
+   "detail": "auto",
+   "tokens": 1659
+  },
+  {
+   "w": 1024,
+   "h": 1024,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 1024,
+   "h": 1024,
+   "detail": "high",
+   "tokens": 1659
+  },
+  {
+   "w": 1024,
+   "h": 1024,
+   "detail": "original",
+   "tokens": 1659
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "detail": "auto",
+   "tokens": 2489
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "detail": "high",
+   "tokens": 2489
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "detail": "original",
+   "tokens": 2489
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "detail": "auto",
+   "tokens": 2489
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "detail": "high",
+   "tokens": 2489
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "detail": "original",
+   "tokens": 2489
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "detail": "auto",
+   "tokens": 2465
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "detail": "high",
+   "tokens": 2465
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "detail": "original",
+   "tokens": 2465
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "detail": "auto",
+   "tokens": 7
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "detail": "high",
+   "tokens": 7
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "detail": "original",
+   "tokens": 7
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "detail": "auto",
+   "tokens": 519
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "detail": "high",
+   "tokens": 519
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "detail": "original",
+   "tokens": 519
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "detail": "auto",
+   "tokens": 2353
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "detail": "high",
+   "tokens": 2353
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "detail": "original",
+   "tokens": 2353
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "detail": "auto",
+   "tokens": 104
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "detail": "low",
+   "tokens": 415
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "detail": "high",
+   "tokens": 104
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "detail": "original",
+   "tokens": 104
+  }
+ ],
+ "generated": [
+  {
+   "w": 1024,
+   "h": 1024,
+   "quality": "auto",
+   "tokens": 1056
+  },
+  {
+   "w": 1024,
+   "h": 1024,
+   "quality": "low",
+   "tokens": 272
+  },
+  {
+   "w": 1024,
+   "h": 1024,
+   "quality": "high",
+   "tokens": 4160
+  },
+  {
+   "w": 1024,
+   "h": 1024,
+   "quality": "hd",
+   "tokens": 4160
+  },
+  {
+   "w": 1024,
+   "h": 1024,
+   "quality": "medium",
+   "tokens": 1056
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "quality": "auto",
+   "tokens": 1584
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "quality": "low",
+   "tokens": 408
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "quality": "high",
+   "tokens": 6240
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "quality": "hd",
+   "tokens": 6240
+  },
+  {
+   "w": 1536,
+   "h": 1024,
+   "quality": "medium",
+   "tokens": 1584
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "quality": "auto",
+   "tokens": 1584
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "quality": "low",
+   "tokens": 408
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "quality": "high",
+   "tokens": 6240
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "quality": "hd",
+   "tokens": 6240
+  },
+  {
+   "w": 1024,
+   "h": 1536,
+   "quality": "medium",
+   "tokens": 1584
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "quality": "auto",
+   "tokens": 16896
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "quality": "low",
+   "tokens": 4352
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "quality": "high",
+   "tokens": 66560
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "quality": "hd",
+   "tokens": 66560
+  },
+  {
+   "w": 4096,
+   "h": 4096,
+   "quality": "medium",
+   "tokens": 16896
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "quality": "auto",
+   "tokens": 5
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "quality": "low",
+   "tokens": 2
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "quality": "high",
+   "tokens": 17
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "quality": "hd",
+   "tokens": 17
+  },
+  {
+   "w": 64,
+   "h": 64,
+   "quality": "medium",
+   "tokens": 5
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "quality": "auto",
+   "tokens": 679
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "quality": "low",
+   "tokens": 175
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "quality": "high",
+   "tokens": 2674
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "quality": "hd",
+   "tokens": 2674
+  },
+  {
+   "w": 3000,
+   "h": 200,
+   "quality": "medium",
+   "tokens": 679
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "quality": "auto",
+   "tokens": 48469
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "quality": "low",
+   "tokens": 12485
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "quality": "high",
+   "tokens": 190938
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "quality": "hd",
+   "tokens": 190938
+  },
+  {
+   "w": 8000,
+   "h": 6000,
+   "quality": "medium",
+   "tokens": 48469
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "quality": "auto",
+   "tokens": 291
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "quality": "low",
+   "tokens": 75
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "quality": "high",
+   "tokens": 1146
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "quality": "hd",
+   "tokens": 1146
+  },
+  {
+   "w": 17,
+   "h": 9000,
+   "quality": "medium",
+   "tokens": 291
+  }
+ ],
+ "parse": [
+  {
+   "size": "1024x1536",
+   "wh": [
+    1024,
+    1536
+   ]
+  },
+  {
+   "size": "",
+   "wh": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "size": null,
+   "wh": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "size": "abc",
+   "wh": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "size": "9x9",
+   "wh": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "size": "1792 * 1024",
+   "wh": [
+    1792,
+    1024
+   ]
+  },
+  {
+   "size": "1x99999",
+   "wh": [
+    1024,
+    1024
+   ]
+  },
+  {
+   "size": "00x00",
+   "wh": [
+    1024,
+    1024
+   ]
+  }
+ ]
+}
