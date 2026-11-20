@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -143,9 +144,15 @@ func (s *Service) saveLocked() {
 		return
 	}
 	if err := s.store.Save(s.order, changed, removed); err != nil {
-		// keep going like Python would after a failed write; the next save retries the same documents
+		// keep going like Python would after a failed write, but remember what is still owed so the
+		// next save retries it: changed rows as unsaved, removed rows as still in the database
+		// (otherwise a deleted account would come back after a restart)
+		log.Printf("account save failed (will retry on the next save): %v", err)
 		for token := range changed {
 			delete(s.persisted, token)
+		}
+		for _, token := range removed {
+			s.persisted[token] = ""
 		}
 	}
 }
