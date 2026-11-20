@@ -8,6 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 import time
+from datetime import date, datetime, timedelta
 
 from services.storage.base import StorageBackend
 
@@ -619,14 +620,29 @@ class ConfigStore:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def cleanup_old_images(self) -> int:
-        cutoff = time.time() - self.image_retention_days * 86400
+    def image_retention_keep_from(self, today: date | None = None) -> str:
+        """按自然日保留最近 image_retention_days 天（含今天）：返回保留的最早日期 YYYY-MM-DD。"""
+        today = today or date.today()
+        return (today - timedelta(days=self.image_retention_days - 1)).isoformat()
+
+    def cleanup_old_images(self, today: date | None = None) -> int:
+        """删除保留期之前的图片。按图片所在的日期目录（YYYY/MM/DD）判断，同一天的图片一起保留或一起清理；
+        不在日期目录里的图片按修改日期判断。"""
+        keep_from = self.image_retention_keep_from(today)
+        root = self.images_dir
         removed = 0
-        for path in self.images_dir.rglob("*"):
-            if path.is_file() and path.stat().st_mtime < cutoff:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            parts = path.relative_to(root).parts
+            if len(parts) >= 4 and all(part.isdigit() for part in parts[:3]):
+                day = f"{parts[0]}-{parts[1]}-{parts[2]}"
+            else:
+                day = datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
+            if day < keep_from:
                 path.unlink()
                 removed += 1
-        for path in sorted((p for p in self.images_dir.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+        for path in sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
             try:
                 path.rmdir()
             except OSError:

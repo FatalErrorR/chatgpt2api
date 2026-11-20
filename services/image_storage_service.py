@@ -43,13 +43,12 @@ def _now_iso() -> str:
 
 
 def _safe_relative_path(path: str) -> str:
+    # 纯字符串处理（列表对账时每张图都要调用，pathlib 太慢）；规则同 pathlib：忽略空段和 "."，拒绝 ".."
     value = str(path or "").strip().replace("\\", "/").lstrip("/")
-    if not value:
+    parts = [part for part in value.split("/") if part not in {"", "."}]
+    if not value or ".." in parts:
         raise HTTPException(status_code=404, detail="image not found")
-    parts = Path(value).parts
-    if any(part in {"", ".", ".."} for part in parts):
-        raise HTTPException(status_code=404, detail="image not found")
-    return Path(*parts).as_posix()
+    return "/".join(parts) or "."
 
 
 def _image_dimensions(payload: bytes) -> tuple[int, int] | None:
@@ -314,10 +313,12 @@ class ImageStorageService:
         """补上磁盘上有、索引里没有的图片，去掉文件已不存在的条目（如被定时清理删掉的），有变化时写回。"""
         root = config.images_dir
         changed = False
+        on_disk: set[str] = set()
         for path in root.rglob("*"):
             if not path.is_file() or not _is_image_rel(path.name):
                 continue
             rel = path.relative_to(root).as_posix()
+            on_disk.add(rel)
             if rel in indexed:
                 continue
             dimensions = None
@@ -343,7 +344,7 @@ class ImageStorageService:
                 indexed.pop(rel, None)
                 changed = True
                 continue
-            local = _local_image_path(rel).is_file()
+            local = rel in on_disk  # 上面刚遍历过磁盘，不再逐张解析路径
             webdav = bool(item.get("webdav"))
             if not local and not webdav:
                 indexed.pop(rel, None)

@@ -213,7 +213,7 @@ export function ConfigCard() {
               placeholder="30"
              
             />
-            <p className="text-xs text-ink-3">自动删除多少天前的本地图片。</p>
+            <p className="text-xs text-ink-3">按天清理：保留最近多少天（含今天）的图片，每 30 分钟检查一次。图片页「存储 → 定时清理规则」可预览影响。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-ink-2">图片轮询超时</label>

@@ -66,5 +66,52 @@ class BatchImageDeleteTests(unittest.TestCase):
         self.assertFalse(self.storage.delete(self.rels[2]))
 
 
+def _old_safe_relative_path(path):
+    """改写前的 pathlib 版本，作为对照。"""
+    from fastapi import HTTPException
+    value = str(path or "").strip().replace("\\", "/").lstrip("/")
+    if not value:
+        raise HTTPException(status_code=404, detail="image not found")
+    parts = Path(value).parts
+    if any(part in {"", ".", ".."} for part in parts):
+        raise HTTPException(status_code=404, detail="image not found")
+    return Path(*parts).as_posix()
+
+
+class SafeRelativePathTests(unittest.TestCase):
+    CASES = [
+        "2026/11/01/a.png", "/2026/11/01/a.png", "2026//11/./01/a.png", "2026\\11\\01\\a.png",
+        "  2026/11/01/a.png  ", "a.png", "./a.png", "a/../b.png", "../a.png", "..", ".", "./", "//",
+        "", "   ", None, "a/b/", "a/.../b.png", "a/..b/c.png", "2026/11/01/a.PNG", "a/./../b.png",
+    ]
+
+    def test_matches_the_old_pathlib_version(self):
+        from fastapi import HTTPException
+        for case in self.CASES:
+            with self.subTest(case=case):
+                try:
+                    expected = _old_safe_relative_path(case)
+                except HTTPException:
+                    expected = "rejected"
+                try:
+                    got = image_storage_service._safe_relative_path(case)
+                except HTTPException:
+                    got = "rejected"
+                self.assertEqual(got, expected)
+
+
+class ReconcileTests(unittest.TestCase):
+    setUp = BatchImageDeleteTests.setUp
+
+    def test_reconcile_drops_missing_files_and_adds_new_ones(self):
+        (self.images / self.rels[0]).unlink()
+        new_rel = "2026/11/03/fresh.png"
+        (self.images / new_rel).parent.mkdir(parents=True, exist_ok=True)
+        (self.images / new_rel).write_bytes(b"png")
+        rels = sorted(item["path"] for item in self.storage.list_items("", refresh=True))
+        self.assertEqual(rels, sorted([*self.rels[1:], new_rel]))
+        self.assertEqual(sorted(json.loads(self.index_file.read_text())["items"]), rels)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -878,14 +878,17 @@ export async function deleteImageTag(tag: string) {
 export type ImageStorageStats = {
   disk_total_mb: number; disk_used_mb: number; disk_free_mb: number;
   image_count: number; image_size_mb: number; image_size_bytes: number;
+  /** 定时清理规则：保留最近多少天（含今天）、保留的最早日期、服务器的今天 */
+  retention_days?: number; retention_keep_from?: string; today?: string;
 };
+
+/** 只改「图片自动清理」天数，其他设置不动 */
+export async function updateImageRetentionDays(days: number) {
+  return httpRequest<{ config: SettingsConfig }>("/api/settings", { method: "POST", body: { image_retention_days: days } });
+}
 
 export async function fetchImageStorage() {
   return httpRequest<ImageStorageStats>("/api/images/storage");
-}
-
-export async function compressAllImages() {
-  return httpRequest<{ compressed: number; saved_bytes: number; saved_mb: number }>("/api/images/storage/compress", { method: "POST" });
 }
 
 export async function deleteToTarget(targetFreeMb: number, dryRun = false) {

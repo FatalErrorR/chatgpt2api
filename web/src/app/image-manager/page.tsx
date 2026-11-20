@@ -14,9 +14,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { compressAllImages, deleteImageTag, deleteManagedImages, deleteToTarget, downloadImages, downloadSingleImage, fetchImageStorage, fetchImageTags, fetchManagedImagePaths, fetchManagedImages, setImageTags, type ImageStorageStats, type ManagedImage } from "@/lib/api";
+import { deleteImageTag, deleteManagedImages, deleteToTarget, downloadImages, downloadSingleImage, fetchImageStorage, fetchImageTags, fetchManagedImagePaths, fetchManagedImages, setImageTags, updateImageRetentionDays, type ImageStorageStats, type ManagedImage } from "@/lib/api";
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/ui/states";
 import { ChunkedDeleteError, deleteInChunks, type DeleteProgress } from "@/lib/chunked-delete";
+import { dayBefore, parseRetentionDays, retentionKeepFrom } from "@/lib/image-retention";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +74,14 @@ function ImageManagerContent() {
   const [deleteTarget, setDeleteTarget] = useState<ManagedImage | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState<DeleteProgress | null>(null);
+  // 按日期删除：选好日期就先查出会删哪些，弹窗里直接显示张数
+  const [byDatePreview, setByDatePreview] = useState<{ date: string; paths: string[] } | null>(null);
+  const [byDatePreviewError, setByDatePreviewError] = useState("");
+  // 定时清理规则：保留最近 N 天（含今天），每 30 分钟检查一次
+  const [retentionOpen, setRetentionOpen] = useState(false);
+  const [retentionInput, setRetentionInput] = useState("");
+  const [retentionSaving, setRetentionSaving] = useState(false);
+  const [retentionPreview, setRetentionPreview] = useState<{ keepFrom: string; count: number } | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [storage, setStorage] = useState<ImageStorageStats | null>(null);
   const [storageLoading, setStorageLoading] = useState(false);
@@ -286,6 +295,54 @@ function ImageManagerContent() {
     }
   };
 
+  useEffect(() => {
+    if (deleteMode !== "byDate" || !deleteStartDate) {
+      setByDatePreview(null);
+      return;
+    }
+    let cancelled = false;
+    setByDatePreview(null);
+    setByDatePreviewError("");
+    fetchManagedImagePaths({ end_date: deleteStartDate })
+      .then((data) => { if (!cancelled) setByDatePreview({ date: deleteStartDate, paths: data.paths }); })
+      .catch((error) => { if (!cancelled) setByDatePreviewError(error instanceof Error ? error.message : "统计失败"); });
+    return () => { cancelled = true; };
+  }, [deleteMode, deleteStartDate]);
+
+  const retentionDays = parseRetentionDays(retentionInput);
+  const retentionKeep = retentionDays && storage?.today ? retentionKeepFrom(storage.today, retentionDays) : "";
+
+  // 改天数时预览：保留期之前（不含保留的第一天）现在有多少张
+  useEffect(() => {
+    if (!retentionOpen || !retentionKeep) {
+      setRetentionPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setRetentionPreview(null);
+    const timer = setTimeout(() => {
+      fetchManagedImagePaths({ end_date: dayBefore(retentionKeep) })
+        .then((data) => { if (!cancelled) setRetentionPreview({ keepFrom: retentionKeep, count: data.paths.length }); })
+        .catch(() => { if (!cancelled) setRetentionPreview(null); });
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [retentionOpen, retentionKeep]);
+
+  const saveRetention = async () => {
+    if (!retentionDays) return;
+    setRetentionSaving(true);
+    try {
+      await updateImageRetentionDays(retentionDays);
+      toast.success(`已保存：保留最近 ${retentionDays} 天的图片`);
+      setRetentionOpen(false);
+      void loadStorage();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setRetentionSaving(false);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deleteMode || selectedCount === 0) return;
     // 「删除筛选结果」按页面上的日期和标签取路径，和列表里看到的一致
@@ -332,17 +389,12 @@ function ImageManagerContent() {
                 <button
                   type="button"
                   className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-ink-2 hover:bg-surface-hover hover:text-ink"
-                  onClick={async () => {
-                    try {
-                      const r = await compressAllImages();
-                      toast.success(`已压缩，节省 ${r.saved_mb} MB`);
-                      void loadStorage();
-                    } catch {
-                      toast.error("压缩失败");
-                    }
+                  onClick={() => {
+                    setRetentionInput(String(storage?.retention_days ?? ""));
+                    setRetentionOpen(true);
                   }}
                 >
-                  压缩优化
+                  定时清理规则…
                 </button>
                 <button
                   type="button"
@@ -390,6 +442,15 @@ function ImageManagerContent() {
               <i className="block h-full bg-ink" style={{ width: `${Math.min(100, (storage.disk_used_mb / Math.max(1, storage.disk_total_mb)) * 100)}%` }} />
             </div>
           </div>
+          {storage.retention_days ? (
+            <div>
+              <div className="text-xs text-ink-3">定时清理</div>
+              <div className="text-[13px] text-ink">
+                保留最近 {storage.retention_days} 天
+                {storage.retention_keep_from ? <span className="text-ink-3">（{storage.retention_keep_from.slice(5)} 起）</span> : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="rounded-[10px] border border-line bg-surface px-[18px] py-3.5 text-[13px] text-ink-3">
@@ -655,6 +716,51 @@ function ImageManagerContent() {
         </>
       )}
 
+      <Dialog open={retentionOpen} onOpenChange={(open) => (!retentionSaving ? setRetentionOpen(open) : null)}>
+        <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
+          <DialogHeader className="gap-1.5">
+            <DialogTitle className="font-serif text-[22px] font-medium">定时清理规则</DialogTitle>
+            <DialogDescription className="text-[13px] leading-6 text-ink-2">
+              按天清理：只保留最近 N 天（含今天）的图片，更早的整天删除。每 30 分钟自动检查一次，删除后无法恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex items-center gap-2 text-[13px] text-ink-2">
+            保留最近
+            <Input
+              className="h-[34px] w-24 rounded-[7px] text-right"
+              type="number"
+              min={1}
+              max={3650}
+              value={retentionInput}
+              onChange={(event) => setRetentionInput(event.target.value)}
+              disabled={retentionSaving}
+            />
+            天的图片
+          </label>
+          <div className={cn("rounded-[7px] px-3 py-2.5 text-[13px]", retentionPreview && retentionPreview.count > 0 ? "bg-bad-soft text-bad" : "bg-sunken text-ink-2")}>
+            {!retentionDays
+              ? "请输入 1 到 3650 之间的整数天数。"
+              : !retentionKeep
+                ? `保留最近 ${retentionDays} 天。`
+                : !retentionPreview
+                  ? `保留 ${retentionKeep} 及之后的图片，正在统计更早的图片…`
+                  : retentionPreview.count > 0
+                    ? `保留 ${retentionKeep} 及之后的图片。现在有 ${retentionPreview.count.toLocaleString("en-US")} 张更早的图片，保存后 30 分钟内会被删除。`
+                    : `保留 ${retentionKeep} 及之后的图片。目前没有更早的图片。`}
+          </div>
+          <DialogFooter className="pt-2">
+            <Button variant="ghost" onClick={() => setRetentionOpen(false)} disabled={retentionSaving}>取消</Button>
+            <Button
+              disabled={!retentionDays || retentionSaving || retentionDays === storage?.retention_days}
+              onClick={() => void saveRetention()}
+            >
+              {retentionSaving ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={cleanupOpen} onOpenChange={(open) => (!cleanupBusy ? setCleanupOpen(open) : null)}>
         <DialogContent showCloseButton={false} className="rounded-[14px] p-6 sm:max-w-[480px]">
           <DialogHeader className="gap-1.5">
@@ -735,27 +841,44 @@ function ImageManagerContent() {
           <DialogHeader className="gap-1.5">
             <DialogTitle className="font-serif text-[22px] font-medium">按日期删除图片</DialogTitle>
             <DialogDescription className="text-[13px] leading-6 text-ink-2">
-              删除所选日期之前的全部图片和缩略图，无法恢复。
+              删除所选日期及之前的全部图片和缩略图，无法恢复。
             </DialogDescription>
           </DialogHeader>
           <label className="flex items-center gap-2 text-[13px] text-ink-2">
             删除
             <Input className="w-44" type="date" value={deleteStartDate} onChange={(event) => setDeleteStartDate(event.target.value)} />
-            之前的图片
+            及之前的图片
           </label>
+          {deleteStartDate && !deleteProgress ? (
+            <div
+              className={cn(
+                "rounded-[7px] px-3 py-2.5 text-[13px]",
+                byDatePreview && byDatePreview.paths.length > 0 ? "bg-bad-soft text-bad" : "bg-sunken text-ink-2",
+              )}
+            >
+              {byDatePreviewError
+                ? `统计失败：${byDatePreviewError}`
+                : !byDatePreview
+                  ? "正在统计要删除的图片…"
+                  : byDatePreview.paths.length > 0
+                    ? `将删除 ${byDatePreview.paths.length.toLocaleString("en-US")} 张图片。`
+                    : "这个日期及之前没有图片，不会删除任何图片。"}
+            </div>
+          ) : null}
           <DeleteProgressBar progress={deleteProgress} />
           <DialogFooter className="pt-2">
             <Button variant="ghost" onClick={() => setDeleteMode(null)} disabled={isDeleting}>取消</Button>
             <Button
               variant="destructive"
-              disabled={!deleteStartDate || isDeleting}
+              disabled={!byDatePreview || byDatePreview.paths.length === 0 || isDeleting}
               onClick={() => {
-                if (!deleteStartDate) return;
-                void runBatchDelete(async () => (await fetchManagedImagePaths({ end_date: deleteStartDate })).paths);
+                if (!byDatePreview) return;
+                const { paths } = byDatePreview;
+                void runBatchDelete(async () => paths);
               }}
             >
               {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              删除
+              删除{byDatePreview && byDatePreview.paths.length > 0 ? ` ${byDatePreview.paths.length.toLocaleString("en-US")} 张` : ""}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -11,7 +11,6 @@ from api.support import require_admin, require_identity, resolve_image_base_url
 from services.backup_service import BackupError, backup_service
 from services.config import config
 from services.image_service import (
-    compress_images,
     delete_images,
     delete_to_target,
     download_images_zip,
@@ -326,11 +325,6 @@ def create_router(app_version: str) -> APIRouter:
     async def get_image_storage(authorization: str | None = Header(default=None)):
         require_admin(authorization)
         return storage_stats()
-
-    @router.post("/api/images/storage/compress")
-    async def compress_all_images(authorization: str | None = Header(default=None)):
-        require_admin(authorization)
-        return await run_in_threadpool(compress_images)
 
     @router.post("/api/images/storage/cleanup-to-target")
     async def cleanup_to_target(

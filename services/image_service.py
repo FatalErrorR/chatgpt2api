@@ -5,6 +5,7 @@ import shutil
 import threading
 import time
 import zipfile
+from datetime import date
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -299,31 +300,11 @@ def storage_stats() -> dict:
         "image_count": image_count,
         "image_size_mb": image_size // (1024 * 1024),
         "image_size_bytes": image_size,
+        # 定时清理规则：保留最近 N 天（含今天），today 用服务器日期，前端据此预览
+        "retention_days": config.image_retention_days,
+        "retention_keep_from": config.image_retention_keep_from(),
+        "today": date.today().isoformat(),
     }
-
-
-def compress_images(quality: int = 60) -> dict:
-    """重新压缩所有图片，返回节省的空间"""
-    saved = 0
-    count = 0
-    for p in sorted(config.images_dir.rglob("*.png")):
-        if not p.is_file():
-            continue
-        try:
-            orig = p.stat().st_size
-            with Image.open(p) as img:
-                img = ImageOps.exif_transpose(img)
-                img.save(str(p) + ".tmp", format="PNG", optimize=True)
-            new_size = Path(str(p) + ".tmp").stat().st_size
-            if new_size < orig:
-                Path(str(p) + ".tmp").replace(p)
-                saved += orig - new_size
-                count += 1
-            else:
-                Path(str(p) + ".tmp").unlink()
-        except Exception:
-            pass
-    return {"compressed": count, "saved_bytes": saved, "saved_mb": saved // (1024 * 1024)}
 
 
 def delete_to_target(target_free_mb: int, dry_run: bool = False) -> dict:
