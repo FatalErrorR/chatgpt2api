@@ -467,3 +467,29 @@ func TestFailoverSettingDefaultsAndBounds(t *testing.T) {
 		}
 	}
 }
+
+// Go-side behaviour: progress events do not block a retry (Python's emitted_for_token did).
+func TestResetAfterProgressSwitchesAccount(t *testing.T) {
+	accounts := &fakeAccounts{tokens: []any{"one", "two"}, sameProxy: map[string]bool{}}
+	g := newGenerator(nil, accounts)
+	g.Stream = func(_ context.Context, backend Backend, req Request, index, total int, emit func(Output)) error {
+		emit(newOutput("progress", req, index, total))
+		if backend.(nopBackend).token == "one" {
+			return resetErr
+		}
+		emit(newOutput("result", req, index, total))
+		return nil
+	}
+	result, err := g.GenerateSingleImage(context.Background(), Request{Model: "gpt-image-2", Prompt: "cat"}, 1, 1)
+	if err != nil || result[len(result)-1].Kind != "result" || accounts.calls != 2 {
+		t.Fatalf("err %v calls %d", err, accounts.calls)
+	}
+}
+
+// ...but a plain timeout after progress still does not switch when failover is off.
+func TestPlainTimeoutAfterProgressStillDoesNotSwitch(t *testing.T) {
+	_, err, seen, _ := runFailover(t, tokens("one"), false, 60, 600, 0)
+	if err == nil || len(seen) != 1 {
+		t.Fatalf("err %v seen %v", err, seen)
+	}
+}

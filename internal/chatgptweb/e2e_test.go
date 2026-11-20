@@ -190,18 +190,16 @@ func TestForbiddenAccountIsSidelinedAndAnotherOneDraws(t *testing.T) {
 	e.noSlotsHeld(t)
 }
 
-// A stream cut off after the first events does NOT switch accounts. This copies the Python
-// version: emitted_for_token turns true on any output, progress included, so the stream-reset retry
-// (main 1162271) only fires when the reset comes before the first event. Kept for parity; see
-// docs/go-migration.md "已知的 Python 行为差异".
-func TestDroppedStreamAfterProgressDoesNotSwitch(t *testing.T) {
+// A stream cut off after the first events switches accounts: nothing reached the caller yet.
+// (Python stopped retrying after the first progress event; the Go port deliberately does not.)
+func TestDroppedStreamAfterProgressSwitchesAccount(t *testing.T) {
 	e := newEnv(t, "fake-drop-1", "fake-ok-1")
-	_, err := e.run(t, imagegen.Request{})
-	if err == nil || err.Error() != "upstream connection was interrupted, please retry later" {
-		t.Fatalf("err %v", err)
+	outputs, err := e.run(t, imagegen.Request{})
+	if err != nil || len(resultURLs(outputs)) != 1 {
+		t.Fatalf("outputs %v err %v", outputs, err)
 	}
-	if e.accounts.GetAccount("fake-drop-1")["fail"] != 1 || e.accounts.GetAccount("fake-ok-1")["success"] != 0 {
-		t.Fatal("expected one failed attempt and no switch")
+	if e.accounts.GetAccount("fake-drop-1")["fail"] != 1 || e.accounts.GetAccount("fake-ok-1")["success"] != 1 {
+		t.Fatal("expected the dropped attempt to fail and the next account to draw")
 	}
 	e.noSlotsHeld(t)
 }

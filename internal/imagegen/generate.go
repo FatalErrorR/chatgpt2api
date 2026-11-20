@@ -60,11 +60,17 @@ func withAccount(err *GenerationError, email string) *GenerationError {
 
 // attemptResult says how one attempt ended.
 type attemptResult struct {
-	outputs  []Output
-	emitted  bool
-	message  bool
-	result   bool
-	lastConv string
+	outputs []Output
+	// emitted: any output, progress included (Python's emitted_for_token).
+	emitted bool
+	// delivered: a result or a message came back. Only then is switching accounts pointless; until
+	// then nothing reached the caller (outputs are collected before responding), so a failure after
+	// progress events may still try another account. Deliberate difference from Python, which
+	// stopped retrying after the first progress event (see docs/go-migration.md).
+	delivered bool
+	message   bool
+	result    bool
+	lastConv  string
 }
 
 func (g *Generator) attempt(ctx context.Context, token string, account pool.Account, req Request, index, total int, email string) (attemptResult, error) {
@@ -89,6 +95,9 @@ func (g *Generator) attempt(ctx context.Context, token string, account pool.Acco
 			return
 		}
 		res.emitted = true
+		if out.Kind == "message" || out.Kind == "result" {
+			res.delivered = true
+		}
 		res.message = out.Kind == "message"
 		res.result = res.result || out.Kind == "result"
 		res.outputs = append(res.outputs, out)
@@ -225,6 +234,8 @@ func (g *Generator) GenerateSingleImage(ctx context.Context, req Request, index,
 			}
 			g.Accounts.MarkImageResult(token, false)
 			timeout.AccountEmail = firstNonEmpty(timeout.AccountEmail, email)
+			// kept as in Python: after progress, a plain (non-failover) timeout does not switch, or one
+			// request could wait image_poll_timeout_secs five times over
 			if !res.emitted {
 				pollTimeoutRetries++
 				if pollTimeoutRetries <= maxPollTimeoutRetries {
@@ -241,7 +252,7 @@ func (g *Generator) GenerateSingleImage(ctx context.Context, req Request, index,
 		case errors.As(err, &generation):
 			g.Accounts.MarkImageResult(token, false)
 			withAccount(generation, email)
-			if IsModelTextReplyInsteadOfImage(generation.Message) && !res.emitted {
+			if IsModelTextReplyInsteadOfImage(generation.Message) && !res.delivered {
 				textReplyRetries++
 				if textReplyRetries <= maxTextReplyRetries {
 					continue
@@ -255,14 +266,14 @@ func (g *Generator) GenerateSingleImage(ctx context.Context, req Request, index,
 		// any other failure
 		g.Accounts.MarkImageResult(token, false)
 		last := err.Error()
-		if !res.emitted && IsImageModelNotFound(err) {
+		if !res.delivered && IsImageModelNotFound(err) {
 			g.Accounts.SidelineImageAccount(token, ModelNotFoundCooldown)
 			modelNotFoundRetries++
 			if modelNotFoundRetries <= maxPollTimeoutRetries {
 				continue
 			}
 		}
-		if !res.emitted && IsTokenInvalidError(last) {
+		if !res.delivered && IsTokenInvalidError(last) {
 			if refreshed := g.Accounts.RefreshAccessToken(ctx, token, true, "image_stream"); refreshed != "" && refreshed != token {
 				continue
 			}
@@ -273,14 +284,14 @@ func (g *Generator) GenerateSingleImage(ctx context.Context, req Request, index,
 			// 403 is usually Cloudflare checking the egress IP: cool the account, avoid its egress this time
 			g.Accounts.SidelineImageAccount(token, ForbiddenCooldown)
 			forbiddenRetries++
-			if !res.emitted && forbiddenRetries <= maxForbiddenRetries {
+			if !res.delivered && forbiddenRetries <= maxForbiddenRetries {
 				for other := range g.Accounts.SameProxyTokens(token) {
 					avoided[other] = true
 				}
 				continue
 			}
 		}
-		if !res.emitted && IsStreamResetError(last) {
+		if !res.delivered && IsStreamResetError(last) {
 			open := g.breaker.note()
 			resetRetries++
 			if !open && resetRetries <= maxStreamResetRetries {
@@ -288,21 +299,21 @@ func (g *Generator) GenerateSingleImage(ctx context.Context, req Request, index,
 				continue
 			}
 		}
-		if !res.emitted && IsTLSConnectionError(last) {
+		if !res.delivered && IsTLSConnectionError(last) {
 			tlsRetries++
 			if tlsRetries <= maxTLSRetries {
 				g.Sleep(ctx, time.Duration(min(2*tlsRetries, 10))*time.Second)
 				continue
 			}
 		}
-		if !res.emitted && IsConnectionTimeoutError(last) {
+		if !res.delivered && IsConnectionTimeoutError(last) {
 			connTimeoutRetries++
 			if connTimeoutRetries <= maxConnTimeoutRetries {
 				g.Sleep(ctx, time.Duration(min(3*connTimeoutRetries, 9))*time.Second)
 				continue
 			}
 		}
-		if forEdits && g.Settings.ImageEditUploadCooldownEnabled() && !res.emitted && pool.IsEditUploadThrottled(last) {
+		if forEdits && g.Settings.ImageEditUploadCooldownEnabled() && !res.delivered && pool.IsEditUploadThrottled(last) {
 			g.Accounts.MarkEditUploadCooldown(token, last)
 			triedUpload[token] = true
 			editUploadRetries++
