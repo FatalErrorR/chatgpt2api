@@ -15,6 +15,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/imagefit"
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
 	"github.com/basketikun/chatgpt2api/internal/imagesize"
+	"github.com/basketikun/chatgpt2api/internal/imagestore"
 	"github.com/basketikun/chatgpt2api/internal/logs"
 	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/proxylist"
@@ -33,10 +34,11 @@ import (
 // route for go to Upstream, which holds every route of upstream v2. As modules are ported, their
 // paths are taken over by compat; Upstream keeps serving the rest.
 type App struct {
-	Engine    *gin.Engine
-	Upstream  *gin.Engine
-	scheduler *service.Scheduler
-	repo      *repository.Repository
+	Engine   *gin.Engine
+	Upstream *gin.Engine
+	repo     *repository.Repository
+	pool     *pool.Service
+	images   *imagestore.Service
 }
 
 // Routes lists the routes of both routers.
@@ -86,7 +88,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	scheduler := service.NewScheduler(accountService, imageService, taskService, logService, cfg)
 
 	db := repo.DB()
-	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate, docstore.Migrate} {
+	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate, docstore.Migrate, imagestore.Migrate} {
 		if err := migrate(db); err != nil {
 			return nil, err
 		}
@@ -110,8 +112,9 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	if dataDir == "" {
 		dataDir = "data"
 	}
+	imageStore := imagestore.New(db, store, dataDir)
 	imagePipeline := imagegen.NewPipeline(store, imagegen.Hooks{
-		Save: compat.LocalImageSaver(dataDir, store.BaseURL),
+		Save: imageStore.Save,
 		Upscale: func(data []byte, size string) []byte {
 			return imagesize.MaybeUpscale(data, size, imagesize.Settings{
 				ExactSize: store.ImageExactSizeEnabled(), Upscale: store.ImageUpscaleEnabled(),
@@ -167,16 +170,20 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
-		Images: images, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
+		Images: images, ImageStore: imageStore, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })
-	return &App{Engine: main, Upstream: engine, scheduler: scheduler, repo: repo}, nil
+	_ = scheduler
+	return &App{Engine: main, Upstream: engine, repo: repo, pool: accountPool, images: imageStore}, nil
 }
 
 // Start resets state left over from a previous run and starts the background jobs.
 func (a *App) Start(ctx context.Context) {
 	a.repo.FailRunningTasks(context.Background(), time.Now().UTC())
 	a.repo.ResetAccountImageInflight(context.Background())
-	a.scheduler.Run(ctx)
+	// The upstream scheduler is not started: it refreshes the upstream accounts table, which the
+	// compat routes do not use, and cleans data/images by file age instead of by calendar day.
+	go a.pool.Watch(ctx)
+	go a.images.Run(ctx)
 }

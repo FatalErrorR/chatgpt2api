@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
+	"github.com/basketikun/chatgpt2api/internal/imagestore"
 	"github.com/basketikun/chatgpt2api/internal/logs"
 	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/proxyops"
@@ -24,6 +25,7 @@ type Deps struct {
 	ImageProbe  pool.ImageProbe // one small test image per account
 	Images      *imagegen.Generator
 	Logs        *logs.Service
+	ImageStore  *imagestore.Service
 	DataDir     string
 	Version     string
 	DatabaseURL string
@@ -72,6 +74,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerProxies(admin, d)
 	registerImages(engine, d)
 	registerLogs(admin, d)
+	registerImageManagement(engine, admin, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

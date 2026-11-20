@@ -68,6 +68,15 @@
   仍按原判断，避免一次请求等五遍 600 秒。测试：`TestResetAfterProgressSwitchesAccount`、
   `TestPlainTimeoutAfterProgressStillDoesNotSwitch`、`TestDroppedStreamAfterProgressSwitchesAccount`。
 
+- 保存图片前的过期清理：Python 每保存一张都遍历一次图片目录；Go 版最多每分钟一次（结果相同，另有每 30 分钟的定时清理）。
+
+## 与上游 v2 的取舍
+
+- 上游的定时器（`service.Scheduler`）不启动：它刷新的是上游自己的 accounts 表（兼容层不用），并按文件修改时间
+  滚动清理 `data/images`，会破坏「按自然日保留」。改为启动兼容层的两个后台任务：账号巡检 `pool.Watch`
+  （`start_limited_account_watcher`）和图片清理 `imagestore.Run`（`_auto_cleanup_worker`，启动时先清一次）。
+  上游任务表的过期清理留到第 9 步。
+
 ## 不迁移
 
 - 压缩优化（`main` 上已删除，会卡死容器）
@@ -114,7 +123,15 @@
   - `internal/logs`：`List`（类型、起止日期按北京时间日期，最新在前，最多 200 条；按写入顺序 `seq` 排，同一秒内也不乱）、`Delete`、`ImageOutputCounts`（今天/昨天/近 7/14/15/30 天/全部，按每日合计）
   - `/api/logs`、`/api/logs/delete`、`/api/logs/image-counts`
   - 契约：061 一致；060 只差在 Python 最新一条是文本接口的调用日志（第 8 步接上后一致），生图与账号日志的字段两边相同
-- [ ] 7. 图片管理
+- [x] 7. 图片管理
+  - `internal/imagestore`：索引表 `compat_images`、标签表 `compat_image_tags`，文件仍在 `data/images`、`data/image_thumbnails`；
+    保存（local/webdav/both，WebDAV 失败则本次出图失败，同 Python）、每分钟最多一次与磁盘对账、分页与标签筛选、批量删除
+    （文件、缩略图、索引、标签）、按自然日清理、缩略图（320 内，EXIF 转正）、ZIP 下载、存储统计、清理到目标空间、WebDAV 测试与同步
+  - 路由：`/api/images`、`/api/images/paths`、`/images/*`、`/image-thumbnails/*`、`/api/images/delete`、`/api/images/download`、
+    `/api/images/download/*`、`/api/images/tags`（GET/POST/DELETE）、`/api/images/storage`、`/api/images/storage/cleanup-to-target`、
+    `/api/image-storage/test`、`/api/image-storage/sync`
+  - 顺带补上账号巡检 `pool.Watch`（之前没迁，上游定时器刷的是另一张表）
+  - 契约：**53/60 一致**，2 个已知差异；剩下 5 个属于第 8、9 步（054–056 文本接口，060 依赖文本调用日志，062 生图任务）
 - [ ] 8. 文本接口
 - [ ] 9. 任务类
 - [ ] 10. 账号来源与备份

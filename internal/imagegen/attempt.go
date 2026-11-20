@@ -110,7 +110,11 @@ func (p *Pipeline) resultOutput(ctx context.Context, backend Backend, req Reques
 	for _, image := range images {
 		items = append(items, map[string]any{"b64_json": base64.StdEncoding.EncodeToString(image)})
 	}
-	data, _ := p.Hooks.FormatImageResult(items, req.Prompt, req.ResponseFormat, req.BaseURL, time.Now().Unix(), "", req.Size)["data"].([]map[string]any)
+	formatted, err := p.Hooks.FormatImageResult(items, req.Prompt, req.ResponseFormat, req.BaseURL, time.Now().Unix(), "", req.Size)
+	if err != nil {
+		return Output{}, false, err
+	}
+	data, _ := formatted["data"].([]map[string]any)
 	if len(data) == 0 {
 		return Output{}, false, nil
 	}

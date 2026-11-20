@@ -102,3 +102,8 @@ func applyOrientation(img image.Image, orientation int) image.Image {
 	}
 	return out
 }
+
+// Orient is ImageOps.exif_transpose for JPEG bytes: img decoded from data, turned upright.
+func Orient(img image.Image, data []byte) image.Image {
+	return applyOrientation(img, jpegOrientation(data))
+}

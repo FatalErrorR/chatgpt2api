@@ -2,9 +2,7 @@ package compat
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,39 +12,12 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
 	"github.com/gin-gonic/gin"
 	xdraw "golang.org/x/image/draw"
 )
-
-// LocalImageSaver stores images under data/images/YYYY/MM/DD/<unix>_<md5>.<png|gif> and returns
-// <base>/images/<rel>, like image_storage_service in local mode. (The full storage service with the
-// index, WebDAV and thumbnails comes with step 7.)
-func LocalImageSaver(dataDir string, defaultBase func() string) func(data []byte, baseURL string) string {
-	return func(data []byte, baseURL string) string {
-		sum := md5.Sum(data)
-		ext := "png"
-		if imagegen.IsGIF(data) {
-			ext = "gif"
-		}
-		now := time.Now()
-		rel := fmt.Sprintf("%s/%d_%s.%s", now.Format("2006/01/02"), now.Unix(), hex.EncodeToString(sum[:]), ext)
-		full := filepath.Join(dataDir, "images", filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err == nil {
-			os.WriteFile(full, data, 0o644)
-		}
-		base := strings.TrimRight(baseURL, "/")
-		if base == "" && defaultBase != nil {
-			base = strings.TrimRight(defaultBase(), "/")
-		}
-		return base + "/images/" + rel
-	}
-}
 
 // resolveImageBaseURL is resolve_image_base_url: config base_url, else this request's origin.
 func resolveImageBaseURL(c *gin.Context, d *Deps) string {
@@ -397,7 +368,6 @@ func registerImages(engine *gin.Engine, d *Deps) {
 		raw, _ := io.ReadAll(c.Request.Body)
 		edit(c, raw)
 	})
-	engine.GET("/images/*image_path", func(c *gin.Context) { serveDataFile(c, d, "images", c.Param("image_path")) })
 }
 
 // detailRepr is str(HTTPException.detail) for {"error": message}: Python's dict repr.
@@ -418,18 +388,3 @@ func abortHTTPError(c *gin.Context, err error) {
 	abortDetail(c, 500, err.Error())
 }
 
-// serveDataFile serves data/<dir>/<rel>, refusing paths that leave the directory.
-func serveDataFile(c *gin.Context, d *Deps, dir, rel string) {
-	root := filepath.Join(d.DataDir, dir)
-	clean := filepath.Clean(filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(rel, "/"))))
-	if !strings.HasPrefix(clean, root+string(filepath.Separator)) {
-		abortDetail(c, 404, "image not found")
-		return
-	}
-	info, err := os.Stat(clean)
-	if err != nil || info.IsDir() {
-		c.AbortWithStatusJSON(404, gin.H{"detail": "image not found"})
-		return
-	}
-	c.File(clean)
-}

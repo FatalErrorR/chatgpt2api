@@ -104,8 +104,8 @@ func (o Output) Chunk() map[string]any {
 
 // Hooks are the parts outside the pipeline: storing an image and the optional upscale.
 type Hooks struct {
-	// Save stores the image and returns its public URL (save_image_bytes).
-	Save func(data []byte, baseURL string) string
+	// Save stores the image and returns its public URL (save_image_bytes); an error fails the result.
+	Save func(data []byte, baseURL string) (string, error)
 	// Upscale is maybe_upscale_image; nil means no upscaling.
 	Upscale func(data []byte, size string) []byte
 }
@@ -117,7 +117,7 @@ func IsGIF(data []byte) bool {
 
 // FormatImageResult is format_image_result: decode, upscale (not GIFs), store, and build the
 // OpenAI data items.
-func (h Hooks) FormatImageResult(items []map[string]any, prompt, responseFormat, baseURL string, created int64, message, size string) map[string]any {
+func (h Hooks) FormatImageResult(items []map[string]any, prompt, responseFormat, baseURL string, created int64, message, size string) (map[string]any, error) {
 	data := []map[string]any{}
 	for _, item := range items {
 		b64, _ := item["b64_json"].(string)
@@ -144,7 +144,11 @@ func (h Hooks) FormatImageResult(items []map[string]any, prompt, responseFormat,
 		}
 		url := ""
 		if h.Save != nil {
-			url = h.Save(image, baseURL)
+			saved, err := h.Save(image, baseURL)
+			if err != nil {
+				return nil, err
+			}
+			url = saved
 		}
 		if responseFormat == "b64_json" {
 			data = append(data, map[string]any{"b64_json": b64, "url": url, "revised_prompt": revised})
@@ -159,7 +163,7 @@ func (h Hooks) FormatImageResult(items []map[string]any, prompt, responseFormat,
 	if message != "" && len(data) == 0 {
 		result["message"] = message
 	}
-	return result
+	return result, nil
 }
 
 func nowUnix() int64 { return time.Now().Unix() }

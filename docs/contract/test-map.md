@@ -133,3 +133,16 @@ model 方式直接走 Lanczos（等同 Python 的失败回退）。
 | test_counts_successful_images_in_beijing_windows | `TestCountsSuccessfulImagesInBeijingWindows` |
 | test_new_success_updates_the_daily_file | 同上（Go 版计数在 `Add` 里同一事务累加，没有单独的文件） |
 | test_list_reads_the_newest_lines | `TestListReturnsNewestFirstWithFilters`（另加 `TestDeleteByID`） |
+
+## 图片管理（`internal/imagestore`）
+
+| Python | Go |
+| --- | --- |
+| test_image_storage_service.py（5 个） | `TestLocalModeSavesToLocalDirectory`、`TestWebDAVModeUploadsWithoutLocalFile`、`TestListItemsIgnoresNonImageFiles`、`TestBothModeSavesToLocalAndWebDAV`、`TestTestWebDAVWritesAndDeletesProbeFile`（WebDAV 用内存服务器测真实客户端，不用 mock） |
+| test_image_delete.py BatchImageDeleteTests（3 个） | `TestDeletesFilesThumbnailsIndexAndTags`、`TestSingleDeleteStillReportsResult`；「只写一次」的断言对数据库不适用 |
+| SafeRelativePathTests | `TestSafeRelMatchesPython`（21 个输入，期望值取自 pathlib 版） |
+| ReconcileTests | `TestReconcileDropsMissingFilesAndAddsNewOnes` |
+| test_image_list_pagination.py（7 个） | `TestPageReturnsOnlyThatPageNewestFirst`、`TestPagePastTheEndIsClampedToTheLastPage`、`TestPageSizeIsCapped`、`TestTagsFilterRequiresEveryTag`、`TestWithoutPageReturnsEverything`、`TestPathsListsEveryMatchAcrossPages`、`TestDiskChangesShowUpOnRefreshNotOnEveryRequest` |
+| test_image_retention.py（3 个） | `TestKeepsTheLastNCalendarDaysIncludingToday`、`TestImagesOutsideDateFoldersUseTheirModifiedDay`、`TestOneDayKeepsOnlyToday` |
+| test_gif_output.py test_saved_name_uses_gif_suffix | `TestSavedGIFUsesGIFSuffix` |
+| （新增） | `TestDeleteAllMatchingUsesTheDateRange`、`TestWebDAVFailureFailsTheSave`、`TestSyncNeedsWebDAV`、`TestDeleteTagCountsImages`、`TestThumbnailFitsIn320AndIsReused`、`TestThumbnailFitMatchesPIL`、`TestZipRenamesDuplicatesAndNeedsOneFile` |

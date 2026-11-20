@@ -78,7 +78,7 @@ func newEnv(t *testing.T, tokens ...string) *env {
 
 	cfg := &config.Config{}
 	proxies := service.NewProxyService(cfg)
-	pipeline := imagegen.NewPipeline(store, imagegen.Hooks{Save: func(data []byte, _ string) string { return "http://saved/" + itoa(len(data)) }})
+	pipeline := imagegen.NewPipeline(store, imagegen.Hooks{Save: func(data []byte, _ string) (string, error) { return "http://saved/" + itoa(len(data)), nil }})
 	pipeline.Background = func(fn func()) {}
 	generator := &imagegen.Generator{Pipeline: pipeline, Accounts: accounts, NewBackend: func(token string, _ pool.Account) (imagegen.Backend, error) {
 		return &chatgptweb.Backend{API: upstream.NewOpenAIBackendAPI(token, "", proxies, cfg), Settings: store,

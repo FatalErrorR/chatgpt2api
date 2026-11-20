@@ -74,8 +74,8 @@ Go v2 的 `logs` 表没有 `type` 列，需要新增。按决定只迁近 30 天
 - 标签：`{rel: [tag, …]}`。
 - 图片文件和缩略图仍在 `data/images`、`data/image_thumbnails`，不迁移，原地沿用。
 
-Go v2 用 `files` 表管理文件，结构不同。为了保持索引与磁盘对账的行为一致，新建 `images` 表和 `image_tags` 表，
-按上面的字段建模。
+Go v2 用 `files` 表管理文件，结构不同。为了保持索引与磁盘对账的行为一致，新建 `compat_images` 表（rel 主键，整条索引存 JSON，
+date/created_at/webdav 另存列用于筛选排序，seq 保持 Python dict 的顺序）和 `compat_image_tags` 表（rel、tags JSON、seq）。
 
 ## 生图任务：`image_tasks.json` → 表 `tasks`
 

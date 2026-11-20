@@ -196,7 +196,11 @@ func CodexAttempt(hooks imagegen.Hooks) func(ctx context.Context, token string, 
 				items = append(items, map[string]any{"b64_json": image, "revised_prompt": req.Prompt})
 			}
 		}
-		data, _ := hooks.FormatImageResult(items, req.Prompt, req.ResponseFormat, req.BaseURL, time.Now().Unix(), "", req.Size)["data"].([]map[string]any)
+		formatted, err := hooks.FormatImageResult(items, req.Prompt, req.ResponseFormat, req.BaseURL, time.Now().Unix(), "", req.Size)
+		if err != nil {
+			return err
+		}
+		data, _ := formatted["data"].([]map[string]any)
 		if len(data) == 0 {
 			return imagegen.NewGenerationError("No image result found in response")
 		}

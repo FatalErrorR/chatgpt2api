@@ -11,10 +11,6 @@ GET /api/image-tasks
 POST /api/image-tasks/edits
 POST /api/image-tasks/generations
 POST /api/image-tasks/{task_id}/resume-poll
-GET /api/images/paths
-GET /api/images/tags
-POST /api/images/tags
-DELETE /api/images/tags/{tag}
 GET /files/{file_path:path}
 GET /v1/editable-file-tasks
 POST /v1/ppt/generations
