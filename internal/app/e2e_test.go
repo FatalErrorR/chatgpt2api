@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,10 +24,20 @@ import (
 
 // e2eApp is the whole application against an in-process fake chatgpt.com.
 func e2eApp(t *testing.T, imageDelay time.Duration) (*App, *settings.Store) {
+	application, store, _ := e2eAppCounting(t, imageDelay)
+	return application, store
+}
+
+// e2eAppCounting also counts the requests that reach the fake chatgpt.com.
+func e2eAppCounting(t *testing.T, imageDelay time.Duration) (*App, *settings.Store, *atomic.Int64) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	fake := fakeupstream.New("", imageDelay, 30*time.Second)
-	upstreamServer := httptest.NewServer(fake)
+	requests := &atomic.Int64{}
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		fake.ServeHTTP(w, r)
+	}))
 	t.Cleanup(upstreamServer.Close)
 	fake.SetBase(upstreamServer.URL)
 	t.Setenv("CHATGPT2API_UPSTREAM_BASE_URL", upstreamServer.URL)
@@ -49,7 +60,27 @@ func e2eApp(t *testing.T, imageDelay time.Duration) (*App, *settings.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return application, store
+	return application, store, requests
+}
+
+// CHATGPT2API_BACKGROUND_JOBS=off (the rehearsal instance on a copy of production data) starts no
+// account watcher, so nothing refreshes or rotates the accounts' tokens; by default it runs at once.
+func TestBackgroundJobsCanBeTurnedOff(t *testing.T) {
+	for _, mode := range []string{"off", ""} {
+		t.Setenv("CHATGPT2API_BACKGROUND_JOBS", mode)
+		application, _, requests := e2eAppCounting(t, 0)
+		if response := call(t, application.Engine, "POST", "/api/accounts", map[string]any{"tokens": []string{"fake-ok-1"}}); response.Code != 200 {
+			t.Fatalf("add account %d", response.Code)
+		}
+		before := requests.Load()
+		ctx, stop := context.WithCancel(context.Background())
+		application.Start(ctx)
+		time.Sleep(700 * time.Millisecond)
+		stop()
+		if called := requests.Load() - before; (mode == "off") != (called == 0) {
+			t.Fatalf("mode %q: %d upstream requests after start", mode, called)
+		}
+	}
 }
 
 func call(t *testing.T, handler http.Handler, method, path string, body any) *httptest.ResponseRecorder {

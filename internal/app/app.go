@@ -332,9 +332,20 @@ func (a *App) Start(ctx context.Context) {
 	a.repo.ResetAccountImageInflight(context.Background())
 	// The upstream scheduler is not started: it refreshes the upstream accounts table, which the
 	// compat routes do not use, and cleans data/images by file age instead of by calendar day.
+	if !BackgroundJobsEnabled() {
+		log.Printf("CHATGPT2API_BACKGROUND_JOBS=off: account watcher, image cleanup and scheduled backups are not started")
+		return
+	}
 	go a.pool.Watch(ctx)
 	go a.images.Run(ctx)
 	go a.backups.Start(ctx)
+}
+
+// BackgroundJobsEnabled is false when CHATGPT2API_BACKGROUND_JOBS is "off". An instance started on
+// a copy of production data (the migration rehearsal) must not refresh or rotate the real accounts'
+// tokens, delete images by retention, or upload backups with production's R2 settings.
+func BackgroundJobsEnabled() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("CHATGPT2API_BACKGROUND_JOBS")), "off")
 }
 
 // ShutdownGrace is how long a stop waits for requests and background work in flight: the image

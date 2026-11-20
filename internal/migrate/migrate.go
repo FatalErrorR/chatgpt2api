@@ -644,11 +644,16 @@ func replace[T any](tx *gorm.DB, model T, rows []T) error {
 	return tx.CreateInBatches(rows, 200).Error
 }
 
-// LegacyLogID gives a log line without an id a stable id of its own: the line's text plus how many
-// identical lines came before it, so repeated identical lines stay separate rows and a rerun gives
-// the same ids.
+// LegacyLogID gives a log line without an id a stable id. The first occurrence of a line gets the id
+// Python's log list shows for it (_legacy_id(raw_line, 0)); later identical lines, which Python's list
+// shows under that same id, each get one of their own so they stay separate rows. A rerun gives the
+// same ids.
 func LegacyLogID(raw string, occurrence int) string {
-	sum := sha1.Sum([]byte(fmt.Sprintf("legacy:%d:%s", occurrence, raw)))
+	payload := "0:" + raw
+	if occurrence > 0 {
+		payload = fmt.Sprintf("legacy:%d:%s", occurrence, raw)
+	}
+	sum := sha1.Sum([]byte(payload))
 	return hex.EncodeToString(sum[:])[:24]
 }
 

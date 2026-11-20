@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"crypto/md5"
+	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -82,7 +83,6 @@ func fixture(t *testing.T) string {
 		".DS_Store": {"date": "x"}}}`)
 	write(t, dir, "image_tags.json", `{"2026/11/20/z.png": ["猫"], "2026/11/19/a.png": []}`)
 	write(t, dir, "image_tasks.json", `{"tasks": [{"id": "t1", "owner_id": "k1", "status": "success", "updated_at": "2026-11-20 09:00:00"}, {"id": "t2"}]}`)
-	legacy := `{"time":"2026-11-19 10:00:00","type":"account","summary":"legacy line without id","detail":{}}`
 	write(t, dir, "logs.jsonl", strings.Join([]string{
 		`{"id":"old","time":"2026-09-01 10:00:00","type":"call","summary":"文生图调用完成","detail":{"endpoint":"/v1/images/generations","status":"success","urls":["u"]}}`,
 		legacy,
@@ -137,6 +137,8 @@ func accountTokens(t *testing.T, db *gorm.DB) []string {
 	return tokens
 }
 
+const legacy = `{"time":"2026-11-19 10:00:00","type":"account","summary":"legacy line without id","detail":{}}`
+
 func TestMigrationIsFaithfulIdempotentAndReadOnly(t *testing.T) {
 	dir := fixture(t)
 	before := checksums(dir)
@@ -187,6 +189,11 @@ func TestMigrationIsFaithfulIdempotentAndReadOnly(t *testing.T) {
 	entries, _ := logs.New(db).List("", "", "", 10)
 	if len(entries) != 3 || entries[0]["id"] != "new" || entries[1]["id"] == entries[2]["id"] || entries[1]["summary"] != "legacy line without id" {
 		t.Fatalf("logs %v", entries)
+	}
+	// the first one keeps the id Python's log list shows: sha1("0:" + line)[:24]
+	sum := sha1.Sum([]byte("0:" + legacy))
+	if pythonID := hex.EncodeToString(sum[:])[:24]; entries[2]["id"] != pythonID {
+		t.Fatalf("legacy id %v, Python shows %s", entries[2]["id"], pythonID)
 	}
 }
 
