@@ -58,6 +58,10 @@
 12. **完整测试**：契约、迁移演练、真实上游测试实例、压测（标准 A–F）。
 13. **并行上线**（标准 G）。
 
+## 已知的 Python 行为差异（Go 版不照抄）
+
+- `_decode_image_base64`：base64 短于 512 字符时先当文件路径检查，超过 255 字符会抛「File name too long」。只影响约 380 字节以下的极小图片。
+
 ## 不迁移
 
 - 压缩优化（`main` 上已删除，会卡死容器）
@@ -71,7 +75,8 @@
 - [ ] 0. 基础设施
   - [x] 路由组装移到 `internal/app`，路由覆盖测试（1c43454）：93 个路由中上游已有 49 个，待实现 44 个
   - [x] 数据模型对照 `docs/contract/data-model.md`
-  - [ ] 假上游 `tools/fakeupstream`
+  - [x] 假上游 `tools/fakeupstream`：Python 版（main 9b48b49 起可用 `CHATGPT2API_UPSTREAM_BASE_URL` 指向它）已跑通账号刷新、文生图、图生图 1/3/4 张参考图、chat；场景 ok/slow/notool/403/upload429/badtoken/nomodel/drop
+  - [x] 本机 PostgreSQL 16（docker `c2a-pg`，127.0.0.1:55432，用户/密码/库 c2a），上游 Go 版在其上建表启动正常
   - [ ] 契约对比 `tools/contract`
   - [ ] PostgreSQL 集成测试（本机需启动 Docker Desktop）
 - [ ] 1. 数据层与迁移脚本
