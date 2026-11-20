@@ -15,8 +15,10 @@ package fakeupstream
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -36,7 +38,10 @@ type Server struct {
 	mu        sync.Mutex
 	convs     map[string]*conversation
 	pngBytes  []byte
-	stats     sync.Map // path -> *atomic.Int64
+	// UniqueImages makes every served image different (a text chunk with its file id), as real
+	// images are; the load test needs it, since identical images share one stored file name.
+	UniqueImages bool
+	stats        sync.Map // path -> *atomic.Int64
 }
 
 type conversation struct {
@@ -110,7 +115,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case strings.HasPrefix(path, "/blob/"):
 		w.Header().Set("Content-Type", "image/png")
-		w.Write(s.pngBytes)
+		if s.UniqueImages {
+			w.Write(withTextChunk(s.pngBytes, strings.TrimPrefix(path, "/blob/")))
+		} else {
+			w.Write(s.pngBytes)
+		}
 		return
 	case strings.HasPrefix(path, "/upload/"):
 		w.WriteHeader(http.StatusCreated)
@@ -297,4 +306,17 @@ func toolResult(fileID string) map[string]any {
 			"metadata": map[string]any{"dalle": map[string]any{"prompt": "fake"}}}}},
 		"status": "finished_successfully", "end_turn": true,
 		"metadata": map[string]any{"async_task_type": "image_gen", "image_gen_async": true, "tool_invoked": true, "turn_use_case": "image gen"}, "recipient": "all"}
+}
+
+// withTextChunk inserts a PNG tEXt chunk ("id" = text) before the closing IEND chunk.
+func withTextChunk(png []byte, text string) []byte {
+	payload := append([]byte("id\x00"), text...)
+	chunk := make([]byte, 0, len(payload)+12)
+	chunk = binary.BigEndian.AppendUint32(chunk, uint32(len(payload)))
+	chunk = append(chunk, "tEXt"...)
+	chunk = append(chunk, payload...)
+	chunk = binary.BigEndian.AppendUint32(chunk, crc32.ChecksumIEEE(append([]byte("tEXt"), payload...)))
+	end := len(png) - 12 // IEND: length, type, crc
+	out := append(append(append([]byte{}, png[:end]...), chunk...), png[end:]...)
+	return out
 }
