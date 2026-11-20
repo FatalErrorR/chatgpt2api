@@ -208,5 +208,10 @@
     两边都 22/22 步通过；在已改过的数据上重跑同一脚本，6 步失败、退出码 1
   - `CHATGPT2API_BACKGROUND_JOBS=off`：在生产数据副本上起实例时不启动账号巡检、图片清理、定时备份，避免轮换真实账号的 refresh token（e2012f1）
   - 第 12 步测试实例与第 13 步回切方案：`docs/go-staging.md`
+- [x] Codex 复查（基准 585c3e4）修复
+  - 迁移：源文件必须恰好是一个 JSON 值，尾端垃圾或第二个值在写库前拒绝（之前 `[] trailing-invalid-content` 被当成 `[]`，清空账号表且退出码 0）；日志行同样严格，同 `json.loads`（6c7afae）
+  - 部署：`deploy/staging/docker-compose.yml` 挂载设置目录（单文件挂载会让保存的 rename 失败）；迁移在对应服务的容器里执行，
+    工具打印实际目标库，PostgreSQL 必须写 `-expect-db`，不符即拒绝，`-dry-run` 只校验（ec86fe6）
+  - 演练实例放在没有出口的内部网络，管理入口经 socat gate；`deploy/staging/verify-local.sh` 用合成数据验证全部隔离与持久化，失败退出码非 0
 - [ ] 12. 完整测试
 - [ ] 13. 并行上线

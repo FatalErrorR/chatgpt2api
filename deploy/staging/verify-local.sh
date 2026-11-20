@@ -64,7 +64,13 @@ echo "== 2. config.json 放在挂载的目录里：设置页保存后重建容�
 compose up -d --no-deps app >/dev/null 2>&1; wait_http http://127.0.0.1:3401
 export CHROME_PATH=${CHROME_PATH:-$(ls -d ~/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell 2>/dev/null | head -1)}
 export NODE_PATH=${NODE_PATH:-$(ls -d ~/.npm/_npx/*/node_modules/playwright/.. 2>/dev/null | head -1)}
-$CLEAN node "$G/deploy/staging/save-setting.js" http://127.0.0.1:3401 "$KEY" 77 || fail "设置页保存失败"
+if command -v node >/dev/null && [ -n "$NODE_PATH" ] && [ -x "$CHROME_PATH" ]; then
+  $CLEAN node "$G/deploy/staging/save-setting.js" http://127.0.0.1:3401 "$KEY" 77 || fail "设置页保存失败"
+else  # no Playwright (e.g. on the server): the same POST the settings page sends
+  echo "  （没有 Playwright，改用设置页发出的同一个 POST /api/settings）"
+  body=$(curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:3401/api/settings | python3 -c "import json,sys;c=json.load(sys.stdin)['config'];c.update(image_failover_enabled=True,image_failover_secs=77);print(json.dumps(c))")
+  [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "$body" http://127.0.0.1:3401/api/settings)" = 200 ] || fail "保存失败"
+fi
 python3 -c "import json,sys;c=json.load(open('$S/conf/config.json'));sys.exit(0 if c.get('image_failover_enabled') is True and int(c.get('image_failover_secs'))==77 else 1)" && pass "宿主机 conf/config.json 已写入 77 秒" || fail "宿主机文件没变"
 compose up -d --no-deps --force-recreate app >/dev/null 2>&1; wait_http http://127.0.0.1:3401
 curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:3401/api/settings | python3 -c "import json,sys;c=json.load(sys.stdin)['config'];sys.exit(0 if c['image_failover_enabled'] is True and int(c['image_failover_secs'])==77 else 1)" && pass "重建容器后 /api/settings 读到 77 秒" || fail "重建后设置丢失"
