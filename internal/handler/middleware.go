@@ -42,7 +42,13 @@ func LimitBody(cfg *config.Config) gin.HandlerFunc {
 
 func CORS(c *gin.Context) {
 	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Access-Control-Allow-Headers", "*")
+	// like Starlette's CORSMiddleware(allow_headers=["*"]): echo the requested headers, because
+	// a literal "*" does not cover Authorization
+	if requested := c.GetHeader("Access-Control-Request-Headers"); requested != "" {
+		c.Header("Access-Control-Allow-Headers", requested)
+	} else {
+		c.Header("Access-Control-Allow-Headers", "*")
+	}
 	c.Header("Access-Control-Allow-Methods", "*")
 	if c.Request.Method == http.MethodOptions {
 		c.AbortWithStatus(http.StatusNoContent)

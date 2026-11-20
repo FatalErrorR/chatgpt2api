@@ -26,3 +26,6 @@ debug
 .claude
 artifacts
 .DS_Store
+
+# the exported Next.js frontend (built from web/)
+web_dist/

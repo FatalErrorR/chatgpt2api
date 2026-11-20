@@ -201,3 +201,8 @@ Python 没有备份的单元测试。Go 新增：`TestSigV4MatchesPython`（黄�
 
 `TestMigrationIsFaithfulIdempotentAndReadOnly`（两次运行对账全过、源文件不变、重复 token、旧日志 id、窗口与顺序）、
 `TestDailyCountsComeFromTheFileOrAreRebuiltFromAllLogs`、`TestRerunFollowsTheSource`、`TestMissingFilesAreReportedNotFatal`。
+
+## 前端托管与走查
+
+`compat.TestServeWebFollowsPythonResolution`、`compat.TestGzipLikeStarlette`、`compat.TestUserInfoRecordsProxyHealthAndRetriesChallenges`、
+`upstream.TestSingleAttemptFailsFast`；页面级的对比由 `tools/walkthrough/run.sh` 完成（见 go-migration.md 第 11 步）。

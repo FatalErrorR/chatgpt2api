@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/pool"
@@ -26,6 +27,22 @@ const (
 type ChatGPTRemote struct {
 	Proxy  upstream.ClientProvider
 	Config *config.Config
+	// Health records how the account's proxy did, as _retry_cloudflare_challenge does in Python.
+	Health interface {
+		RecordSuccess(proxy string)
+		RecordFailure(proxy, cause string)
+	}
+	Sleep func(time.Duration)
+}
+
+// challengePage is a 403 whose body is not JSON: Cloudflare's challenge, not an API answer.
+func challengePage(err error) bool {
+	var httpErr *upstream.UpstreamHTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != 403 {
+		return false
+	}
+	var decoded any
+	return json.Unmarshal([]byte(httpErr.Body), &decoded) != nil
 }
 
 func accountProxy(account pool.Account) string {
@@ -36,11 +53,42 @@ func accountProxy(account pool.Account) string {
 // UserInfo is OpenAIBackendAPI.get_user_info for one account, through its own proxy.
 func (r *ChatGPTRemote) UserInfo(ctx context.Context, account pool.Account) (pool.Account, error) {
 	token, _ := account["access_token"].(string)
-	api := upstream.NewOpenAIBackendAPI(token, accountProxy(account), r.Proxy, r.Config)
+	api := upstream.NewOpenAIBackendAPI(token, accountProxy(account), r.Proxy, r.Config).SingleAttempt()
 	if accountID, _ := account["account_id"].(string); accountID != "" {
 		api.WithAccountID(accountID)
 	}
-	info, err := api.UserInfo(ctx)
+	proxy := accountProxy(account)
+	var info pool.Account
+	var err error
+	var outcomes []error // the last attempt's sub-request results
+	api.ObserveUserInfo(func(result error) { outcomes = append(outcomes, result) })
+	for attempt := 1; attempt <= 3; attempt++ {
+		outcomes = nil
+		info, err = api.UserInfo(ctx)
+		if !challengePage(err) {
+			break
+		}
+		if attempt < 3 {
+			if r.Sleep != nil {
+				r.Sleep(time.Duration(1.5 * float64(attempt) * float64(time.Second)))
+			} else {
+				time.Sleep(time.Duration(1.5 * float64(attempt) * float64(time.Second)))
+			}
+		}
+	}
+	if r.Health != nil && proxy != "" {
+		for _, result := range outcomes {
+			var httpErr *upstream.UpstreamHTTPError
+			switch {
+			case challengePage(result):
+				r.Health.RecordFailure(proxy, "Cloudflare challenge (HTTP 403)")
+			case result == nil || errors.As(result, &httpErr) || errors.Is(result, upstream.ErrTokenInvalidated):
+				r.Health.RecordSuccess(proxy) // an API answer: the proxy got through
+			default:
+				r.Health.RecordFailure(proxy, result.Error())
+			}
+		}
+	}
 	if err != nil {
 		if errors.Is(err, upstream.ErrTokenInvalidated) {
 			return nil, fmt.Errorf("%s: %w", strings.TrimSuffix(err.Error(), ": token invalidated"), pool.ErrInvalidToken)

@@ -8,3 +8,7 @@ config.yaml
 docs
 assets
 README.md
+web/node_modules
+web/out
+web/.next
+web_dist

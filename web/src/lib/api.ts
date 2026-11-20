@@ -1,0 +1,1166 @@
+import { httpRequest, request } from "@/lib/request";
+
+export type AccountType = string;
+export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
+export type ImageModel = string;
+export type AuthRole = "admin" | "user";
+export type ImageStorageMode = "local" | "webdav" | "both";
+
+export type ImageStorageSettings = {
+  enabled: boolean;
+  mode: ImageStorageMode;
+  webdav_url: string;
+  webdav_username: string;
+  webdav_password: string;
+  webdav_root_path: string;
+  public_base_url: string;
+};
+
+export type Account = {
+  access_token: string;
+  type: AccountType;
+  source_type?: string | null;
+  status: AccountStatus;
+  quota: number;
+  email?: string | null;
+  user_id?: string | null;
+  limits_progress?: Array<{
+    feature_name?: string;
+    remaining?: number;
+    reset_after?: string;
+  }>;
+  default_model_slug?: string | null;
+  restore_at?: string | null;
+  edit_upload_blocked_until?: string | null;
+  success: number;
+  fail: number;
+  /** 当前图片在途数(正在生成、尚未结束的图片数)。号池空闲时持续 > 0 表示并发槽位泄漏。 */
+  image_inflight?: number;
+  last_used_at?: string | null;
+  last_refresh_error?: string | null;
+  last_token_refresh_error?: string | null;
+  proxy?: string | null;
+  created_at?: string | null;
+  /** 后端按代理清单同一规则算出的识别值，用来匹配代理名称、健康和筛选；proxy 本身不变 */
+  proxy_key?: string;
+};
+
+export type AccountImportPayload = {
+  access_token: string;
+  accessToken?: string;
+  type?: string;
+  export_type?: string;
+  source_type?: string;
+  [key: string]: unknown;
+};
+
+export type Model = {
+  id: string;
+  object: string;
+  created: number;
+  owned_by: string;
+  permission: unknown[];
+  root: string;
+  parent: string | null;
+};
+
+type AccountListResponse = {
+  items: Account[];
+};
+
+type ModelListResponse = {
+  object: string;
+  data: Model[];
+};
+
+type AccountMutationResponse = {
+  items: Account[];
+  added?: number;
+  skipped?: number;
+  removed?: number;
+  refreshed?: number;
+  relogined?: number;
+  errors?: Array<{ access_token: string; error: string }>;
+};
+
+export type AccountRefreshResponse = {
+  items: Account[];
+  refreshed: number;
+  relogined?: number;
+  errors: Array<{ access_token: string; error: string }>;
+};
+
+export type RefreshProgressResponse = {
+  total: number;
+  processed: number;
+  done: boolean;
+  error: string | null;
+  status_counts?: Record<string, number>;
+  total_quota?: number;
+  result?: AccountRefreshResponse | null;
+  results?: Array<{ token: string; status: string; error?: string | null }>;
+};
+
+type AccountUpdateResponse = {
+  item: Account;
+  items: Account[];
+};
+
+export type ProxyRuntimeEgressMode = "direct" | "single_proxy";
+export type ProxyRuntimeClearanceMode = "none" | "manual" | "flaresolverr";
+
+export type ProxyRuntimeClearanceSettings = {
+  enabled: boolean;
+  mode: ProxyRuntimeClearanceMode;
+  cf_cookies: string;
+  cf_clearance: string;
+  user_agent: string;
+  browser: string;
+  flaresolverr_url: string;
+  timeout_sec: number | string;
+  refresh_interval: number | string;
+  warm_up_on_start: boolean;
+  has_cf_cookies?: boolean;
+  has_cf_clearance?: boolean;
+};
+
+export type ProxyRuntimeSettings = {
+  enabled: boolean;
+  egress_mode: ProxyRuntimeEgressMode;
+  proxy_url: string;
+  resource_proxy_url: string;
+  skip_ssl_verify: boolean;
+  reset_session_status_codes: number[];
+  clearance: ProxyRuntimeClearanceSettings;
+};
+
+export type ProxyRuntimeStatus = {
+  enabled: boolean;
+  egress_mode: ProxyRuntimeEgressMode | string;
+  proxy_source: string;
+  has_proxy: boolean;
+  clearance_enabled: boolean;
+  clearance_mode: ProxyRuntimeClearanceMode | string;
+  has_clearance_bundle: boolean;
+  cached_clearance_hosts: string[];
+};
+
+export type ProxyRuntimeResponse = {
+  runtime: ProxyRuntimeSettings;
+  status: ProxyRuntimeStatus;
+};
+
+export type ThirdPartyAppsSettings = {
+  infinite_canvas: {
+    enabled: boolean;
+    url: string;
+  };
+};
+
+export type SettingsConfig = {
+  proxy: string;
+  base_url?: string;
+  global_system_prompt?: string;
+  default_upstream_model_name?: string;
+  default_thinking_effort?: "auto" | "standard" | "extended" | "max";
+  sensitive_words?: string[];
+  ai_review?: {
+    enabled?: boolean;
+    base_url?: string;
+    api_key?: string;
+    model?: string;
+    prompt?: string;
+  };
+  refresh_account_interval_minute?: number | string;
+  image_retention_days?: number | string;
+  image_poll_timeout_secs?: number | string;
+  /** 出图等太久就换号重新生成 */
+  image_failover_enabled?: boolean;
+  /** 换号前每个账号最多等多少秒（15–600） */
+  image_failover_secs?: number | string;
+  /** 每个代理最多挂几个账号：导入平均分配、停用迁移、重新分配都遵守 */
+  proxy_max_accounts?: number | string;
+  image_account_concurrency?: number | string;
+  image_parallel_generation?: boolean;
+  image_settle_enabled?: boolean;
+  image_ref_fit_enabled?: boolean;
+  image_req_fit_enabled?: boolean;
+  image_edit_upload_cooldown_enabled?: boolean;
+  image_upscale_enabled?: boolean;
+  image_exact_size_enabled?: boolean;
+  image_upscale_target_edge?: number | string;
+  image_upscale_method?: "lanczos" | "model";
+  image_check_before_hit_enabled?: boolean;
+  image_remove_conversation_after_result?: boolean;
+  image_remove_conversation_always?: boolean;
+  image_settle_secs?: number | string;
+  image_timeout_retry_secs?: number | string;
+  auto_remove_invalid_accounts?: boolean;
+  auto_remove_rate_limited_accounts?: boolean;
+  auto_relogin_after_refresh?: boolean;
+  log_levels?: string[];
+  image_storage?: ImageStorageSettings;
+  proxy_runtime?: ProxyRuntimeSettings;
+  third_party_apps?: ThirdPartyAppsSettings;
+  backup?: BackupSettings;
+  backup_state?: BackupState;
+  [key: string]: unknown;
+};
+
+export type BackupInclude = {
+  config: boolean;
+  cpa: boolean;
+  sub2api: boolean;
+  logs: boolean;
+  image_tasks: boolean;
+  accounts_snapshot: boolean;
+  auth_keys_snapshot: boolean;
+  images: boolean;
+};
+
+export type BackupSettings = {
+  enabled: boolean;
+  provider: "cloudflare_r2" | string;
+  account_id: string;
+  access_key_id: string;
+  secret_access_key: string;
+  bucket: string;
+  prefix: string;
+  interval_minutes: number | string;
+  rotation_keep: number | string;
+  encrypt: boolean;
+  passphrase: string;
+  include: BackupInclude;
+};
+
+export type BackupState = {
+  running: boolean;
+  last_started_at?: string | null;
+  last_finished_at?: string | null;
+  last_status?: string;
+  last_error?: string | null;
+  last_object_key?: string | null;
+};
+
+export type BackupItem = {
+  key: string;
+  name: string;
+  size: number;
+  updated_at?: string | null;
+  encrypted: boolean;
+};
+
+export type BackupDetail = {
+  key: string;
+  name: string;
+  encrypted: boolean;
+  created_at?: string | null;
+  trigger?: string | null;
+  app_version?: string | null;
+  storage_backend?: Record<string, unknown> | null;
+  files: Array<{
+    name: string;
+    exists: boolean;
+    content_type?: string;
+    size: number;
+    sha256?: string;
+  }>;
+  snapshots: Array<{
+    name: string;
+    count: number;
+  }>;
+};
+
+export type ManagedImage = {
+  rel: string;
+  path?: string;
+  name: string;
+  date: string;
+  size: number;
+  url: string;
+  thumbnail_url?: string;
+  created_at: string;
+  width?: number;
+  height?: number;
+  tags?: string[];
+};
+
+export type SystemLog = {
+  id: string;
+  time: string;
+  type: "call" | "account" | string;
+  summary?: string;
+  detail?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type ImageResponse = {
+  created: number;
+  data: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
+};
+
+export type ImageTask = {
+  id: string;
+  status: "queued" | "running" | "success" | "error";
+  mode: "generate" | "edit";
+  model?: ImageModel;
+  size?: string;
+  quality?: string;
+  created_at: string;
+  updated_at: string;
+  conversation_id?: string;
+  data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
+  error?: string;
+  progress?: string;
+  elapsed_secs?: number;
+  duration_ms?: number;
+};
+
+type ImageTaskListResponse = {
+  items: ImageTask[];
+  missing_ids: string[];
+};
+
+export type LoginResponse = {
+  ok: boolean;
+  version: string;
+  role: AuthRole;
+  subject_id: string;
+  name: string;
+};
+
+export type UserKey = {
+  id: string;
+  name: string;
+  role: "user";
+  enabled: boolean;
+  created_at: string | null;
+  last_used_at: string | null;
+};
+
+export async function login(authKey: string) {
+  const normalizedAuthKey = String(authKey || "").trim();
+  return httpRequest<LoginResponse>("/auth/login", {
+    method: "POST",
+    body: {},
+    headers: {
+      Authorization: `Bearer ${normalizedAuthKey}`,
+    },
+    redirectOnUnauthorized: false,
+  });
+}
+
+export async function fetchAccounts() {
+  return httpRequest<AccountListResponse>("/api/accounts");
+}
+
+export async function fetchModels() {
+  return httpRequest<ModelListResponse>("/v1/models");
+}
+
+/** 导入时写到账号上的代理：proxy 是单个代理；distribute_proxies 非空时把新账号平均分到这些代理。 */
+export type ImportProxyChoice = {
+  proxy: string;
+  distribute_proxies: string[];
+};
+
+const NO_IMPORT_PROXY: ImportProxyChoice = { proxy: "", distribute_proxies: [] };
+
+export async function createAccounts(
+  tokens: string[],
+  accounts: AccountImportPayload[] = [],
+  proxyChoice: ImportProxyChoice = NO_IMPORT_PROXY,
+) {
+  return httpRequest<AccountMutationResponse>("/api/accounts", {
+    method: "POST",
+    body: { tokens, accounts, ...proxyChoice },
+  });
+}
+
+export type ProxyHealth = {
+  abnormal: boolean;
+  successes: number;
+  failures: number;
+  consecutive_failures: number;
+  last_error: string;
+  last_failure_at: number | null;
+  last_success_at: number | null;
+};
+
+export type ProxyEntry = {
+  url: string;
+  /** 同一代理不同写法（如 socks5:// 与 socks5h://）共用的识别值，与 Account.proxy_key 对应 */
+  key: string;
+  name: string;
+  masked_url: string;
+  account_count: number;
+  health: ProxyHealth;
+  /** 已停用：不再参与任何分配；停用前账号已迁走 */
+  disabled: boolean;
+};
+
+type ProxyListResponse = { items: ProxyEntry[] };
+
+/** 账号迁移方案：每个账号从哪个代理到哪个代理；error / shortfall 表示做不了（名额不足、没有可用代理）。 */
+export type ProxyMovePlan = {
+  moves: { email: string; from: string; to: string }[];
+  unchanged: number;
+  targets: { key: string; label: string; before: number; after: number }[];
+  max_per_proxy: number;
+  error?: string;
+  shortfall?: number;
+};
+
+export type ProxyRetirePlan = ProxyMovePlan & {
+  retiring: { key: string; label: string; account_count: number }[];
+};
+
+export type ProxyCheckResult = ProxyListResponse & {
+  tested: number;
+  passed: number;
+  failures: { key: string; label: string; status: number; error: string; account_count: number }[];
+  /** 大面积失败（超过一半，或都是 402）：多半是代理商的问题，不给停用方案 */
+  outage: boolean;
+  plan: ProxyRetirePlan | null;
+  results: Record<string, ProxyTestResult>;
+};
+
+/** 检测所有启用的代理一轮；失败的附上「停用并迁移账号」的方案（不执行）。 */
+export async function checkProxies() {
+  return httpRequest<ProxyCheckResult>("/api/proxies/check", { method: "POST", body: {} });
+}
+
+/** 把代理上的账号迁到其它可用代理，再停用代理；dryRun 只返回方案。urls 可以是地址或 key。 */
+export async function retireProxies(urls: string[], dryRun: boolean) {
+  return httpRequest<ProxyListResponse & ProxyRetirePlan & { moved?: number; disabled?: number }>("/api/proxies/retire", {
+    method: "POST",
+    body: { urls, dry_run: dryRun },
+  });
+}
+
+export async function enableProxies(urls: string[]) {
+  return httpRequest<ProxyListResponse & { enabled: number }>("/api/proxies/enable", { method: "POST", body: { urls } });
+}
+
+/** 把选中账号按平均分配规则重新分到 proxies（为空 = 所有可用代理）；dryRun 只返回方案。 */
+export async function reassignAccountProxies(tokens: string[], proxies: string[], dryRun: boolean) {
+  return httpRequest<ProxyMovePlan & { moved?: number; items?: Account[] }>("/api/accounts/reassign-proxy", {
+    method: "POST",
+    body: { tokens, proxies, dry_run: dryRun },
+  });
+}
+
+export async function fetchProxies() {
+  return httpRequest<ProxyListResponse>("/api/proxies");
+}
+
+export type ProxyBatchAddResult = ProxyListResponse & {
+  added: { name: string; masked_url: string; key: string }[];
+  skipped: { line: number; text: string; reason: string; name: string }[];
+  invalid: { line: number; text: string; error: string }[];
+};
+
+/** 批量添加代理，每行一个；填了 vendor 就依次命名「厂商-N」，接着这个厂商已有的最大序号。 */
+export async function addProxies(text: string, vendor: string) {
+  return httpRequest<ProxyBatchAddResult>("/api/proxies/batch", { method: "POST", body: { text, vendor } });
+}
+
+export async function renameProxy(url: string, name: string) {
+  return httpRequest<ProxyListResponse>("/api/proxies/update", { method: "POST", body: { url, name } });
+}
+
+export async function deleteProxy(url: string) {
+  return httpRequest<ProxyListResponse>("/api/proxies/delete", { method: "POST", body: { url } });
+}
+
+/** 批量测试代理连 chatgpt.com；urls 为空时测全部。results 按代理 key，结果同时记进健康状况。 */
+export async function testProxies(urls: string[] = []) {
+  return httpRequest<ProxyListResponse & { results: Record<string, ProxyTestResult> }>("/api/proxies/test", {
+    method: "POST",
+    body: { urls },
+  });
+}
+
+export type OAuthLoginStartResponse = {
+  session_id: string;
+  authorize_url: string;
+  expires_in: string;
+  redirect_uri_prefix: string;
+};
+
+export async function startOAuthLogin(emailHint?: string) {
+  return httpRequest<OAuthLoginStartResponse>("/api/accounts/oauth/start", {
+    method: "POST",
+    body: { email_hint: emailHint ?? "" },
+  });
+}
+
+export async function finishOAuthLogin(
+  sessionId: string,
+  callback: string,
+  proxyChoice: ImportProxyChoice = NO_IMPORT_PROXY,
+) {
+  return httpRequest<AccountMutationResponse>("/api/accounts/oauth/finish", {
+    method: "POST",
+    body: { session_id: sessionId, callback, ...proxyChoice },
+  });
+}
+
+export type ProtocolLoginItem = {
+  email: string;
+  status: "等待" | "登录中" | "成功" | "失败";
+  error: string;
+  token?: string;
+};
+
+export type ProtocolLoginProgress = {
+  id: string;
+  status: "running" | "done";
+  total: number;
+  completed: number;
+  success: number;
+  failed: number;
+  invalid: Array<{ line: number; email?: string; error: string }>;
+  items: ProtocolLoginItem[];
+};
+
+export async function startProtocolLogin(text: string, proxyChoice: ImportProxyChoice = NO_IMPORT_PROXY) {
+  return httpRequest<{
+    progress_id: string;
+    total: number;
+    invalid: ProtocolLoginProgress["invalid"];
+  }>("/api/accounts/protocol-login", {
+    method: "POST",
+    body: { text, ...proxyChoice },
+  });
+}
+
+export async function fetchProtocolLoginProgress(progressId: string) {
+  return httpRequest<ProtocolLoginProgress>(`/api/accounts/protocol-login/progress/${progressId}`);
+}
+
+/** 今日 / 昨日 / 近 N 天 / 全部（有记录以来）成功出图张数，按北京时间。 */
+export type ImageCountPeriod = "today" | "yesterday" | "d7" | "d14" | "d15" | "d30" | "all";
+export type ImageOutputCounts = {
+  edits: Record<ImageCountPeriod, number>;
+  generations: Record<ImageCountPeriod, number>;
+};
+
+export async function fetchImageOutputCounts() {
+  return httpRequest<ImageOutputCounts>("/api/logs/image-counts");
+}
+
+export async function deleteAccounts(tokens: string[]) {
+  return httpRequest<AccountMutationResponse>("/api/accounts", {
+    method: "DELETE",
+    body: { tokens },
+  });
+}
+
+export async function refreshAccounts(accessTokens: string[]) {
+  return httpRequest<{ progress_id: string }>("/api/accounts/refresh", {
+    method: "POST",
+    body: { access_tokens: accessTokens },
+  });
+}
+
+export async function fetchRefreshProgress(progressId: string) {
+  return httpRequest<RefreshProgressResponse>(`/api/accounts/refresh/progress/${progressId}`);
+}
+
+export async function reLoginAccounts(accessTokens: string[]) {
+  return httpRequest<{ progress_id: string }>("/api/accounts/re-login", {
+    method: "POST",
+    body: { access_tokens: accessTokens },
+  });
+}
+
+export async function fetchReLoginProgress(progressId: string) {
+  return httpRequest<RefreshProgressResponse>(`/api/accounts/re-login/progress/${progressId}`);
+}
+
+export async function testAccountImages(accessTokens: string[]) {
+  return httpRequest<{ progress_id: string }>("/api/accounts/image-test", {
+    method: "POST",
+    body: { access_tokens: accessTokens },
+  });
+}
+
+export async function fetchImageTestProgress(progressId: string) {
+  return httpRequest<RefreshProgressResponse>(`/api/accounts/image-test/progress/${progressId}`);
+}
+
+export async function updateAccount(
+  accessToken: string,
+  updates: {
+    type?: AccountType;
+    status?: AccountStatus;
+    quota?: number;
+    proxy?: string;
+  },
+) {
+  return httpRequest<AccountUpdateResponse>("/api/accounts/update", {
+    method: "POST",
+    body: {
+      access_token: accessToken,
+      ...updates,
+    },
+  });
+}
+
+export async function generateImage(
+  prompt: string,
+  model?: ImageModel,
+  size?: string,
+  quality = "auto",
+  outputFormat = "png",
+  frameCount?: number,
+  frameDurationMs?: number,
+) {
+  return httpRequest<ImageResponse>(
+    "/v1/images/generations",
+    {
+      method: "POST",
+      body: {
+        prompt,
+        ...(model ? { model } : {}),
+        ...(size ? { size } : {}),
+        quality,
+        ...(outputFormat === "gif" ? { output_format: "gif", frame_count: frameCount, frame_duration_ms: frameDurationMs } : {}),
+        n: 1,
+        response_format: "b64_json",
+      },
+    },
+  );
+}
+
+export async function editImage(files: File | File[], prompt: string, model?: ImageModel, size?: string, quality = "auto") {
+  const formData = new FormData();
+  const uploadFiles = Array.isArray(files) ? files : [files];
+
+  uploadFiles.forEach((file) => {
+    formData.append("image", file);
+  });
+  formData.append("prompt", prompt);
+  if (model) {
+    formData.append("model", model);
+  }
+  if (size) {
+    formData.append("size", size);
+  }
+  formData.append("quality", quality);
+  formData.append("n", "1");
+
+  return httpRequest<ImageResponse>(
+    "/v1/images/edits",
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+export async function createImageGenerationTask(
+  clientTaskId: string,
+  prompt: string,
+  model?: ImageModel,
+  size?: string,
+  quality = "auto",
+  outputFormat = "png",
+  frameCount?: number,
+  frameDurationMs?: number,
+) {
+  return httpRequest<ImageTask>("/api/image-tasks/generations", {
+    method: "POST",
+    body: {
+      client_task_id: clientTaskId,
+      prompt,
+      ...(model ? { model } : {}),
+      ...(size ? { size } : {}),
+      quality,
+      ...(outputFormat === "gif" ? { output_format: "gif", frame_count: frameCount, frame_duration_ms: frameDurationMs } : {}),
+    },
+  });
+}
+
+export async function createImageEditTask(
+  clientTaskId: string,
+  files: File | File[],
+  prompt: string,
+  model?: ImageModel,
+  size?: string,
+  quality = "auto",
+) {
+  const formData = new FormData();
+  const uploadFiles = Array.isArray(files) ? files : [files];
+
+  uploadFiles.forEach((file) => {
+    formData.append("image", file);
+  });
+  formData.append("client_task_id", clientTaskId);
+  formData.append("prompt", prompt);
+  if (model) {
+    formData.append("model", model);
+  }
+  if (size) {
+    formData.append("size", size);
+  }
+  formData.append("quality", quality);
+
+  return httpRequest<ImageTask>("/api/image-tasks/edits", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export async function fetchImageTasks(ids: string[]) {
+  const params = new URLSearchParams();
+  if (ids.length > 0) {
+    params.set("ids", ids.join(","));
+  }
+  params.set("_t", String(Date.now()));
+  return httpRequest<ImageTaskListResponse>(`/api/image-tasks?${params.toString()}`);
+}
+
+export async function resumeImagePoll(taskId: string, extraTimeoutSecs = 30) {
+  return httpRequest<ImageTask>(`/api/image-tasks/${encodeURIComponent(taskId)}/resume-poll`, {
+    method: "POST",
+    body: { extra_timeout_secs: extraTimeoutSecs },
+  });
+}
+
+export async function fetchSettingsConfig() {
+  return httpRequest<{ config: SettingsConfig }>("/api/settings");
+}
+
+export async function updateSettingsConfig(settings: SettingsConfig) {
+  return httpRequest<{ config: SettingsConfig }>("/api/settings", {
+    method: "POST",
+    body: settings,
+  });
+}
+
+export async function fetchThirdPartyApps() {
+  return httpRequest<{ third_party_apps: ThirdPartyAppsSettings }>("/api/third-party-apps");
+}
+
+export async function testBackupConnection() {
+  return httpRequest<{ result: { ok: boolean; status: number } }>("/api/backup/test", {
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function testImageStorageConnection() {
+  return httpRequest<{ result: { ok: boolean; status: number; error?: string } }>("/api/image-storage/test", {
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function syncImageStorage() {
+  return httpRequest<{ result: { uploaded: number; skipped: number; failed: number } }>("/api/image-storage/sync", {
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function fetchBackups() {
+  return httpRequest<{ items: BackupItem[]; state: BackupState; settings: BackupSettings }>("/api/backups");
+}
+
+export async function runBackupNow() {
+  return httpRequest<{ result: { key: string; size: number; encrypted: boolean } }>("/api/backups/run", {
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function deleteBackup(key: string) {
+  return httpRequest<{ ok: boolean }>("/api/backups/delete", {
+    method: "POST",
+    body: { key },
+  });
+}
+
+export async function fetchBackupDetail(key: string) {
+  const params = new URLSearchParams();
+  params.set("key", key);
+  return httpRequest<{ item: BackupDetail }>(`/api/backups/detail?${params.toString()}`);
+}
+
+export function getBackupDownloadUrl(key: string) {
+  const params = new URLSearchParams();
+  params.set("key", key);
+  return `/api/backups/download?${params.toString()}`;
+}
+
+export type ManagedImageFilters = { start_date?: string; end_date?: string; tags?: string[] };
+
+function managedImageParams(filters: ManagedImageFilters) {
+  const params = new URLSearchParams();
+  if (filters.start_date) params.set("start_date", filters.start_date);
+  if (filters.end_date) params.set("end_date", filters.end_date);
+  if (filters.tags?.length) params.set("tags", filters.tags.join(","));
+  return params;
+}
+
+/** 分页取图片：只返回这一页，total 为筛选后的总数；refresh 让后端立即和磁盘对账。 */
+export async function fetchManagedImages(
+  filters: ManagedImageFilters & { page: number; page_size: number; refresh?: boolean },
+) {
+  const params = managedImageParams(filters);
+  params.set("page", String(filters.page));
+  params.set("page_size", String(filters.page_size));
+  if (filters.refresh) params.set("refresh", "true");
+  return httpRequest<{
+    items: ManagedImage[];
+    total: number;
+    page: number;
+    page_size: number;
+    page_count: number;
+  }>(`/api/images?${params.toString()}`);
+}
+
+/** 符合筛选条件的全部图片路径（跨页），供「全选结果」使用。 */
+export async function fetchManagedImagePaths(filters: ManagedImageFilters) {
+  const params = managedImageParams(filters);
+  return httpRequest<{ paths: string[] }>(`/api/images/paths${params.toString() ? `?${params.toString()}` : ""}`);
+}
+
+export async function deleteManagedImages(body: { paths?: string[]; start_date?: string; end_date?: string; all_matching?: boolean }) {
+  return httpRequest<{ removed: number }>("/api/images/delete", { method: "POST", body });
+}
+
+export async function downloadImages(paths: string[]) {
+  const response = await request.post("/api/images/download", { paths }, { responseType: "blob" });
+  const blob = response.data as Blob;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "images.zip";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadSingleImage(path: string) {
+  const response = await request.get(`/api/images/download/${path}`, { responseType: "blob" });
+  const blob = response.data as Blob;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = path.split("/").pop() || "image.png";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function fetchImageTags() {
+  return httpRequest<{ tags: string[] }>("/api/images/tags");
+}
+
+export async function setImageTags(path: string, tags: string[]) {
+  return httpRequest<{ ok: boolean; tags: string[] }>("/api/images/tags", {
+    method: "POST",
+    body: { path, tags },
+  });
+}
+
+export async function deleteImageTag(tag: string) {
+  return httpRequest<{ ok: boolean; removed_from: number }>(`/api/images/tags/${encodeURIComponent(tag)}`, {
+    method: "DELETE",
+  });
+}
+
+export type ImageStorageStats = {
+  disk_total_mb: number; disk_used_mb: number; disk_free_mb: number;
+  image_count: number; image_size_mb: number; image_size_bytes: number;
+  /** 定时清理规则：保留最近多少天（含今天）、保留的最早日期、服务器的今天 */
+  retention_days?: number; retention_keep_from?: string; today?: string;
+};
+
+/** 只改「图片自动清理」天数，其他设置不动 */
+export async function updateImageRetentionDays(days: number) {
+  return httpRequest<{ config: SettingsConfig }>("/api/settings", { method: "POST", body: { image_retention_days: days } });
+}
+
+export async function fetchImageStorage() {
+  return httpRequest<ImageStorageStats>("/api/images/storage");
+}
+
+export async function deleteToTarget(targetFreeMb: number, dryRun = false) {
+  return httpRequest<{ removed: number; freed_mb: number; done: boolean }>(
+    `/api/images/storage/cleanup-to-target?target_free_mb=${targetFreeMb}&dry_run=${dryRun}`,
+    { method: "POST" },
+  );
+}
+
+export async function fetchSystemLogs(filters: { type?: string; start_date?: string; end_date?: string }) {
+  const params = new URLSearchParams();
+  if (filters.type) params.set("type", filters.type);
+  if (filters.start_date) params.set("start_date", filters.start_date);
+  if (filters.end_date) params.set("end_date", filters.end_date);
+  return httpRequest<{ items: SystemLog[] }>(`/api/logs${params.toString() ? `?${params.toString()}` : ""}`);
+}
+
+export async function deleteSystemLogs(ids: string[]) {
+  return httpRequest<{ removed: number }>("/api/logs/delete", {
+    method: "POST",
+    body: { ids },
+  });
+}
+
+export async function fetchUserKeys() {
+  return httpRequest<{ items: UserKey[] }>("/api/auth/users");
+}
+
+export async function createUserKey(name: string) {
+  return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>("/api/auth/users", {
+    method: "POST",
+    body: { name },
+  });
+}
+
+export async function updateUserKey(keyId: string, updates: { enabled?: boolean; name?: string; key?: string }) {
+  return httpRequest<{ item: UserKey; items: UserKey[] }>(`/api/auth/users/${keyId}`, {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function deleteUserKey(keyId: string) {
+  return httpRequest<{ items: UserKey[] }>(`/api/auth/users/${keyId}`, {
+    method: "DELETE",
+  });
+}
+
+// ── CPA (CLIProxyAPI) ──────────────────────────────────────────────
+
+export type CPAPool = {
+  id: string;
+  name: string;
+  base_url: string;
+  import_job?: CPAImportJob | null;
+};
+
+export type CPARemoteFile = {
+  name: string;
+  email: string;
+};
+
+export type CPAImportJob = {
+  job_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  total: number;
+  completed: number;
+  added: number;
+  skipped: number;
+  refreshed: number;
+  failed: number;
+  errors: Array<{ name: string; error: string }>;
+};
+
+export async function fetchCPAPools() {
+  return httpRequest<{ pools: CPAPool[] }>("/api/cpa/pools");
+}
+
+export async function createCPAPool(pool: { name: string; base_url: string; secret_key: string }) {
+  return httpRequest<{ pool: CPAPool; pools: CPAPool[] }>("/api/cpa/pools", {
+    method: "POST",
+    body: pool,
+  });
+}
+
+export async function updateCPAPool(
+  poolId: string,
+  updates: { name?: string; base_url?: string; secret_key?: string },
+) {
+  return httpRequest<{ pool: CPAPool; pools: CPAPool[] }>(`/api/cpa/pools/${poolId}`, {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function deleteCPAPool(poolId: string) {
+  return httpRequest<{ pools: CPAPool[] }>(`/api/cpa/pools/${poolId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchCPAPoolFiles(poolId: string) {
+  return httpRequest<{ pool_id: string; files: CPARemoteFile[] }>(`/api/cpa/pools/${poolId}/files`);
+}
+
+export async function startCPAImport(poolId: string, names: string[]) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/cpa/pools/${poolId}/import`, {
+    method: "POST",
+    body: { names },
+  });
+}
+
+export async function fetchCPAPoolImportJob(poolId: string) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/cpa/pools/${poolId}/import`);
+}
+
+// ── Sub2API ────────────────────────────────────────────────────────
+
+export type Sub2APIServer = {
+  id: string;
+  name: string;
+  base_url: string;
+  email: string;
+  has_api_key: boolean;
+  group_id: string;
+  import_job?: CPAImportJob | null;
+};
+
+export type Sub2APIRemoteAccount = {
+  id: string;
+  name: string;
+  email: string;
+  plan_type: string;
+  status: string;
+  expires_at: string;
+  has_refresh_token: boolean;
+};
+
+export type Sub2APIRemoteGroup = {
+  id: string;
+  name: string;
+  description: string;
+  platform: string;
+  status: string;
+  account_count: number;
+  active_account_count: number;
+};
+
+export async function fetchSub2APIServers() {
+  return httpRequest<{ servers: Sub2APIServer[] }>("/api/sub2api/servers");
+}
+
+export async function createSub2APIServer(server: {
+  name: string;
+  base_url: string;
+  email: string;
+  password: string;
+  api_key: string;
+  group_id: string;
+}) {
+  return httpRequest<{ server: Sub2APIServer; servers: Sub2APIServer[] }>("/api/sub2api/servers", {
+    method: "POST",
+    body: server,
+  });
+}
+
+export async function updateSub2APIServer(
+  serverId: string,
+  updates: {
+    name?: string;
+    base_url?: string;
+    email?: string;
+    password?: string;
+    api_key?: string;
+    group_id?: string;
+  },
+) {
+  return httpRequest<{ server: Sub2APIServer; servers: Sub2APIServer[] }>(`/api/sub2api/servers/${serverId}`, {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function fetchSub2APIServerGroups(serverId: string) {
+  return httpRequest<{ server_id: string; groups: Sub2APIRemoteGroup[] }>(
+    `/api/sub2api/servers/${serverId}/groups`,
+  );
+}
+
+export async function deleteSub2APIServer(serverId: string) {
+  return httpRequest<{ servers: Sub2APIServer[] }>(`/api/sub2api/servers/${serverId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchSub2APIServerAccounts(serverId: string) {
+  return httpRequest<{ server_id: string; accounts: Sub2APIRemoteAccount[] }>(
+    `/api/sub2api/servers/${serverId}/accounts`,
+  );
+}
+
+export async function startSub2APIImport(serverId: string, accountIds: string[]) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/sub2api/servers/${serverId}/import`, {
+    method: "POST",
+    body: { account_ids: accountIds },
+  });
+}
+
+export async function fetchSub2APIImportJob(serverId: string) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/sub2api/servers/${serverId}/import`);
+}
+
+// ── Upstream proxy ────────────────────────────────────────────────
+
+export type ProxySettings = {
+  enabled: boolean;
+  url: string;
+};
+
+export type ProxyTestResult = {
+  ok: boolean;
+  status: number;
+  latency_ms: number;
+  error: string | null;
+  proxy_source?: string;
+  has_proxy?: boolean;
+};
+
+export type ClearanceTestResult = {
+  ok: boolean;
+  status: string;
+  latency_ms: number;
+  has_cookies: boolean;
+  user_agent: string;
+  error: string | null;
+  runtime: ProxyRuntimeStatus;
+};
+
+export async function fetchProxy() {
+  return httpRequest<{ proxy: ProxySettings }>("/api/proxy");
+}
+
+export async function updateProxy(updates: { enabled?: boolean; url?: string }) {
+  return httpRequest<{ proxy: ProxySettings }>("/api/proxy", {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function testProxy(url?: string) {
+  return httpRequest<{ result: ProxyTestResult }>("/api/proxy/test", {
+    method: "POST",
+    body: { url: url ?? "" },
+  });
+}
+
+export async function fetchProxyRuntime() {
+  return httpRequest<ProxyRuntimeResponse>("/api/proxy/runtime");
+}
+
+export async function updateProxyRuntime(runtime: ProxyRuntimeSettings) {
+  return httpRequest<ProxyRuntimeResponse>("/api/proxy/runtime", {
+    method: "POST",
+    body: runtime,
+  });
+}
+
+export async function testProxyClearance(targetUrl?: string) {
+  return httpRequest<{ result: ClearanceTestResult }>("/api/proxy/clearance/test", {
+    method: "POST",
+    body: { target_url: targetUrl ?? "https://chatgpt.com" },
+  });
+}

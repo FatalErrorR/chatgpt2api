@@ -1,3 +1,16 @@
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web-build
+
+WORKDIR /app/web
+
+COPY web/package.json web/bun.lock ./
+RUN npm install
+
+COPY VERSION /app/VERSION
+COPY CHANGELOG.md /app/CHANGELOG.md
+COPY web ./
+RUN NEXT_PUBLIC_APP_VERSION="$(cat /app/VERSION)" npm run build
+
+
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 
 ARG TARGETOS
@@ -20,9 +33,8 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=build /chatgpt2api /chatgpt2api-migrate ./
-COPY web ./web
+COPY --from=web-build /app/web/out ./web_dist
 COPY VERSION ./
-COPY config.example.yaml ./config.yaml
 
 ENV PORT=80
 EXPOSE 80

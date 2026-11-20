@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/service"
@@ -124,4 +125,19 @@ func openAIBackendClient(t *testing.T) *upstream.OpenAIBackendAPI {
 	}
 	cfg := &config.Config{Image: config.ImageSettings{PollTimeoutSeconds: 120, PollIntervalSeconds: 10, PollInitialWaitSeconds: 10}}
 	return upstream.NewOpenAIBackendAPI(token, "", service.NewProxyService(cfg), cfg)
+}
+
+// The compat layer retries at a higher level (switching accounts), as the Python client does, so
+// its clients make one attempt: an unreachable upstream fails at once instead of after 15 s.
+func TestSingleAttemptFailsFast(t *testing.T) {
+	t.Setenv("CHATGPT2API_UPSTREAM_BASE_URL", "http://127.0.0.1:1")
+	cfg := &config.Config{}
+	api := upstream.NewOpenAIBackendAPI("token", "", service.NewProxyService(cfg), cfg).SingleAttempt()
+	started := time.Now()
+	if err := api.ChatRequirements(context.Background()); err == nil {
+		t.Fatal("expected a connection error")
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("took %s", elapsed)
+	}
 }

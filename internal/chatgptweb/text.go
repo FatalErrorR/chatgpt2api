@@ -133,10 +133,7 @@ func (b *Backend) conversationMessages(ctx context.Context, messages []map[strin
 
 // StreamText is stream_conversation for text: the SSE data payloads of one web conversation.
 func (b *Backend) StreamText(ctx context.Context, messages []map[string]any, model, thinkingEffort string) (<-chan string, func() error, error) {
-	if err := convertErr(b.API.Bootstrap(ctx)); err != nil {
-		return nil, nil, err
-	}
-	if err := convertErr(b.API.ChatRequirements(ctx)); err != nil {
+	if err := b.handshake(ctx, true); err != nil {
 		return nil, nil, err
 	}
 	path, timezone := textConversationPath, "Asia/Shanghai"
@@ -171,7 +168,7 @@ func (b *Backend) StreamText(ctx context.Context, messages []map[string]any, mod
 
 // ListModels is list_models: the account's (or the anonymous) models as an OpenAI list.
 func (b *Backend) ListModels(ctx context.Context) (map[string]any, error) {
-	if err := convertErr(b.API.Bootstrap(ctx)); err != nil {
+	if err := b.handshake(ctx, false); err != nil {
 		return nil, err
 	}
 	path := "/backend-api/models?history_and_training_disabled=false"
@@ -225,10 +222,7 @@ func (b *Backend) Search(ctx context.Context, prompt string) (map[string]any, er
 	if conduit == "" {
 		return nil, errors.New("missing conduit_token")
 	}
-	if err := convertErr(b.API.Bootstrap(ctx)); err != nil {
-		return nil, err
-	}
-	if err := convertErr(b.API.ChatRequirements(ctx)); err != nil {
+	if err := b.handshake(ctx, true); err != nil {
 		return nil, err
 	}
 	payload := map[string]any{

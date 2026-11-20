@@ -53,19 +53,21 @@ type OpenAIBackendOptions struct {
 }
 
 type OpenAIBackendAPI struct {
-	baseURL      string
-	accessToken  string
-	accountID    string
-	sentinel     string
-	proof        string
-	turnstile    string
-	accountProxy string
-	proxy        ClientProvider
-	options      OpenAIBackendOptions
-	deviceID     string
-	sessionID    string
-	build        string
-	version      string
+	observe       func(error) // sees the outcome of each UserInfo sub-request (proxy health)
+	singleAttempt bool        // no transient retry budget (the compat layer retries at a higher level, as Python does)
+	baseURL       string
+	accessToken   string
+	accountID     string
+	sentinel      string
+	proof         string
+	turnstile     string
+	accountProxy  string
+	proxy         ClientProvider
+	options       OpenAIBackendOptions
+	deviceID      string
+	sessionID     string
+	build         string
+	version       string
 }
 
 type ClientProvider interface {
@@ -680,6 +682,9 @@ func (u *OpenAIBackendAPI) requestRetry(ctx context.Context, method string, path
 // budget runs out. The upstream link drops in bursts that can outlast a fixed
 // attempt count, so long running jobs budget by time instead.
 func (u *OpenAIBackendAPI) requestRetryBudget(ctx context.Context, method string, path string, payload any, extra map[string]string, budget time.Duration) (*http.Response, error) {
+	if u.singleAttempt {
+		budget = 0
+	}
 	var response *http.Response
 	err := retryTransient(ctx, budget, func() error {
 		current, err := u.request(ctx, method, path, payload, extra)

@@ -51,3 +51,17 @@ func (u *OpenAIBackendAPI) AccountProxy() string { return u.accountProxy }
 
 // AccessToken is the account's token ("" for the anonymous routes).
 func (u *OpenAIBackendAPI) AccessToken() string { return u.accessToken }
+
+// SingleAttempt turns off the transient retry budget: every request is tried once, like the
+// Python client, whose callers decide whether to retry or switch accounts.
+func (u *OpenAIBackendAPI) SingleAttempt() *OpenAIBackendAPI {
+	u.singleAttempt = true
+	return u
+}
+
+// ObserveUserInfo receives the outcome (nil or the error) of each of UserInfo's three requests,
+// as Python records every request's result on the proxy's health.
+func (u *OpenAIBackendAPI) ObserveUserInfo(fn func(error)) *OpenAIBackendAPI {
+	u.observe = fn
+	return u
+}

@@ -288,10 +288,7 @@ func (b *Backend) prepareEditable(ctx context.Context, prompt string, uploaded [
 }
 
 func (b *Backend) runEditable(ctx context.Context, prompt string, uploaded []editableUpload, conduit string) (string, error) {
-	if err := convertErr(b.API.Bootstrap(ctx)); err != nil {
-		return "", err
-	}
-	if err := convertErr(b.API.ChatRequirements(ctx)); err != nil {
+	if err := b.handshake(ctx, true); err != nil {
 		return "", err
 	}
 	message := map[string]any{"id": uuid.NewString(), "author": map[string]any{"role": "user"}, "create_time": float64(time.Now().UnixNano()) / 1e9}

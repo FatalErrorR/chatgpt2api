@@ -86,6 +86,11 @@ func (u *OpenAIBackendAPI) UserInfo(ctx context.Context) (map[string]any, error)
 		accounts, errs[2] = u.getJSON(ctx, http.MethodGet, "/backend-api/accounts/check/v4-2023-04-27?"+url.Values{"timezone_offset_min": {"-480"}}.Encode(), nil)
 	}()
 	wg.Wait()
+	if u.observe != nil {
+		for _, err := range errs {
+			u.observe(err)
+		}
+	}
 	for _, err := range errs {
 		if err != nil {
 			return nil, err

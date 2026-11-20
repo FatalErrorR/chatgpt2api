@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -126,6 +127,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	if err != nil {
 		return nil, err
 	}
+	accountPool.Remote.(*compat.ChatGPTRemote).Health = proxyList
 	proxyOps := &proxyops.Ops{List: proxyList, Pool: accountPool, Settings: store, Log: compatLogs,
 		Test: func(ctx context.Context, proxyURL string) map[string]any { return proxyService.Test(ctx, proxyURL) }}
 	dataDir := store.DataDir
@@ -148,7 +150,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		Codex:    chatgptweb.CodexAttempt(imagePipeline.Hooks),
 		NewBackend: func(token string, account pool.Account) (imagegen.Backend, error) {
 			proxy, _ := account["proxy"].(string)
-			api := upstream.NewOpenAIBackendAPI(token, strings.TrimSpace(proxy), proxyService, cfg)
+			api := upstream.NewOpenAIBackendAPI(token, strings.TrimSpace(proxy), proxyService, cfg).SingleAttempt()
 			if accountID, _ := account["account_id"].(string); accountID != "" {
 				api.WithAccountID(accountID)
 			}
@@ -257,7 +259,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 				account = accountPool.GetAccount(token)
 			}
 			proxy, _ := account["proxy"].(string)
-			api := upstream.NewOpenAIBackendAPI(token, strings.TrimSpace(proxy), proxyService, cfg)
+			api := upstream.NewOpenAIBackendAPI(token, strings.TrimSpace(proxy), proxyService, cfg).SingleAttempt()
 			if accountID, _ := account["account_id"].(string); accountID != "" {
 				api.WithAccountID(accountID)
 			}
@@ -295,7 +297,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		},
 	}}
 	main := gin.New()
-	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
+	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg), compat.Gzip)
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compatAuth, Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
 		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, FileTasks: fileTasks,
@@ -306,7 +308,13 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		}, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
-	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })
+	// every Python route is on the compat layer now; the upstream routes are no longer reachable
+	// (their handlers use upstream's own tables). Anything else is the frontend, as in Python.
+	webDir := os.Getenv("CHATGPT2API_WEB_DIR")
+	if webDir == "" {
+		webDir = "web_dist"
+	}
+	main.NoRoute(compat.ServeWeb(webDir))
 	_ = scheduler
 	return &App{Engine: main, Upstream: engine, repo: repo, pool: accountPool, images: imageStore, backups: backups}, nil
 }

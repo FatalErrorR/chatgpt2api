@@ -1,0 +1,197 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter), "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: var(--font-source-serif), "Songti SC", "Noto Serif SC", "STSong", Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
+  /* 设计变量（docs/design/anthropic-redesign.html） */
+  --color-page: var(--page);
+  --color-sunken: var(--sunken);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-clay: var(--clay);
+  --color-clay-hover: var(--clay-hover);
+  --color-clay-soft: var(--clay-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-info: var(--info);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --page: #F5F4EE;
+  --sunken: #EDEBE3;
+  --surface: #FCFBF8;
+  --surface-hover: #F2F0E9;
+  --ink: #1F1E1B;
+  --ink-2: #57554F;
+  --ink-3: #8A877F;
+  --line: #E3E0D6;
+  --line-strong: #D3CFC2;
+  --clay: #D97757;
+  --clay-hover: #C4633F;
+  --clay-soft: #F6E3DA;
+  --ok: #6B8A4E;
+  --ok-soft: #E7EDDD;
+  --warn: #B9852F;
+  --warn-soft: #F5EAD3;
+  --bad: #B5483B;
+  --bad-soft: #F4DEDA;
+  --info: #5B7A99;
+  --background: var(--page);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--page);
+  --secondary: var(--sunken);
+  --secondary-foreground: var(--ink);
+  --muted: var(--sunken);
+  --muted-foreground: var(--ink-3);
+  --accent: var(--surface-hover);
+  --accent-foreground: var(--ink);
+  --destructive: var(--bad);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--clay);
+  --chart-1: var(--clay);
+  --chart-2: var(--ok);
+  --chart-3: var(--info);
+  --chart-4: var(--warn);
+  --chart-5: var(--ink-3);
+  --sidebar: var(--sunken);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: var(--page);
+  --sidebar-accent: var(--surface);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--clay);
+}
+
+.dark {
+  --page: #1F1E1C;
+  --sunken: #191817;
+  --surface: #262523;
+  --surface-hover: #2E2D2A;
+  --ink: #F0EEE6;
+  --ink-2: #BDB9AE;
+  --ink-3: #8A877F;
+  --line: #34322F;
+  --line-strong: #46433E;
+  --clay-soft: #3D2A22;
+  --ok: #94AD77;
+  --ok-soft: #2B3324;
+  --warn: #CFA154;
+  --warn-soft: #3A3021;
+  --bad: #DC988B;
+  --bad-soft: #3B2522;
+  --info: #A2B8CC;
+  --primary: var(--ink);
+  --primary-foreground: var(--page);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body {
+    background: var(--page);
+    overscroll-behavior: none;
+  }
+
+  h1,
+  h2,
+  .font-serif {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+  }
+
+  body {
+    @apply text-foreground;
+  }
+}
+
+@layer utilities {
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* 侧栏这类窄列表：细滚动条，颜色跟主题走 */
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+}
+
+/* 去掉旧页面的投影；inset 阴影是新页面画的选中框和状态左边线，必须保留 */
+.dark .shadow-sm,
+.dark .shadow-xs,
+.dark [class*="shadow-"]:not([class*="shadow-[inset"]) {
+  box-shadow: none !important;
+}
+
+@keyframes grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+::view-transition-old(root), ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+}

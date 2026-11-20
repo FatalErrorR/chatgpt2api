@@ -66,6 +66,22 @@ func (b *Backend) sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
+// handshake is _bootstrap (and _get_chat_requirements when sentinel is set). Like every Python
+// call that goes through _retry_cloudflare_challenge, a challenge page is retried and the
+// outcome counts towards the proxy's health.
+func (b *Backend) handshake(ctx context.Context, sentinel bool) error {
+	steps := []func(context.Context) error{b.API.Bootstrap}
+	if sentinel {
+		steps = append(steps, b.API.ChatRequirements)
+	}
+	for _, step := range steps {
+		if _, err := b.withChallengeRetry(ctx, func() (*http.Response, error) { return nil, step(ctx) }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // pythonContext names the failing call like the Python ensure_ok contexts.
 func pythonContext(path string) string {
 	switch {
@@ -302,10 +318,7 @@ func (b *Backend) StreamPicture(ctx context.Context, prompt, model string, image
 		}
 		refs = append(refs, ref)
 	}
-	if err := convertErr(b.API.Bootstrap(ctx)); err != nil {
-		return nil, nil, err
-	}
-	if err := convertErr(b.API.ChatRequirements(ctx)); err != nil {
+	if err := b.handshake(ctx, true); err != nil {
 		return nil, nil, err
 	}
 	upstreamModel := b.upstreamModel(model)
