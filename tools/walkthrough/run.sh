@@ -22,7 +22,7 @@ cp -R $W/data $W/go/data && cp -R $WEB $W/go/web_dist && cp $W/config.json $W/go
 docker exec c2a-pg psql -q -U c2a -d c2a -c "drop database if exists c2a_walk with (force);" -c "create database c2a_walk;"
 DB="postgres://c2a:c2a@127.0.0.1:55432/c2a_walk?sslmode=disable"
 (cd $G && go build -o $W/go/server . && go build -o $W/migrate ./cmd/migrate)
-$W/migrate -data $W/data -database-url "$DB" > $W/migrate.log
+$W/migrate -data $W/data -database-url "$DB" -expect-db c2a_walk > $W/migrate.log
 (cd $W/go && exec $CLEAN CHATGPT2API_AUTH_KEY="$K" CHATGPT2API_CONFIG_FILE=$W/go/config.json DATABASE_URL="$DB" PORT=3400 GIN_MODE=release CHATGPT2API_UPSTREAM_BASE_URL=http://127.0.0.1:1 ./server) > $W/go.log 2>&1 < /dev/null &
 for p in 8400 3400; do for i in $(seq 1 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$p/version)" = 200 ] && break; sleep 0.5; done; done
 export CHROME_PATH=${CHROME_PATH:-$(ls -d ~/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell 2>/dev/null | head -1)}

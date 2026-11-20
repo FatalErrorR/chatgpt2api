@@ -1,0 +1,100 @@
+# Step 12 test instances on the production server, fully apart from /opt/chatgpt2api.
+# Layout of this directory (see docs/go-staging.md):
+#   .env                     PG_PASSWORD=...  (and optional overrides below)
+#   conf/config.json         staging settings (copy of production's, edited); the directory is mounted,
+#                            not the file: Go saves by writing a temp file and renaming it over the old
+#                            one, which a single-file bind mount refuses ("Resource busy")
+#   data/                    staging data (images, thumbnails, files copies)
+#   source/staging/          snapshot with only the borrowed accounts (read only)
+#   rehearsal-conf/, rehearsal-data/, source/full/   the same for the rehearsal (full production copy)
+#
+# Staging (real upstream, the borrowed accounts):   docker compose up -d
+# Rehearsal (full copy, NO way out to the internet): docker compose --profile rehearsal up -d rehearsal-gate
+# Migrations run inside the matching service, so the target comes from that container's DATABASE_URL:
+#   docker compose run --rm --no-deps app       ./chatgpt2api-migrate -data /source -expect-db c2a_staging
+#   docker compose run --rm rehearsal           ./chatgpt2api-migrate -data /source -expect-db c2a_rehearsal
+name: chatgpt2api-go-staging
+
+x-app: &app
+  image: ${C2A_IMAGE:-chatgpt2api-go:staging}
+  restart: unless-stopped
+  stop_grace_period: ${STOP_GRACE:-375s} # > CHATGPT2API_SHUTDOWN_TIMEOUT_SECS, or Docker kills generations in flight
+
+services:
+  pg:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment: { POSTGRES_USER: c2a, POSTGRES_PASSWORD: "${PG_PASSWORD:?set PG_PASSWORD in .env}", POSTGRES_DB: c2a_staging }
+    volumes: [ "pg:/var/lib/postgresql/data" ]
+    networks: [ staging ]
+    healthcheck: { test: [ "CMD", "pg_isready", "-U", "c2a", "-d", "c2a_staging" ], interval: 2s, timeout: 3s, retries: 30 }
+
+  sentinel-solver:
+    build: ${SENTINEL_SOLVER_DIR:-/opt/chatgpt2api/sentinel_solver}
+    restart: unless-stopped
+    shm_size: "1gb"
+    volumes: [ "solver-browsers:/ms-playwright" ]
+    environment: { SENTINEL_SOLVER_TIMEZONE: America/Los_Angeles }
+    networks: [ staging ]
+
+  app:
+    <<: *app
+    depends_on: { pg: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: "postgres://c2a:${PG_PASSWORD}@pg:5432/c2a_staging?sslmode=disable"
+      CHATGPT2API_CONFIG_FILE: /app/conf/config.json
+      CHATGPT2API_SENTINEL_SOLVER_URL: http://sentinel-solver:8080
+      CHATGPT2API_SHUTDOWN_TIMEOUT_SECS: "${SHUTDOWN_SECS:-360}"
+    volumes:
+      - ./conf:/app/conf
+      - ./data:/app/data
+      - ./source/staging:/source:ro
+    ports: [ "127.0.0.1:${STAGING_PORT:-3401}:80" ] # local only; reach it through an SSH tunnel
+    networks: [ staging ]
+
+  # --- rehearsal: a full copy of production data. Its only network is internal (no gateway, no
+  # DNS for outside names), so nothing in it can reach chatgpt.com, auth.openai.com, R2 or WebDAV,
+  # whatever the settings say or a button on a page does. It reaches its own PostgreSQL; the admin
+  # pages come in through rehearsal-gate, which forwards one port and nothing else.
+  pg-rehearsal:
+    image: postgres:16-alpine
+    profiles: [ rehearsal ]
+    restart: unless-stopped
+    environment: { POSTGRES_USER: c2a, POSTGRES_PASSWORD: "${PG_PASSWORD:?set PG_PASSWORD in .env}", POSTGRES_DB: c2a_rehearsal }
+    volumes: [ "pg-rehearsal:/var/lib/postgresql/data" ]
+    networks: [ rehearsal ]
+    healthcheck: { test: [ "CMD", "pg_isready", "-U", "c2a", "-d", "c2a_rehearsal" ], interval: 2s, timeout: 3s, retries: 30 }
+
+  rehearsal:
+    <<: *app
+    profiles: [ rehearsal ]
+    depends_on: { pg-rehearsal: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: "postgres://c2a:${PG_PASSWORD}@pg-rehearsal:5432/c2a_rehearsal?sslmode=disable"
+      CHATGPT2API_CONFIG_FILE: /app/conf/config.json
+      CHATGPT2API_BACKGROUND_JOBS: "off"                    # defence in depth; the network is the guard
+      CHATGPT2API_UPSTREAM_BASE_URL: "http://127.0.0.1:1"
+    volumes:
+      - ./rehearsal-conf:/app/conf
+      - ./rehearsal-data:/app/data
+      - ./source/full:/source:ro
+    networks: [ rehearsal ]
+
+  rehearsal-gate:
+    image: alpine/socat:1.8.0.3
+    profiles: [ rehearsal ]
+    restart: unless-stopped
+    depends_on: [ rehearsal ]
+    command: [ "tcp-listen:80,fork,reuseaddr", "tcp-connect:rehearsal:80" ]
+    ports: [ "127.0.0.1:${REHEARSAL_PORT:-3402}:80" ]
+    networks: [ rehearsal, gate ]
+
+networks:
+  staging: {}
+  rehearsal: { internal: true }
+  gate: {}
+
+volumes:
+  pg: {}
+  pg-rehearsal: {}
+  solver-browsers: {}

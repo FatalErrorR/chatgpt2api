@@ -819,6 +819,15 @@ var ErrVerification = errors.New("对账不一致，已回滚，目标库未改�
 
 // Run migrates everything under opts.DataDir in one transaction, verifies it against the sources
 // and commits only when every check passes.
+// Validate reads and validates every source file like Run, without touching any database (dry run).
+func Validate(opts Options) (*Report, error) {
+	p, err := read(opts.withDefaults())
+	if err != nil {
+		return nil, err
+	}
+	return p.report, nil
+}
+
 func Run(db *gorm.DB, opts Options) (*Report, error) {
 	opts = opts.withDefaults()
 	p, err := read(opts)

@@ -105,7 +105,7 @@
   - [x] 契约对比 `tools/contract`：60 个场景，Python 版自身两次录制 60/60 一致。**起点：上游 Go 原样 9/60 一致**
   - [x] PostgreSQL：`tools/contract/run-go.sh` 每次新建 `c2a_contract` 库，Go 版在 PostgreSQL 上跑契约
 - [x] 1. 数据层与迁移脚本
-  - 命令 `cmd/migrate`（镜像里是 `/app/chatgpt2api-migrate`）：`chatgpt2api-migrate -data <Python 的 data 目录> -database-url <PostgreSQL>`
+  - 命令 `cmd/migrate`（镜像里是 `/app/chatgpt2api-migrate`）：`chatgpt2api-migrate -data <Python 的 data 目录> -expect-db <库名>`（目标取 `$DATABASE_URL` 或 `-database-url`；先打印实际连到的库，库名不符或 PostgreSQL 未写 `-expect-db` 时拒绝；`-dry-run` 只校验源数据）
   - 先读完并校验全部源文件，再在**一个事务**里替换所有表并对账，任何一步失败都整体回滚，目标库保持原样（d268a45，Codex 评审）：
     `accounts.json` 不是列表、不是有效 JSON、有内容却没有一个可用 token，或后面任一文件格式错误，都在写库前报错退出，退出码 1
   - 账号、API key、代理清单、图片索引与标签、生图任务、可编辑文件任务、CPA / Sub2API 配置、备份状态：整表镜像，重跑结果相同；
