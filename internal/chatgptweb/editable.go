@@ -420,7 +420,7 @@ func exportPaths(payload any, re *regexp.Regexp) []string {
 }
 
 func cleanMime(value any) string {
-	text := strings.ToLower(strings.TrimSpace(fmt.Sprint(firstNonNil(value, ""))))
+	text := strings.ToLower(strings.TrimSpace(textOf(value)))
 	if !strings.Contains(text, "/") {
 		return ""
 	}
@@ -445,11 +445,11 @@ func artifactFromDict(payload map[string]any, messageID, role string, created fl
 	if !relevant {
 		return nil
 	}
-	attachmentID := fileIDMatch(fmt.Sprint(firstNonNil(payload["id"], "")))
-	fileID := fileIDMatch(fmt.Sprint(firstNonNil(payload["file_id"], "")))
+	attachmentID := fileIDMatch(textOf(payload["id"]))
+	fileID := fileIDMatch(textOf(payload["file_id"]))
 	name := sanitizeFilename(firstString(payload["name"], payload["file_name"], payload["filename"], payload["title"]))
 	mime := cleanMime(firstNonNil(payload["mime_type"], payload["mimeType"]))
-	for _, match := range editableAssetPointerRE.FindAllStringSubmatch(fmt.Sprint(firstNonNil(payload["asset_pointer"], "")), -1) {
+	for _, match := range editableAssetPointerRE.FindAllStringSubmatch(textOf(payload["asset_pointer"]), -1) {
 		if attachmentID == "" {
 			attachmentID = match[1]
 		}
@@ -527,11 +527,11 @@ func extractArtifacts(conversation map[string]any, re *regexp.Regexp) []artifact
 	}
 	for _, n := range nodes {
 		author, _ := n.message["author"].(map[string]any)
-		role := strings.TrimSpace(fmt.Sprint(firstNonNil(author["role"], "")))
+		role := strings.TrimSpace(textOf(author["role"]))
 		if role != "assistant" && role != "tool" {
 			continue
 		}
-		messageID := fmt.Sprint(firstNonNil(n.message["id"], ""))
+		messageID := textOf(n.message["id"])
 		candidates := []map[string]any{}
 		metadata, _ := n.message["metadata"].(map[string]any)
 		attachments, _ := metadata["attachments"].([]any)

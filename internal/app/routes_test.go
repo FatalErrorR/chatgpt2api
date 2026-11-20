@@ -92,8 +92,10 @@ func testApp(t *testing.T) *App {
 // version must be registered, except those still listed in docs/contract/pending-routes.txt.
 // Implementing a route without removing it from the pending list also fails, so the list only shrinks.
 func TestPythonRoutesAreServed(t *testing.T) {
+	// Only the compat layer counts: upstream's handlers of the same path use upstream's tables
+	// (another account store, another API key store), so delegating to them is not a port.
 	registered := map[string]bool{}
-	for _, route := range testApp(t).Routes() {
+	for _, route := range testApp(t).Engine.Routes() {
 		registered[normalizeRoute(route.Method, route.Path)] = true
 	}
 	pending := map[string]bool{}

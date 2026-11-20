@@ -24,7 +24,9 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/imagestore"
 	"github.com/basketikun/chatgpt2api/internal/imagetasks"
 	"github.com/basketikun/chatgpt2api/internal/logs"
+	"github.com/basketikun/chatgpt2api/internal/openailogin"
 	"github.com/basketikun/chatgpt2api/internal/pool"
+	"github.com/basketikun/chatgpt2api/internal/protocollogin"
 	"github.com/basketikun/chatgpt2api/internal/proxylist"
 	"github.com/basketikun/chatgpt2api/internal/proxyops"
 	"github.com/basketikun/chatgpt2api/internal/repository"
@@ -110,6 +112,12 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		return nil, err
 	}
 	accountPool.Remote = &compat.ChatGPTRemote{Proxy: proxyService, Config: cfg}
+	passwordLogin := openailogin.Login{GlobalProxy: store.Proxy}
+	loginFunc := func(ctx context.Context, email, password, totpSecret, proxy string) (map[string]any, error) {
+		result, err := passwordLogin.PasswordLogin(ctx, email, password, totpSecret, proxy)
+		return map[string]any(result), err
+	}
+	accountPool.Relogin = accountPool.PasswordRelogin(loginFunc)
 	proxyList, err := proxylist.New(docstore.New(db))
 	if err != nil {
 		return nil, err
@@ -256,7 +264,8 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
-		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, FileTasks: fileTasks, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
+		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, FileTasks: fileTasks,
+		ProtocolLogin: &protocollogin.Service{Pool: accountPool, Proxies: proxyOps, Login: loginFunc}, OAuth: &openailogin.OAuth{Proxy: store.Proxy}, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

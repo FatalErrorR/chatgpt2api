@@ -1,9 +1,23 @@
 # Python 版有、Go 版还没实现的路由。实现一个就删一行（TestPythonRoutesAreServed 会检查）。
-POST /api/accounts/protocol-login
-GET /api/accounts/protocol-login/progress/{progress_id}
 POST /api/backup/test
 GET /api/backups
 POST /api/backups/delete
 GET /api/backups/detail
 GET /api/backups/download
 POST /api/backups/run
+GET /api/cpa/pools
+POST /api/cpa/pools
+DELETE /api/cpa/pools/{pool_id}
+POST /api/cpa/pools/{pool_id}
+GET /api/cpa/pools/{pool_id}/files
+GET /api/cpa/pools/{pool_id}/import
+POST /api/cpa/pools/{pool_id}/import
+POST /api/proxy/clearance/test
+GET /api/sub2api/servers
+POST /api/sub2api/servers
+DELETE /api/sub2api/servers/{server_id}
+POST /api/sub2api/servers/{server_id}
+GET /api/sub2api/servers/{server_id}/accounts
+GET /api/sub2api/servers/{server_id}/groups
+GET /api/sub2api/servers/{server_id}/import
+POST /api/sub2api/servers/{server_id}/import

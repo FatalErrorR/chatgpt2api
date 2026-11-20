@@ -174,3 +174,14 @@ Python 只有连真实服务的手动脚本（test_gpt_ppt.py、test_gpt_psd.py�
 `TestPPTTaskUsesLeastRecentlyUsedPaidAccountAndServesFiles`、`TestPSDWithoutImagesAndNoPaidAccountFail`、
 `TestRestartFailsUnfinishedTasksAndOwnersAreSeparate`、`TestEditableArtifactsPickTheNewestPrimaryAndZip`、`TestFileIDsSkipTheFileServiceScheme`；
 真实导出放在第 12 步的测试实例里验证。
+
+## 登录（`internal/openailogin`、`internal/protocollogin`、`pool.PasswordRelogin`）
+
+| Python | Go |
+| --- | --- |
+| test_protocol_login.py TotpTests（3 个） | `TestTOTP`（RFC 6238 向量、规整、剩余秒数） |
+| ParseLinesTests（3 个）、ErrorTextTests | `TestParseLines`、`TestDescribeError` |
+| ServiceTests（4 个） | `TestSuccessAddsAccountWithCredentials`、`TestFailureAndErrorDoNotStopTheBatch`、`TestExistingEmailIsUpdatedInPlace`、`TestBatchLimitAndEmptyInput` |
+| MfaHelperTests（2 个） | `TestMFAHelpers` |
+| LoginFlowTests（7 个） | `TestPasswordOnlyLogin`、`TestMFALoginSubmitsTOTPAndFollowsRedirect`、`TestLoginFailures`（5 种失败）、`TestLoginUsesTheAccountProxyElseTheGlobalOne`、`TestReloginPassesTheStoredSecretAndProxyAndDisablesDeactivated`；用真实 TLS 客户端打假的 auth 服务（重定向、cookie、sentinel 都走一遍） |
+| （新增） | `TestSentinelProofMeetsTheDifficulty`、`TestOAuthBridge`、`TestDistributionOnlyGivesNewEmailsAProxyAndReleasesOnce`、`chatgptweb.TestMissingValuesAreEmptyNotNil` |

@@ -74,6 +74,13 @@
   {"name": "080-accounts-add-403", "method": "POST", "path": "/api/accounts", "body": {"tokens": ["fake-403-1"]}},
   {"name": "081-accounts-list-with-403", "method": "GET", "path": "/api/accounts"},
 
+  {"name": "082-protocol-login-empty", "method": "POST", "path": "/api/accounts/protocol-login", "body": {"text": "  "}},
+  {"name": "083-protocol-login-invalid-lines", "method": "POST", "path": "/api/accounts/protocol-login", "body": {"text": "garbage\nnot-an-email----pw"}},
+  {"name": "084-protocol-login-progress-missing", "method": "GET", "path": "/api/accounts/protocol-login/progress/nope"},
+  {"name": "085-oauth-start", "method": "POST", "path": "/api/accounts/oauth/start", "body": {"email_hint": "a@example.com"}},
+  {"name": "086-oauth-finish-no-code", "method": "POST", "path": "/api/accounts/oauth/finish", "body": {"session_id": "x"}},
+  {"name": "087-oauth-finish-unknown-session", "method": "POST", "path": "/api/accounts/oauth/finish", "body": {"callback": "https://platform.openai.com/auth/callback?code=c&state=nope.x"}},
+
   {"name": "090-user-key-delete", "method": "DELETE", "path": "/api/auth/users/{user_key_id}"},
   {"name": "091-accounts-delete", "method": "DELETE", "path": "/api/accounts", "body": {"tokens": ["fake-403-1"]}}
 ]

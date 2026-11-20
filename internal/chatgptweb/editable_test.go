@@ -33,3 +33,15 @@ func TestFileIDsSkipTheFileServiceScheme(t *testing.T) {
 		t.Fatal("prompt")
 	}
 }
+
+func TestMissingValuesAreEmptyNotNil(t *testing.T) {
+	if textOf(nil) != "" || textOf("x") != "x" || textOf(3) != "3" {
+		t.Fatal("textOf")
+	}
+	item := artifactFromDict(map[string]any{"name": "a.pptx", "file_id": "file_abc"}, "", "assistant", 1, pptKind.exportRE)
+	// as in Python, the id regex over the dumped dict also matches the key "file_id"; the download
+	// then falls through to the real file id
+	if item == nil || item.AttachmentID != "file_id" || item.FileID != "file_abc" || item.MimeType != "" {
+		t.Fatalf("item %+v", item)
+	}
+}

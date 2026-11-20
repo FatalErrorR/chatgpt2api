@@ -74,7 +74,7 @@ func (b *Backend) conversationMessages(ctx context.Context, messages []map[strin
 				}
 				switch part["type"] {
 				case "text":
-					texts = append(texts, fmt.Sprint(firstNonNil(part["text"], "")))
+					texts = append(texts, textOf(part["text"]))
 				case "image":
 					if data, ok := part["data"].([]byte); ok {
 						mime, _ := part["mime"].(string)
@@ -189,13 +189,13 @@ func (b *Backend) ListModels(ctx context.Context) (map[string]any, error) {
 		if !ok {
 			continue
 		}
-		slug := strings.TrimSpace(fmt.Sprint(firstNonNil(item["slug"], "")))
+		slug := strings.TrimSpace(textOf(item["slug"]))
 		if slug == "" || seen[slug] {
 			continue
 		}
 		seen[slug] = true
 		created := int64(numberOf(item["created"]))
-		owner := strings.TrimSpace(fmt.Sprint(firstNonNil(item["owned_by"], "")))
+		owner := strings.TrimSpace(textOf(item["owned_by"]))
 		if owner == "" {
 			owner = "chatgpt"
 		}
@@ -351,7 +351,7 @@ func extractSearchResult(conversationID string, conversation map[string]any) map
 	}
 	status := strings.TrimSpace(firstString(finish["type"], metadata["status"], findSearchValue(message, "status")))
 	return map[string]any{"conversation_id": conversationID, "status": status, "answer": answer, "sources": sources,
-		"assistant_message_id": fmt.Sprint(firstNonNil(message["id"], "")), "create_time": numberOf(message["create_time"])}
+		"assistant_message_id": textOf(message["id"]), "create_time": numberOf(message["create_time"])}
 }
 
 func hasSource(sources []map[string]any, url string) bool {
@@ -484,4 +484,15 @@ func findSearchValue(payload any, key string) string {
 		}
 	}
 	return ""
+}
+
+// textOf is str(value or ""): nil and missing values are "", other values as printed.
+func textOf(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fmt.Sprint(value)
 }

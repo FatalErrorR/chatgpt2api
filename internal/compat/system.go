@@ -9,7 +9,9 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/imagestore"
 	"github.com/basketikun/chatgpt2api/internal/imagetasks"
 	"github.com/basketikun/chatgpt2api/internal/logs"
+	"github.com/basketikun/chatgpt2api/internal/openailogin"
 	"github.com/basketikun/chatgpt2api/internal/pool"
+	"github.com/basketikun/chatgpt2api/internal/protocollogin"
 	"github.com/basketikun/chatgpt2api/internal/proxyops"
 	"github.com/basketikun/chatgpt2api/internal/settings"
 	"github.com/basketikun/chatgpt2api/internal/textapi"
@@ -19,22 +21,24 @@ import (
 
 // Deps are the shared pieces every compat handler may use.
 type Deps struct {
-	DB          *gorm.DB
-	Settings    *settings.Store
-	Auth        *AuthService
-	Pool        *pool.Service
-	Proxies     ProxyReserver // proxy list reservations for imports
-	ProxyOps    *proxyops.Ops
-	ImageProbe  pool.ImageProbe // one small test image per account
-	Images      *imagegen.Generator
-	Logs        *logs.Service
-	ImageStore  *imagestore.Service
-	Text        *textapi.Deps
-	ImageTasks  *imagetasks.Service
-	FileTasks   *filetasks.Service
-	DataDir     string
-	Version     string
-	DatabaseURL string
+	DB            *gorm.DB
+	Settings      *settings.Store
+	Auth          *AuthService
+	Pool          *pool.Service
+	Proxies       ProxyReserver // proxy list reservations for imports
+	ProxyOps      *proxyops.Ops
+	ImageProbe    pool.ImageProbe // one small test image per account
+	Images        *imagegen.Generator
+	Logs          *logs.Service
+	ImageStore    *imagestore.Service
+	Text          *textapi.Deps
+	ImageTasks    *imagetasks.Service
+	FileTasks     *filetasks.Service
+	ProtocolLogin *protocollogin.Service
+	OAuth         *openailogin.OAuth
+	DataDir       string
+	Version       string
+	DatabaseURL   string
 }
 
 // Migrate creates the compat tables.
@@ -84,6 +88,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerText(engine, d)
 	registerImageTasks(engine, d)
 	registerFileTasks(engine, d)
+	registerLogin(admin, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

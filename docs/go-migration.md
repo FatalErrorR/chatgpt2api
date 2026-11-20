@@ -158,6 +158,13 @@
   - 契约新增 063–069（任务提交、缺字段、PSD/PPT、文件 404、搜索空 prompt），**67/67 一致**，3 个已知差异
   - 测试环境：`tools/contract/setup.sh` 一键重建（PostgreSQL、假上游、Python 参照实例、tiktoken 缓存）
 - [ ] 10. 账号来源与备份
+  - 路由检查收紧：只算兼容层注册的路由（之前转给上游的同名路由也算"已实现"，但上游用的是另一套账号表），因此 CPA、sub2api、OAuth、clearance 共 18 个路由重新列入待办
+  - [x] 登录 `internal/openailogin`：密码登录（authorize、sentinel 工作量证明、密码校验、TOTP 二步验证、手动跟随重定向、换 token）、PKCE、TOTP、手动 OAuth 桥；
+    每次登录独立的 Chrome 指纹客户端和 cookie，走账号代理（没有则全局代理）
+  - [x] 密码重新登录 `pool.PasswordRelogin`：**之前 Go 版的 Relogin 钩子没接，手动"重新登录"和 app_session_terminated 自动重登都不会执行**，现已接上
+  - [x] 批量协议登录 `internal/protocollogin`、`/api/accounts/protocol-login*`、`/api/accounts/oauth/start|finish`
+  - 契约新增 082–087，**73/73 一致**，3 个已知差异
+  - [ ] 备份、CPA、sub2api、clearance 测试
 - [ ] 11. 前端适配与走查
 - [ ] 12. 完整测试
 - [ ] 13. 并行上线
