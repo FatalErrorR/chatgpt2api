@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/basketikun/chatgpt2api/internal/upstream"
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/service"
-	"github.com/basketikun/chatgpt2api/internal/upstream"
 )
 
 func TestCodexAPIImageIntegration(t *testing.T) {
@@ -25,3 +25,5 @@ func TestCodexAPIImageIntegration(t *testing.T) {
 		t.Fatal("missing image")
 	}
 }
+
+
