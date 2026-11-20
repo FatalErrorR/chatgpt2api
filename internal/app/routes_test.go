@@ -11,6 +11,7 @@ import (
 
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/repository"
+	"github.com/basketikun/chatgpt2api/internal/settings"
 	"github.com/gin-gonic/gin"
 )
 
@@ -80,7 +81,11 @@ func testApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { repo.Close() })
-	return New(cfg, repo)
+	application, err := New(cfg, repo, settings.NewForTest(map[string]any{"auth-key": "test-admin-key"}, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application
 }
 
 // TestPythonRoutesAreServed is acceptance criterion A1 as a ratchet: every route of the Python
@@ -88,7 +93,7 @@ func testApp(t *testing.T) *App {
 // Implementing a route without removing it from the pending list also fails, so the list only shrinks.
 func TestPythonRoutesAreServed(t *testing.T) {
 	registered := map[string]bool{}
-	for _, route := range testApp(t).Engine.Routes() {
+	for _, route := range testApp(t).Routes() {
 		registered[normalizeRoute(route.Method, route.Path)] = true
 	}
 	pending := map[string]bool{}

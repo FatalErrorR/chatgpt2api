@@ -81,7 +81,11 @@
   - [x] 契约对比 `tools/contract`：60 个场景，Python 版自身两次录制 60/60 一致。**起点：上游 Go 原样 9/60 一致**
   - [x] PostgreSQL：`tools/contract/run-go.sh` 每次新建 `c2a_contract` 库，Go 版在 PostgreSQL 上跑契约
 - [ ] 1. 数据层与迁移脚本
-- [ ] 2. 鉴权与设置
+- [x] 2. 鉴权与设置
+  - 路由结构：`app.Engine` 先挂兼容层（`internal/compat`，Python 版接口），没匹配到的请求转给 `app.Upstream`（上游 v2 的全部路由），迁移期间服务始终可用
+  - `internal/settings`：直接读写 Python 格式的 `config.json`；用 Python `ConfigStore` 生成的 656 组向量逐一比对（`tools/vectors/settings_vectors.py`）
+  - `internal/compat`：管理员 key + 用户 key（只存 SHA-256，兼容迁移过来的 `auth_keys.json`）、`/auth/login`、`/version`、`/api/settings`、`/api/auth/users*`、`/api/storage/info`、`/api/third-party-apps`
+  - 契约：**18/60 一致**，1 个已知差异（storage-info 返回数据库后端结构）。`/health` 依赖号池统计，放到第 3 步
 - [ ] 3. 号池
 - [ ] 4. 生图链路
 - [ ] 5. 代理池

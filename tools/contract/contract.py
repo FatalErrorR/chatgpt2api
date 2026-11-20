@@ -19,6 +19,7 @@ Scenarios live in scenarios.json next to this file. Fields:
   ignore    keys removed anywhere in the body before comparing values
   save      {"var": "json.path"} stores a value from this response for later paths/bodies
   wait      seconds to sleep before the request (for background jobs)
+  known_diff  reason for an intended difference; diff reports it as KNOWN instead of FAIL
 Only the standard library is used.
 """
 from __future__ import annotations
@@ -139,6 +140,8 @@ def record(args) -> int:
         body = fill(scenario.get("body"), saved)
         status, content_type, raw = request(args.base, scenario["method"], path, token, body)
         entry: dict = {"name": name, "method": scenario["method"], "path": scenario["path"], "status": status}
+        if scenario.get("known_diff"):
+            entry["known_diff"] = scenario["known_diff"]
         try:
             parsed = json.loads(raw) if raw else None
             entry["shape"] = shape(parsed)
@@ -177,6 +180,7 @@ def diff_shapes(left, right, where: str, problems: list[str]) -> None:
 def diff(args) -> int:
     first, second = Path(args.first), Path(args.second)
     failed = 0
+    known = 0
     for path in sorted(first.glob("*.json")):
         other = second / path.name
         a = json.loads(path.read_text())
@@ -196,14 +200,17 @@ def diff(args) -> int:
         if "body" in a and a.get("body") != b.get("body"):
             problems.append("body differs:\n      " + json.dumps(a.get("body"), ensure_ascii=False)[:300]
                             + "\n      " + json.dumps(b.get("body"), ensure_ascii=False)[:300])
-        if problems:
+        if problems and a.get("known_diff"):
+            known += 1
+            print(f"KNOWN    {a['name']}: {a['known_diff']}")
+        elif problems:
             failed += 1
             print(f"FAIL     {a['name']} ({a['method']} {a['path']})")
             for problem in problems[:12]:
                 print("    " + problem)
         else:
             print(f"ok       {a['name']}")
-    print(f"\n{failed} of {len(list(first.glob('*.json')))} scenarios differ")
+    print(f"\n{failed} of {len(list(first.glob('*.json')))} scenarios differ ({known} known differences)")
     return 1 if failed else 0
 
 

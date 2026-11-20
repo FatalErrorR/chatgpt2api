@@ -108,6 +108,9 @@ func mysqlDSN(databaseURL string) (string, error) {
 	return config.FormatDSN(), nil
 }
 
+// DB exposes the connection to the compat layer (internal/compat), which keeps its own tables.
+func (r *Repository) DB() *gorm.DB { return r.db }
+
 func (r *Repository) Close() error {
 	db, err := r.db.DB()
 	if err != nil {

@@ -9,7 +9,7 @@
   {"name": "010-settings-get", "method": "GET", "path": "/api/settings"},
   {"name": "011-settings-save-retention", "method": "POST", "path": "/api/settings", "body": {"image_retention_days": 15}},
   {"name": "012-settings-save-invalid-storage", "method": "POST", "path": "/api/settings", "body": {"image_storage": {"mode": "webdav", "webdav_url": "ftp://x"}}, "values": true},
-  {"name": "013-storage-info", "method": "GET", "path": "/api/storage/info"},
+  {"name": "013-storage-info", "method": "GET", "path": "/api/storage/info", "known_diff": "Go 版用 PostgreSQL，返回 Python 数据库存储后端的结构（type=database），前端两种都能显示"},
   {"name": "014-third-party-apps", "method": "GET", "path": "/api/third-party-apps"},
 
   {"name": "020-user-keys-empty", "method": "GET", "path": "/api/auth/users"},

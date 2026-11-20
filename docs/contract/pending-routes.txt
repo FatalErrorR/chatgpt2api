@@ -35,8 +35,6 @@ POST /api/proxies/test
 POST /api/proxies/update
 GET /api/proxy/runtime
 POST /api/proxy/runtime
-GET /api/storage/info
-GET /api/third-party-apps
 GET /files/{file_path:path}
 GET /health
 GET /v1/editable-file-tasks
