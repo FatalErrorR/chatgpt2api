@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -54,6 +56,9 @@ type App struct {
 	pool     *pool.Service
 	images   *imagestore.Service
 	backups  *backup.Service
+	settings *settings.Store
+	// background work that outlives its request (image tasks, file exports, login batches)
+	waiters []func()
 }
 
 // Routes lists the routes of both routers.
@@ -296,12 +301,13 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 			return map[string]any{"type": "database", "description": "数据库存储"}
 		},
 	}}
+	protocolLogin := &protocollogin.Service{Pool: accountPool, Proxies: proxyOps, Login: loginFunc}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg), compat.Gzip)
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compatAuth, Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
 		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, FileTasks: fileTasks,
-		ProtocolLogin: &protocollogin.Service{Pool: accountPool, Proxies: proxyOps, Login: loginFunc}, OAuth: &openailogin.OAuth{Proxy: store.Proxy}, CPA: cpaSources, Sub2API: sub2apiSources, Backup: backups,
+		ProtocolLogin: protocolLogin, OAuth: &openailogin.OAuth{Proxy: store.Proxy}, CPA: cpaSources, Sub2API: sub2apiSources, Backup: backups,
 		RefreshClearance: func(ctx context.Context, target string) (string, map[string]string, error) {
 			bundle, err := proxyService.RefreshClearance(ctx, target)
 			return bundle.UserAgent, bundle.Cookies, err
@@ -316,7 +322,8 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	}
 	main.NoRoute(compat.ServeWeb(webDir))
 	_ = scheduler
-	return &App{Engine: main, Upstream: engine, repo: repo, pool: accountPool, images: imageStore, backups: backups}, nil
+	return &App{Engine: main, Upstream: engine, repo: repo, pool: accountPool, images: imageStore, backups: backups, settings: store,
+		waiters: []func(){imageTasks.Wait, fileTasks.Wait, protocolLogin.Wait}}, nil
 }
 
 // Start resets state left over from a previous run and starts the background jobs.
@@ -328,4 +335,50 @@ func (a *App) Start(ctx context.Context) {
 	go a.pool.Watch(ctx)
 	go a.images.Run(ctx)
 	go a.backups.Start(ctx)
+}
+
+// ShutdownGrace is how long a stop waits for requests and background work in flight: the image
+// poll timeout plus a minute (an image request can run that long), or
+// CHATGPT2API_SHUTDOWN_TIMEOUT_SECS.
+func (a *App) ShutdownGrace() time.Duration {
+	if value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("CHATGPT2API_SHUTDOWN_TIMEOUT_SECS"))); err == nil && value >= 0 {
+		return time.Duration(value) * time.Second
+	}
+	return time.Duration(a.settings.ImagePollTimeoutSecs()+60) * time.Second
+}
+
+// Serve runs the HTTP server until ctx ends, then stops taking new connections and waits up to
+// grace for requests in flight (image generations, streams) and background tasks to finish,
+// instead of cutting them off.
+func (a *App) Serve(ctx context.Context, server *http.Server, grace time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		<-ctx.Done()
+		log.Printf("shutting down: waiting up to %s for requests and tasks in flight", grace)
+		deadline, cancel := context.WithTimeout(context.Background(), grace)
+		defer cancel()
+		err := server.Shutdown(deadline)
+		finished := make(chan struct{})
+		go func() {
+			for _, wait := range a.waiters {
+				wait()
+			}
+			close(finished)
+		}()
+		select {
+		case <-finished:
+		case <-deadline.Done():
+			if err == nil {
+				err = deadline.Err()
+			}
+		}
+		done <- err
+	}()
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	if err := <-done; err != nil {
+		log.Printf("shutdown did not finish within %s: %v", grace, err)
+	}
+	return nil
 }

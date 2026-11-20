@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -47,13 +46,7 @@ func main() {
 	}
 	application.Start(ctx)
 	server := &http.Server{Addr: ":" + cfg.Port, Handler: application.Engine, ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		server.Shutdown(shutdown)
-	}()
-	if err = server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	if err := application.Serve(ctx, server, application.ShutdownGrace()); err != nil {
 		log.Fatal(err)
 	}
 }

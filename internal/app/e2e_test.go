@@ -2,7 +2,10 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -70,5 +73,72 @@ func TestImageStreamEndsWithDone(t *testing.T) {
 	body := response.Body.String()
 	if response.Code != 200 || !strings.HasPrefix(body, ": stream-open\n\n") || !strings.HasSuffix(body, "data: [DONE]\n\n") || !strings.Contains(body, `"url"`) {
 		t.Fatalf("%d %q", response.Code, body[max(0, len(body)-300):])
+	}
+}
+
+func freeAddr(t *testing.T) string {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return listener.Addr().String()
+}
+
+// SIGTERM (ctx ending) lets a generation in flight finish instead of cutting it off.
+func TestStopWaitsForAGenerationInFlight(t *testing.T) {
+	application, _ := e2eApp(t, 1500*time.Millisecond)
+	call(t, application.Engine, "POST", "/api/accounts", map[string]any{"tokens": []string{"fake-ok-1"}})
+	addr := freeAddr(t)
+	server := &http.Server{Addr: addr, Handler: application.Engine}
+	ctx, stop := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- application.Serve(ctx, server, 30*time.Second) }()
+	for i := 0; i < 50; i++ {
+		if conn, err := net.Dial("tcp", addr); err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	type result struct {
+		status int
+		body   string
+		err    error
+	}
+	results := make(chan result, 1)
+	go func() {
+		request, _ := http.NewRequest("POST", "http://"+addr+"/v1/images/generations", strings.NewReader(`{"prompt":"a red apple","response_format":"url"}`))
+		request.Header.Set("Authorization", "Bearer test-admin-key")
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			results <- result{err: err}
+			return
+		}
+		defer response.Body.Close()
+		raw, _ := io.ReadAll(response.Body)
+		results <- result{status: response.StatusCode, body: string(raw)}
+	}()
+	time.Sleep(400 * time.Millisecond) // the image is still being generated
+	started := time.Now()
+	stop()
+	got := <-results
+	if got.err != nil || got.status != 200 || !strings.Contains(got.body, `"url"`) {
+		t.Fatalf("request cut off: %+v", got)
+	}
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Serve did not return after the request finished")
+	}
+	if waited := time.Since(started); waited < 500*time.Millisecond {
+		t.Fatalf("returned after %s, before the image could be ready", waited)
+	}
+	if _, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+		t.Fatal("still accepting connections after the stop")
 	}
 }
