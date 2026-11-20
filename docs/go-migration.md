@@ -69,6 +69,11 @@
 - [x] 建分支，上游代码编译和测试通过（89a8ad0，go 1.26.3）
 - [x] 验收标准与测试方案（`docs/go-acceptance.md`），路由清单（94 个）
 - [ ] 0. 基础设施
+  - [x] 路由组装移到 `internal/app`，路由覆盖测试（1c43454）：93 个路由中上游已有 49 个，待实现 44 个
+  - [x] 数据模型对照 `docs/contract/data-model.md`
+  - [ ] 假上游 `tools/fakeupstream`
+  - [ ] 契约对比 `tools/contract`
+  - [ ] PostgreSQL 集成测试（本机需启动 Docker Desktop）
 - [ ] 1. 数据层与迁移脚本
 - [ ] 2. 鉴权与设置
 - [ ] 3. 号池
