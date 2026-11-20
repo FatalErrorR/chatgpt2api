@@ -86,7 +86,13 @@
   - `internal/settings`：直接读写 Python 格式的 `config.json`；用 Python `ConfigStore` 生成的 656 组向量逐一比对（`tools/vectors/settings_vectors.py`）
   - `internal/compat`：管理员 key + 用户 key（只存 SHA-256，兼容迁移过来的 `auth_keys.json`）、`/auth/login`、`/version`、`/api/settings`、`/api/auth/users*`、`/api/storage/info`、`/api/third-party-apps`
   - 契约：**18/60 一致**，1 个已知差异（storage-info 返回数据库后端结构）。`/health` 依赖号池统计，放到第 3 步
-- [ ] 3. 号池
+- [x] 3. 号池
+  - `internal/pool`：账号以 JSON 文档存 PostgreSQL（`compat_accounts`，保留字典顺序，只写变化的账号），轮询选号、并发位、暂避、上传冷却、token 刷新与轮换、批量刷新（10 并发）、重登、测试生图、导出、统计
+  - `internal/upstream/userinfo.go`：与 Python `get_user_info` 相同的三个并发请求和解析；`internal/compat/remote.go` 把号池接到上游客户端，OAuth 刷新 token
+  - `internal/logs`：写日志并按 UTC+8 累计每日生图数；`internal/pyval`、`internal/proxylist`（`proxy_key`）
+  - `/api/accounts*`（除 CPA/sub2api/OAuth/协议登录）、`/health`（含 HTML 监控页）
+  - 契约：**29/60 一致**，2 个已知差异（存储后端结构）。导入时按代理平均分配依赖第 5 步的代理清单
+  - 测试对照：`docs/contract/test-map.md`
 - [ ] 4. 生图链路
 - [ ] 5. 代理池
 - [ ] 6. 日志与统计

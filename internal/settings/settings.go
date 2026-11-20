@@ -37,6 +37,25 @@ type Store struct {
 	data map[string]any
 	// DataDir is where accounts, logs and images live (data/ next to config.json by default).
 	DataDir string
+
+	hooksMu sync.Mutex
+	hooks   []func()
+}
+
+// OnChange registers a callback run after every successful Update.
+func (s *Store) OnChange(fn func()) {
+	s.hooksMu.Lock()
+	defer s.hooksMu.Unlock()
+	s.hooks = append(s.hooks, fn)
+}
+
+func (s *Store) runHooks() {
+	s.hooksMu.Lock()
+	hooks := append([]func(){}, s.hooks...)
+	s.hooksMu.Unlock()
+	for _, hook := range hooks {
+		hook()
+	}
 }
 
 // Load reads config.json. A missing or invalid file counts as an empty object, as in Python.
@@ -446,6 +465,7 @@ func (s *Store) Update(changes map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.runHooks()
 	return s.Get(), nil
 }
 

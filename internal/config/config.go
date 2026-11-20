@@ -267,3 +267,11 @@ func preserveClearance(current any, incoming any) any {
 	return next
 }
 
+
+// Sync applies changes under the config lock. The compat layer uses it to copy config.json
+// (internal/settings) into the fields the upstream services read.
+func (c *Config) Sync(apply func(*Config)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	apply(c)
+}

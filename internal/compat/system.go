@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/settings"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -14,6 +15,9 @@ type Deps struct {
 	DB          *gorm.DB
 	Settings    *settings.Store
 	Auth        *AuthService
+	Pool        *pool.Service
+	Proxies     ProxyReserver   // proxy list reservations (step 5); nil until wired
+	ImageProbe  pool.ImageProbe // one small test image per account (step 4); nil until wired
 	Version     string
 	DatabaseURL string
 }
@@ -57,6 +61,50 @@ func Register(engine *gin.Engine, d *Deps) {
 		c.JSON(http.StatusOK, gin.H{"third_party_apps": d.Settings.ThirdPartyApps()})
 	})
 	registerUserKeys(admin, d)
+	registerAccounts(admin, d)
+	engine.GET("/health", func(c *gin.Context) { health(c, d) })
+}
+
+// runtimeStatus is proxy_settings.get_runtime_status() for the upstream profile.
+func runtimeStatus(store *settings.Store) gin.H {
+	runtime := store.ProxyRuntime()
+	clearance, _ := runtime["clearance"].(map[string]any)
+	enabled, _ := runtime["enabled"].(bool)
+	egress, _ := runtime["egress_mode"].(string)
+	source, proxy := "direct", ""
+	if enabled && egress == "single_proxy" {
+		if url, _ := runtime["proxy_url"].(string); url != "" {
+			source, proxy = "runtime", url
+		}
+	}
+	if proxy == "" && store.Proxy() != "" {
+		source, proxy = "global", store.Proxy()
+	}
+	mode, _ := clearance["mode"].(string)
+	clearanceEnabled, _ := clearance["enabled"].(bool)
+	return gin.H{
+		"enabled": enabled, "egress_mode": egress, "proxy_source": source, "has_proxy": proxy != "",
+		"clearance_enabled": enabled && clearanceEnabled && (mode == "manual" || mode == "flaresolverr"),
+		"clearance_mode":    mode, "has_clearance_bundle": false, "cached_clearance_hosts": []string{},
+	}
+}
+
+// health is GET /health: JSON with ?format=json, otherwise the HTML dashboard.
+func health(c *gin.Context, d *Deps) {
+	stats := d.Pool.Stats()
+	healthy := stats["active"].(int) > 0
+	status := "degraded"
+	if healthy {
+		status = "ok"
+	}
+	info := storageInfo(d)
+	payload := gin.H{"status": status, "healthy": healthy, "version": d.Version, "storage": gin.H{"backend": info["backend"], "health": info["health"]},
+		"proxy_runtime": runtimeStatus(d.Settings), "accounts": stats}
+	if c.Query("format") == "json" {
+		c.JSON(http.StatusOK, payload)
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(healthHTML(payload)))
 }
 
 // maskPassword is database_storage._mask_password.

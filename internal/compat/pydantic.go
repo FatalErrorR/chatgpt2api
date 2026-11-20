@@ -2,6 +2,7 @@ package compat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -26,4 +27,26 @@ func pydanticBool(value any) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+// pydanticInt follows pydantic v2 lax int parsing: ints, whole floats and numeric strings.
+func pydanticInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return int(n), true
+		}
+		if f, err := v.Float64(); err == nil && f == float64(int64(f)) {
+			return int(f), true
+		}
+	case string:
+		text := strings.TrimSpace(v)
+		var n int
+		if _, err := fmt.Sscanf(text, "%d", &n); err == nil && fmt.Sprint(n) == strings.TrimPrefix(text, "+") {
+			return n, true
+		}
+	case bool:
+		return 0, false
+	}
+	return 0, false
 }

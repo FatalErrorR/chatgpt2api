@@ -1,6 +1,6 @@
 [
   {"name": "000-version", "method": "GET", "path": "/version", "auth": "none", "values": true, "ignore": ["version"]},
-  {"name": "001-health", "method": "GET", "path": "/health?format=json", "auth": "none"},
+  {"name": "001-health", "method": "GET", "path": "/health?format=json", "auth": "none", "known_diff": "storage 部分同 013：Go 版返回数据库存储后端的结构，其余字段一致"},
   {"name": "002-login-admin", "method": "POST", "path": "/auth/login", "values": true, "ignore": ["version", "subject_id"]},
   {"name": "003-login-none", "method": "POST", "path": "/auth/login", "auth": "none", "values": true},
   {"name": "004-login-bad-key", "method": "POST", "path": "/auth/login", "auth": "bad", "values": true},

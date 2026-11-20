@@ -9,10 +9,13 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/compat"
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/handler"
+	"github.com/basketikun/chatgpt2api/internal/logs"
+	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/repository"
 	"github.com/basketikun/chatgpt2api/internal/service"
 	"github.com/basketikun/chatgpt2api/internal/settings"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // App is the assembled server: the HTTP engine plus the background scheduler.
@@ -73,13 +76,25 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	engine.NoRoute(handler.Static("web"))
 	scheduler := service.NewScheduler(accountService, imageService, taskService, logService, cfg)
 
-	if err := compat.Migrate(repo.DB()); err != nil {
+	db := repo.DB()
+	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate} {
+		if err := migrate(db); err != nil {
+			return nil, err
+		}
+	}
+	// config.json is the source of truth; the upstream services read their copy of it
+	compat.SyncUpstreamConfig(cfg, store)
+	store.OnChange(func() { compat.SyncUpstreamConfig(cfg, store) })
+	compatLogs := logs.New(db)
+	accountPool, err := pool.New(pool.NewDBStore(db), store, compatLogs)
+	if err != nil {
 		return nil, err
 	}
+	accountPool.Remote = &compat.ChatGPTRemote{Proxy: proxyService, Config: cfg}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
-		DB: repo.DB(), Settings: store, Auth: compat.NewAuthService(repo.DB(), store),
+		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

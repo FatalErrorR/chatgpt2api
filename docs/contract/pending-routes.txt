@@ -1,14 +1,7 @@
 # Python 版有、Go 版还没实现的路由。实现一个就删一行（TestPythonRoutesAreServed 会检查）。
-POST /api/accounts/export
-POST /api/accounts/image-test
-GET /api/accounts/image-test/progress/{progress_id}
 POST /api/accounts/protocol-login
 GET /api/accounts/protocol-login/progress/{progress_id}
-POST /api/accounts/re-login
-GET /api/accounts/re-login/progress/{progress_id}
 POST /api/accounts/reassign-proxy
-POST /api/accounts/refresh
-GET /api/accounts/refresh/progress/{progress_id}
 POST /api/backup/test
 GET /api/backups
 POST /api/backups/delete
@@ -36,7 +29,6 @@ POST /api/proxies/update
 GET /api/proxy/runtime
 POST /api/proxy/runtime
 GET /files/{file_path:path}
-GET /health
 GET /v1/editable-file-tasks
 POST /v1/ppt/generations
 POST /v1/psd/generations
