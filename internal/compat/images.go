@@ -175,6 +175,7 @@ func writeSSE(c *gin.Context, items []any) {
 		encoder.Encode(stripInternal(toJSONValue(item)))
 		fmt.Fprintf(c.Writer, "data: %s\n\n", strings.TrimRight(buf.String(), "\n"))
 	}
+	io.WriteString(c.Writer, "data: [DONE]\n\n") // sse_json_stream always ends with it
 	c.Writer.Flush()
 }
 
