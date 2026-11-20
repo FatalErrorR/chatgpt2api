@@ -95,3 +95,21 @@
 | test_widespread_failure_is_a_provider_outage_without_a_plan | `TestWidespreadFailureIsAProviderOutageWithoutAPlan` |
 | test_all_402_failures_are_a_provider_outage | `internal/proxyops` `TestAll402FailuresAreAProviderOutage` |
 | MaxAccountsConfigTests.test_defaults_and_bounds | `TestMaxAccountsSettingBounds` |
+
+## test_image_stream_retry.py（`internal/imagegen/generate_test.go`）
+
+| Python | Go |
+| --- | --- |
+| ImageModelNotFoundTests.test_only_exact_image_conversation_error_matches | `TestOnlyExactImageConversationErrorMatches` |
+| test_account_cooldown_expires_without_changing_quota_or_status | `internal/pool` `TestSidelinedAccountIsSkipped`（暂避只在内存、不改账号） |
+| test_disguised_404_moves_to_next_account | `TestDisguised404MovesToNextAccount` |
+| test_other_404_is_not_retried | `TestOther404IsNotRetried` |
+| test_failover_is_bounded_by_existing_account_retry_limit | `TestModelNotFoundFailoverIsBounded` |
+| ImageForbiddenTests.test_403_cools_the_account_and_skips_its_egress_on_retry | `TestForbiddenCoolsTheAccountAndSkipsItsEgress` |
+| test_403_falls_back_to_the_same_egress_when_nothing_else_is_free | `TestForbiddenFallsBackToTheSameEgressWhenNothingElseIsFree` |
+| test_403_retries_are_bounded | `TestForbiddenRetriesAreBounded` |
+| test_same_proxy_tokens_only_groups_accounts_with_that_proxy | `internal/pool` `TestSameProxyTokensOnlyGroupsThatProxy` |
+| ImageStreamResetTests（5 个） | `TestDetectsOnlyHTTP2StreamResets`、`TestResetSwitchesToAnotherAccount`、`TestResetRetriesAtMostTwice`、`TestBreakerStopsRetryingDuringAWideOutage`、`TestOldResetsFallOutOfTheBreakerWindow` |
+| ImageFailoverTests（5 个） | `TestFailoverSwitchesAccountWhenOneIsStuckAfterProgress`、`TestFailoverOffKeepsTheSingleLongWait`、`TestFailoverTotalWaitIsCappedByThePollTimeout`、`TestFailoverSwitchesAtMostFourTimes`、`TestExplicitPollTimeoutDisablesFailover` |
+| ImageSlotReleaseTests（3 个） | `TestFailoverSwitchReleasesTheStuckAccountsSlot`、`TestFailoverExhaustedReleasesEverySlot`、`TestPlainTimeoutAndSuccessReleaseEverySlot` |
+| ImageFailoverConfigTests.test_defaults_and_bounds | `TestFailoverSettingDefaultsAndBounds` |

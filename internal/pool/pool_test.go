@@ -434,3 +434,20 @@ func TestStatsCountsStatuses(t *testing.T) {
 		t.Fatalf("by_type %v", byType)
 	}
 }
+
+// test_image_stream_retry.py ImageForbiddenTests.test_same_proxy_tokens_only_groups_accounts_with_that_proxy
+func TestSameProxyTokensOnlyGroupsThatProxy(t *testing.T) {
+	s, _ := newService(t, nil, Account{"access_token": "a", "proxy": "http://1.1.1.1:80"}, Account{"access_token": "b", "proxy": "http://1.1.1.1:80"},
+		Account{"access_token": "c", "proxy": "http://2.2.2.2:80"}, Account{"access_token": "d"}, Account{"access_token": "e"})
+	for token, want := range map[string][]string{"a": {"a", "b"}, "c": {"c"}, "d": {}} {
+		got := s.SameProxyTokens(token)
+		if len(got) != len(want) {
+			t.Fatalf("%s: %v", token, got)
+		}
+		for _, other := range want {
+			if !got[other] {
+				t.Fatalf("%s: %v", token, got)
+			}
+		}
+	}
+}
