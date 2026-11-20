@@ -29,8 +29,8 @@ type CodexAPI struct {
 }
 
 func NewCodexAPI(token string, baseurl string, accountProxy string, proxy ClientProvider) *CodexAPI {
-	if baseurl == "" {
-		baseurl = CodexBaseURL
+	if baseurl == "" || baseurl == CodexBaseURL {
+		baseurl = UpstreamBaseURL() + "/backend-api/codex/responses"
 	}
 	return &CodexAPI{token: token, baseurl: baseurl, accountProxy: accountProxy, proxy: proxy}
 }

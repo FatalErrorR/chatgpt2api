@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,16 @@ import (
 )
 
 const chatGPTBaseURL = "https://chatgpt.com"
+
+// UpstreamBaseURL is chatgpt.com unless CHATGPT2API_UPSTREAM_BASE_URL points somewhere else.
+// Only tests set it, to run against tools/fakeupstream.
+func UpstreamBaseURL() string {
+	if value := strings.TrimRight(strings.TrimSpace(os.Getenv("CHATGPT2API_UPSTREAM_BASE_URL")), "/"); value != "" {
+		return value
+	}
+	return chatGPTBaseURL
+}
+
 const upstreamUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
 const defaultDataBuild = "5750d92c02e7d1b6aa2ea1ffdb1c1fb376272952"
 const defaultBuildNumber = ""
@@ -64,7 +75,7 @@ type ClientProvider interface {
 
 func NewOpenAIBackendAPI(token string, accountProxy string, proxy ClientProvider, cfg *config.Config) *OpenAIBackendAPI {
 	options := OpenAIBackendOptions{DefaultUpstreamModelName: cfg.DefaultModel, DefaultThinkingEffort: cfg.ThinkingEffort, ImagePollTimeoutSeconds: float64(cfg.Image.PollTimeoutSeconds), ImagePollIntervalSeconds: cfg.Image.PollIntervalSeconds, ImagePollInitialWait: cfg.Image.PollInitialWaitSeconds}
-	return &OpenAIBackendAPI{baseURL: chatGPTBaseURL, accessToken: token, accountProxy: accountProxy, proxy: proxy, options: options, deviceID: uuid.NewString(), sessionID: uuid.NewString(), build: defaultBuildNumber, version: defaultDataBuild}
+	return &OpenAIBackendAPI{baseURL: UpstreamBaseURL(), accessToken: token, accountProxy: accountProxy, proxy: proxy, options: options, deviceID: uuid.NewString(), sessionID: uuid.NewString(), build: defaultBuildNumber, version: defaultDataBuild}
 }
 
 // WithAccountID 设置 ChatGPT-Account-ID；网页端在账号有 account id 时会带上该头。
