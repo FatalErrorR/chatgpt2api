@@ -387,4 +387,3 @@ func abortHTTPError(c *gin.Context, err error) {
 	}
 	abortDetail(c, 500, err.Error())
 }
-
