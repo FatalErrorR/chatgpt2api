@@ -74,6 +74,7 @@
   Go 版把两类条目分开存。工具 schema 写进提示词时 Go 的 JSON 键按字母序（Python 按传入顺序）。
 - 文本接口里的生图（chat 的 image 模型、Responses 的 image_generation 工具）：Go 版等全部图片完成后一次性输出流式分片，
   与 `/v1/images/*` 的流式一致；Python 边生成边推进度。
+- 续轮询：Python 用不带 token 的客户端去轮询，必然失败；Go 版记下出错的账号邮箱，用同一个账号续轮询。
 - 保存图片前的过期清理：Python 每保存一张都遍历一次图片目录；Go 版最多每分钟一次（结果相同，另有每 30 分钟的定时清理）。
 
 ## 与上游 v2 的取舍
@@ -146,6 +147,10 @@
   - 流式：拿到第一个分片才开始写 SSE，之前的错误按普通错误返回（同 `LoggedCall.run`），之后逐片 flush
   - 契约：**57/60 一致**，2 个已知差异；只剩 062（第 9 步）
 - [ ] 9. 任务类
+  - [x] 生图任务 `internal/imagetasks`（表 `compat_image_tasks`）：提交去重、按 key 隔离、重启后未完成的标为失败、按保留天数清理、进度、调用日志、续轮询；
+    `/api/image-tasks`、`/api/image-tasks/generations`（带参考图转 edits）、`/api/image-tasks/edits`、`/api/image-tasks/{id}/resume-poll`
+  - 契约：**60/60 一致**（含 2 个已知差异）
+  - [ ] PPT/PSD 可编辑文件任务、`/files/*`
 - [ ] 10. 账号来源与备份
 - [ ] 11. 前端适配与走查
 - [ ] 12. 完整测试

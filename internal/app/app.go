@@ -4,6 +4,10 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
 	"github.com/basketikun/chatgpt2api/internal/imagesize"
 	"github.com/basketikun/chatgpt2api/internal/imagestore"
+	"github.com/basketikun/chatgpt2api/internal/imagetasks"
 	"github.com/basketikun/chatgpt2api/internal/logs"
 	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/proxylist"
@@ -89,7 +94,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	scheduler := service.NewScheduler(accountService, imageService, taskService, logService, cfg)
 
 	db := repo.DB()
-	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate, docstore.Migrate, imagestore.Migrate} {
+	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate, docstore.Migrate, imagestore.Migrate, imagetasks.Migrate} {
 		if err := migrate(db); err != nil {
 			return nil, err
 		}
@@ -167,6 +172,57 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		}
 		return status, reason
 	}
+	imageTasks, err := imagetasks.New(db, store, compatLogs)
+	if err != nil {
+		return nil, err
+	}
+	// resume-poll: the account that started the conversation polls it again (Python's version
+	// built a client without a token and always failed).
+	imageTasks.Resume = func(ctx context.Context, email, conversationID string, extraSecs float64, size, quality string) ([]map[string]any, error) {
+		token := ""
+		for _, account := range accountPool.ListAccounts() {
+			if email != "" && strings.EqualFold(strings.TrimSpace(fmt.Sprint(account["email"])), email) {
+				token, _ = account["access_token"].(string)
+				break
+			}
+		}
+		if token == "" {
+			return nil, errors.New("the account that started this task is no longer in the pool")
+		}
+		backend, err := images.NewBackend(token, accountPool.GetAccount(token))
+		if err != nil {
+			return nil, err
+		}
+		web := backend.(*chatgptweb.Backend)
+		files, sediments, err := web.PollImageResults(ctx, conversationID, extraSecs, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(files) == 0 && len(sediments) == 0 {
+			return nil, fmt.Errorf("继续等待 %s 秒后仍未找到图片结果。", strconv.FormatFloat(extraSecs, 'f', -1, 64))
+		}
+		urls, err := web.ResolveImageURLs(ctx, conversationID, files, sediments, 0, false)
+		if err != nil {
+			return nil, err
+		}
+		if len(urls) == 0 {
+			return nil, errors.New("图片 URL 解析失败")
+		}
+		downloaded, err := web.DownloadImages(ctx, urls)
+		if err != nil {
+			return nil, err
+		}
+		items := []map[string]any{}
+		for _, data := range downloaded {
+			items = append(items, map[string]any{"b64_json": base64.StdEncoding.EncodeToString(data)})
+		}
+		formatted, err := imagePipeline.Hooks.FormatImageResult(items, "", "b64_json", "", time.Now().Unix(), "", size)
+		if err != nil {
+			return nil, err
+		}
+		data, _ := formatted["data"].([]map[string]any)
+		return data, nil
+	}
 	textDeps := &textapi.Deps{Settings: store, Pool: accountPool, Generator: images, Cache: textapi.NewCache(store),
 		Images: textapi.Images{Proxy: store.Proxy},
 		NewBackend: func(token string) (textapi.Backend, error) {
@@ -186,7 +242,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
-		Images: images, ImageStore: imageStore, Text: textDeps, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
+		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

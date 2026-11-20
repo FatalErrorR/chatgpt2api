@@ -159,3 +159,11 @@ model 方式直接走 Lanczos（等同 Python 的失败回退）。
 | test_model_catalog_service.py（5 个） | `TestCatalogUnionsAnonymousAndEachActiveAccountType`、`TestCatalogIsCachedUntilTTLExpires`、`TestConcurrentReadersShareOneCatalogRefresh`、`TestFailedRefreshKeepsLastModelsForThatType`、`TestRemovedAccountTypeDropsItsCapabilities` |
 | test_v1_messages.py、test_v1_responses.py 文本部分 | `TestMessageResponseAndStream`、`TestMessageToolCallsBecomeToolUse`、`TestTextResponseStreamEvents`；生图部分由 `/v1/images` 的端到端测试覆盖同一生成器 |
 | （新增） | `TestChatAndResponsesNeverShareACacheEntry`、`TestSourcesBecomeCitationsWithCodePointOffsets`、`chatgptweb.TestTextConversationThroughTheFakeUpstream` |
+
+## 生图任务（`internal/imagetasks`）
+
+| Python | Go |
+| --- | --- |
+| test_image_task_service.py（5 个） | `TestDuplicateSubmitUsesExistingTask`、`TestDifferentOwnerCannotQueryTask`、`TestSuccessTaskPersistsToNewServiceInstance`、`TestStartupMarksUnfinishedTasksAsError`；GIF 参数在 compat 层组装请求，契约与端到端覆盖 |
+| test_image_tasks_api.py、test_generations_reference_images.py | 契约 062 及冒烟（生成任务、缺失 id）；带参考图转 edits 走与 `/v1/images/generations` 相同的 `hasJSONImageReference` |
+| （新增） | `TestEmptyResultFailsAndTimeoutCanBeResumed`、`TestFinishedTasksPastRetentionAreDropped` |
