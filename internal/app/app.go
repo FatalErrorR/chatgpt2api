@@ -12,7 +12,9 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/docstore"
 	"github.com/basketikun/chatgpt2api/internal/handler"
+	"github.com/basketikun/chatgpt2api/internal/imagefit"
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
+	"github.com/basketikun/chatgpt2api/internal/imagesize"
 	"github.com/basketikun/chatgpt2api/internal/logs"
 	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/proxylist"
@@ -108,24 +110,64 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	if dataDir == "" {
 		dataDir = "data"
 	}
-	imagePipeline := imagegen.NewPipeline(store, imagegen.Hooks{Save: compat.LocalImageSaver(dataDir, store.BaseURL)})
+	imagePipeline := imagegen.NewPipeline(store, imagegen.Hooks{
+		Save: compat.LocalImageSaver(dataDir, store.BaseURL),
+		Upscale: func(data []byte, size string) []byte {
+			return imagesize.MaybeUpscale(data, size, imagesize.Settings{
+				ExactSize: store.ImageExactSizeEnabled(), Upscale: store.ImageUpscaleEnabled(),
+				UpscaleMethod: store.ImageUpscaleMethod(), UpscaleToEdge: store.ImageUpscaleTargetEdge(),
+			})
+		},
+	})
 	images := &imagegen.Generator{
 		Pipeline: imagePipeline,
 		Accounts: accountPool,
+		Codex:    chatgptweb.CodexAttempt(imagePipeline.Hooks),
 		NewBackend: func(token string, account pool.Account) (imagegen.Backend, error) {
 			proxy, _ := account["proxy"].(string)
 			api := upstream.NewOpenAIBackendAPI(token, strings.TrimSpace(proxy), proxyService, cfg)
 			if accountID, _ := account["account_id"].(string); accountID != "" {
 				api.WithAccountID(accountID)
 			}
-			return &chatgptweb.Backend{API: api, Settings: store, Health: proxyList}, nil
+			return &chatgptweb.Backend{API: api, Settings: store, Health: proxyList, Fit: func(images [][]byte, prompt string) [][]byte {
+				return imagefit.FitWebReferenceImages(images, prompt, imagefit.Options{
+					RefEnabled: store.ImageRefFitEnabled(), RefBudget: store.ImageRefFitBudgetBytes(),
+					ReqEnabled: store.ImageReqFitEnabled(), ReqBudget: store.ImageReqFitBudgetBytes(), MaxEdge: store.ImageRefFitMaxEdge(),
+				})
+			}}, nil
 		},
+	}
+	// test_image_accounts: one small image with the account's own proxy; the account is not changed
+	imageProbe := func(ctx context.Context, token string) (string, string) {
+		backend, err := images.NewBackend(token, accountPool.GetAccount(token))
+		if err != nil {
+			return "失败", pool.ImageProbeReason(err.Error())
+		}
+		defer backend.Close()
+		// like the Python loop: the first result or message decides
+		status, reason, decided := "失败", "没有返回图片", false
+		err = imagePipeline.StreamImageOutputs(ctx, backend, imagegen.Request{
+			Model: "gpt-image-2.5-flare", Prompt: "a single red apple on a plain white background", N: 1, Size: "1024x1024", Quality: "low", PollTimeoutSecs: 90,
+		}, 1, 1, func(output imagegen.Output) {
+			if decided {
+				return
+			}
+			if output.Kind == "result" && len(output.Data) > 0 {
+				status, reason, decided = "成功", "", true
+			} else if output.Kind == "message" && strings.TrimSpace(output.Text) != "" {
+				reason, decided = pool.ImageProbeReason(output.Text), true
+			}
+		})
+		if err != nil && !decided {
+			return "失败", pool.ImageProbeReason(err.Error())
+		}
+		return status, reason
 	}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
-		Images: images, Logs: compatLogs, DataDir: dataDir,
+		Images: images, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

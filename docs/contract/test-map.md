@@ -113,3 +113,15 @@
 | ImageFailoverTests（5 个） | `TestFailoverSwitchesAccountWhenOneIsStuckAfterProgress`、`TestFailoverOffKeepsTheSingleLongWait`、`TestFailoverTotalWaitIsCappedByThePollTimeout`、`TestFailoverSwitchesAtMostFourTimes`、`TestExplicitPollTimeoutDisablesFailover` |
 | ImageSlotReleaseTests（3 个） | `TestFailoverSwitchReleasesTheStuckAccountsSlot`、`TestFailoverExhaustedReleasesEverySlot`、`TestPlainTimeoutAndSuccessReleaseEverySlot` |
 | ImageFailoverConfigTests.test_defaults_and_bounds | `TestFailoverSettingDefaultsAndBounds` |
+
+## test_image_upscale.py（`internal/imagesize`）
+
+Lanczos 与精确尺寸部分全部对应：`TestUpscaleKeepsRatio`、`TestUpscaleSkipsLargeAndExcessive`、`TestUpscaleKeepsAlpha`、
+`TestRequestedLongEdge`、`TestRequestedDimensions`、`TestFitToSize`、`TestCropKeepsTheCenter`、`TestMaybeUpscalePipeline`。
+RealESRGAN 模型相关的 5 个（model_output_size、tiling、failure fallback、slow model、unknown method）不迁：Go 版没有 ONNX 推理，
+model 方式直接走 Lanczos（等同 Python 的失败回退）。
+
+## test_image_fit.py（`internal/imagefit`）
+
+`TestUnderBudgetReturnsOriginals`、`TestOverBudgetFitsThePackage`、`TestLongEdgeIsCapped`、`TestUnreadableImagesAreLeftAlone`、
+`TestLeftoverBudget`、`TestExifOrientationIsApplied`。Python 用例中依赖 WebP 编码的断言不迁（Go 无 WebP 编码器）。
