@@ -1,7 +1,1 @@
 # Python 版有、Go 版还没实现的路由。实现一个就删一行（TestPythonRoutesAreServed 会检查）。
-POST /api/backup/test
-GET /api/backups
-POST /api/backups/delete
-GET /api/backups/detail
-GET /api/backups/download
-POST /api/backups/run

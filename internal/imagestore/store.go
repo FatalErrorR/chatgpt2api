@@ -726,3 +726,16 @@ func IsHTTPError(err error) (*HTTPError, bool) {
 
 // LocalPath is the file path of rel under data/images.
 func LocalPath(s *Service, rel string) (string, error) { return s.localPath(rel) }
+
+// ExportIndex is image_index.json: {"items": {rel: item}} (backups).
+func (s *Service) ExportIndex() (map[string]any, error) {
+	var rows []indexRow
+	if err := s.db.Order("seq ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := map[string]any{}
+	for _, row := range rows {
+		items[row.Rel] = decodeItem(row.Item)
+	}
+	return map[string]any{"items": items}, nil
+}

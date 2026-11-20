@@ -190,3 +190,9 @@ Python 只有连真实服务的手动脚本（test_gpt_ppt.py、test_gpt_psd.py�
 
 Python 没有对应的单元测试。Go 新增：`TestCPAPoolsAreSanitizedPersistedAndImported`、`TestOldSinglePoolDocumentIsRead`、
 `TestSub2APILoginIsCachedAndPagesAreFollowed`、`TestSub2APIWithoutCredentialsFails`（假的 CPA 管理接口和 sub2api 服务）。
+
+## 备份（`internal/backup`）
+
+Python 没有备份的单元测试。Go 新增：`TestSigV4MatchesPython`（黄金值取自 main 的 `_aws_v4_headers`）、
+`TestEncryptionIsOpenSSLCompatible`（与 openssl 命令行双向互解，命令同 backup_service.py）、`TestRunUploadsDescribesAndRotates`、
+`TestEncryptedBackupNeedsAPassphraseAndDecrypts`、`TestValidationAndSchedule`（假 R2）。

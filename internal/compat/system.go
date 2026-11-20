@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/basketikun/chatgpt2api/internal/backup"
 	"github.com/basketikun/chatgpt2api/internal/filetasks"
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
 	"github.com/basketikun/chatgpt2api/internal/imagestore"
@@ -40,6 +41,7 @@ type Deps struct {
 	OAuth         *openailogin.OAuth
 	CPA           *sources.CPA
 	Sub2API       *sources.Sub2API
+	Backup        *backup.Service
 	// RefreshClearance fetches a Cloudflare clearance bundle (user agent, cookies) for the target.
 	RefreshClearance func(ctx context.Context, target string) (string, map[string]string, error)
 	DataDir          string
@@ -96,6 +98,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerFileTasks(engine, d)
 	registerLogin(admin, d)
 	registerSources(admin, d)
+	registerBackup(admin, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

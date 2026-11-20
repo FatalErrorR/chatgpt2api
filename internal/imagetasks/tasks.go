@@ -475,3 +475,15 @@ func (s *Service) ResumePoll(identity map[string]any, taskID string, extraSecs f
 	}()
 	return public, nil
 }
+
+// Export is image_tasks.json: {"tasks": [...]}, newest update first (backups).
+func (s *Service) Export() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := []map[string]any{}
+	for _, task := range s.tasks {
+		items = append(items, task)
+	}
+	sort.SliceStable(items, func(i, j int) bool { return clean(items[i]["updated_at"], "") > clean(items[j]["updated_at"], "") })
+	return map[string]any{"tasks": items}
+}

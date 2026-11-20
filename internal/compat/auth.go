@@ -334,3 +334,21 @@ func isInputError(err error) bool {
 	var input ErrInput
 	return errors.As(err, &input)
 }
+
+// Snapshot is storage.load_auth_keys: the stored keys (hashes only), in file order (backups).
+func (s *AuthService) Snapshot() (any, error) {
+	items, err := s.all()
+	if err != nil {
+		return nil, err
+	}
+	out := []any{}
+	for _, item := range items {
+		var lastUsed any
+		if item.LastUsedAt != nil {
+			lastUsed = *item.LastUsedAt
+		}
+		out = append(out, map[string]any{"id": item.ID, "name": item.Name, "role": item.Role, "key_hash": item.KeyHash,
+			"enabled": item.Enabled, "created_at": item.CreatedAt, "last_used_at": lastUsed})
+	}
+	return out, nil
+}

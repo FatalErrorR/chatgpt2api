@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/basketikun/chatgpt2api/internal/backup"
 	"github.com/basketikun/chatgpt2api/internal/chatgptweb"
 	"github.com/basketikun/chatgpt2api/internal/compat"
 	"github.com/basketikun/chatgpt2api/internal/config"
@@ -50,6 +52,7 @@ type App struct {
 	repo     *repository.Repository
 	pool     *pool.Service
 	images   *imagestore.Service
+	backups  *backup.Service
 }
 
 // Routes lists the routes of both routers.
@@ -269,12 +272,34 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	if err != nil {
 		return nil, err
 	}
+	docs := docstore.New(db)
+	compatAuth := compat.NewAuthService(db, store)
+	backups := &backup.Service{Settings: store, Docs: docs, Sources: backup.Sources{
+		ConfigFile: store.Path(), ImagesDir: imageStore.ImagesDir(), AppVersion: cfg.Version,
+		Document: func(name string) []byte {
+			var value any
+			if found, err := docs.Load(name, &value); err != nil || !found {
+				return nil
+			}
+			raw, _ := json.MarshalIndent(value, "", "  ")
+			return raw
+		},
+		Logs:       compatLogs.ExportJSONL,
+		ImageTasks: func() any { return imageTasks.Export() },
+		ImageIndex: func() (any, error) { return imageStore.ExportIndex() },
+		ImageTags:  func() (any, error) { return imageStore.Tags() },
+		Accounts:   func() (any, error) { return pool.NewDBStore(db).Load() },
+		AuthKeys:   compatAuth.Snapshot,
+		StorageBackend: func() any {
+			return map[string]any{"type": "database", "description": "数据库存储"}
+		},
+	}}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
-		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
+		DB: db, Settings: store, Auth: compatAuth, Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
 		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, FileTasks: fileTasks,
-		ProtocolLogin: &protocollogin.Service{Pool: accountPool, Proxies: proxyOps, Login: loginFunc}, OAuth: &openailogin.OAuth{Proxy: store.Proxy}, CPA: cpaSources, Sub2API: sub2apiSources,
+		ProtocolLogin: &protocollogin.Service{Pool: accountPool, Proxies: proxyOps, Login: loginFunc}, OAuth: &openailogin.OAuth{Proxy: store.Proxy}, CPA: cpaSources, Sub2API: sub2apiSources, Backup: backups,
 		RefreshClearance: func(ctx context.Context, target string) (string, map[string]string, error) {
 			bundle, err := proxyService.RefreshClearance(ctx, target)
 			return bundle.UserAgent, bundle.Cookies, err
@@ -283,7 +308,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })
 	_ = scheduler
-	return &App{Engine: main, Upstream: engine, repo: repo, pool: accountPool, images: imageStore}, nil
+	return &App{Engine: main, Upstream: engine, repo: repo, pool: accountPool, images: imageStore, backups: backups}, nil
 }
 
 // Start resets state left over from a previous run and starts the background jobs.
@@ -294,4 +319,5 @@ func (a *App) Start(ctx context.Context) {
 	// compat routes do not use, and cleans data/images by file age instead of by calendar day.
 	go a.pool.Watch(ctx)
 	go a.images.Run(ctx)
+	go a.backups.Start(ctx)
 }

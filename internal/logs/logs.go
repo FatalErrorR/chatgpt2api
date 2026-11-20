@@ -207,3 +207,22 @@ func (s *Service) ImageOutputCounts(now time.Time) (map[string]map[string]int64,
 	}
 	return counts, nil
 }
+
+// ExportJSONL writes every entry as logs.jsonl lines, oldest first (backups).
+func (s *Service) ExportJSONL() ([]byte, error) {
+	var rows []Entry
+	if err := s.db.Order("seq ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	for _, row := range rows {
+		item := row.Item()
+		line, err := json.Marshal(map[string]any{"id": item["id"], "time": item["time"], "type": item["type"], "summary": item["summary"], "detail": item["detail"]})
+		if err != nil {
+			continue
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	return buf.Bytes(), nil
+}

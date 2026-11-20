@@ -91,6 +91,13 @@
   {"name": "089f-sub2api-delete-missing", "method": "DELETE", "path": "/api/sub2api/servers/nope"},
   {"name": "089g-clearance-test-disabled", "method": "POST", "path": "/api/proxy/clearance/test", "body": {}},
 
+  {"name": "089h-backups-unconfigured", "method": "GET", "path": "/api/backups"},
+  {"name": "089i-backup-test-incomplete", "method": "POST", "path": "/api/backup/test"},
+  {"name": "089j-backup-run-incomplete", "method": "POST", "path": "/api/backups/run"},
+  {"name": "089k-backup-delete-empty", "method": "POST", "path": "/api/backups/delete", "body": {}},
+  {"name": "089l-backup-detail-empty", "method": "GET", "path": "/api/backups/detail"},
+  {"name": "089m-backup-download-empty", "method": "GET", "path": "/api/backups/download"},
+
   {"name": "090-user-key-delete", "method": "DELETE", "path": "/api/auth/users/{user_key_id}"},
   {"name": "091-accounts-delete", "method": "DELETE", "path": "/api/accounts", "body": {"tokens": ["fake-403-1"]}}
 ]

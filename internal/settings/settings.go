@@ -486,3 +486,6 @@ func (s *Store) saveLocked() error {
 	}
 	return os.Rename(tmp, s.path)
 }
+
+// Path is the config.json file this store reads and writes.
+func (s *Store) Path() string { return s.path }

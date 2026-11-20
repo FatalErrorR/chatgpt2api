@@ -157,7 +157,7 @@
     `/v1/editable-file-tasks`、`/files/*`
   - 契约新增 063–069（任务提交、缺字段、PSD/PPT、文件 404、搜索空 prompt），**67/67 一致**，3 个已知差异
   - 测试环境：`tools/contract/setup.sh` 一键重建（PostgreSQL、假上游、Python 参照实例、tiktoken 缓存）
-- [ ] 10. 账号来源与备份
+- [x] 10. 账号来源与备份
   - 路由检查收紧：只算兼容层注册的路由（之前转给上游的同名路由也算"已实现"，但上游用的是另一套账号表），因此 CPA、sub2api、OAuth、clearance 共 18 个路由重新列入待办
   - [x] 登录 `internal/openailogin`：密码登录（authorize、sentinel 工作量证明、密码校验、TOTP 二步验证、手动跟随重定向、换 token）、PKCE、TOTP、手动 OAuth 桥；
     每次登录独立的 Chrome 指纹客户端和 cookie，走账号代理（没有则全局代理）
@@ -166,7 +166,10 @@
   - 契约新增 082–087，**73/73 一致**，3 个已知差异
   - [x] CPA、sub2api `internal/sources`（配置仍是整份 JSON 文档 cpa_config.json / sub2api_config.json，导入任务、敏感字段过滤、sub2api 登录令牌缓存、分页）、`/api/proxy/clearance/test`
   - 契约新增 088–089g，**82/82 一致**，3 个已知差异
-  - [ ] 备份（6 个路由）
+  - [x] 备份 `internal/backup`：R2（AWS SigV4，签名与 Python 逐字节一致）、压缩包保持 Python 的文件布局（数据库里的数据导出成同名 JSON，两个版本都能读）、
+    加密与 `openssl enc -aes-256-cbc -pbkdf2 -md sha256` 互通（Go 原生实现，镜像不再需要 openssl）、轮换、每 30 秒检查一次定时、状态存 `backup_state.json` 文档
+  - **Python 的 93 个路由全部由兼容层实现，pending-routes.txt 已清空**
+  - 契约新增 089h–089m，**88/88 一致**，3 个已知差异
 - [ ] 11. 前端适配与走查
 - [ ] 12. 完整测试
 - [ ] 13. 并行上线
