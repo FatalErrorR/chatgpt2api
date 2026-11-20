@@ -81,6 +81,16 @@
   {"name": "086-oauth-finish-no-code", "method": "POST", "path": "/api/accounts/oauth/finish", "body": {"session_id": "x"}},
   {"name": "087-oauth-finish-unknown-session", "method": "POST", "path": "/api/accounts/oauth/finish", "body": {"callback": "https://platform.openai.com/auth/callback?code=c&state=nope.x"}},
 
+  {"name": "088-cpa-pools-empty", "method": "GET", "path": "/api/cpa/pools"},
+  {"name": "089-cpa-pool-missing-secret", "method": "POST", "path": "/api/cpa/pools", "body": {"base_url": "http://127.0.0.1:9"}},
+  {"name": "089a-cpa-pool-add", "method": "POST", "path": "/api/cpa/pools", "body": {"name": "c", "base_url": "http://127.0.0.1:9", "secret_key": "k"}},
+  {"name": "089b-cpa-pool-update-missing", "method": "POST", "path": "/api/cpa/pools/nope", "body": {"name": "x"}},
+  {"name": "089c-cpa-import-missing", "method": "GET", "path": "/api/cpa/pools/nope/import"},
+  {"name": "089d-sub2api-no-credentials", "method": "POST", "path": "/api/sub2api/servers", "body": {"base_url": "http://127.0.0.1:9"}},
+  {"name": "089e-sub2api-add", "method": "POST", "path": "/api/sub2api/servers", "body": {"name": "s", "base_url": "http://127.0.0.1:9", "api_key": "k"}},
+  {"name": "089f-sub2api-delete-missing", "method": "DELETE", "path": "/api/sub2api/servers/nope"},
+  {"name": "089g-clearance-test-disabled", "method": "POST", "path": "/api/proxy/clearance/test", "body": {}},
+
   {"name": "090-user-key-delete", "method": "DELETE", "path": "/api/auth/users/{user_key_id}"},
   {"name": "091-accounts-delete", "method": "DELETE", "path": "/api/accounts", "body": {"tokens": ["fake-403-1"]}}
 ]

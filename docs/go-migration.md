@@ -164,7 +164,9 @@
   - [x] 密码重新登录 `pool.PasswordRelogin`：**之前 Go 版的 Relogin 钩子没接，手动"重新登录"和 app_session_terminated 自动重登都不会执行**，现已接上
   - [x] 批量协议登录 `internal/protocollogin`、`/api/accounts/protocol-login*`、`/api/accounts/oauth/start|finish`
   - 契约新增 082–087，**73/73 一致**，3 个已知差异
-  - [ ] 备份、CPA、sub2api、clearance 测试
+  - [x] CPA、sub2api `internal/sources`（配置仍是整份 JSON 文档 cpa_config.json / sub2api_config.json，导入任务、敏感字段过滤、sub2api 登录令牌缓存、分页）、`/api/proxy/clearance/test`
+  - 契约新增 088–089g，**82/82 一致**，3 个已知差异
+  - [ ] 备份（6 个路由）
 - [ ] 11. 前端适配与走查
 - [ ] 12. 完整测试
 - [ ] 13. 并行上线

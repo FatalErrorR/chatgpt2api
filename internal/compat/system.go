@@ -1,6 +1,7 @@
 package compat
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/protocollogin"
 	"github.com/basketikun/chatgpt2api/internal/proxyops"
 	"github.com/basketikun/chatgpt2api/internal/settings"
+	"github.com/basketikun/chatgpt2api/internal/sources"
 	"github.com/basketikun/chatgpt2api/internal/textapi"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -36,9 +38,13 @@ type Deps struct {
 	FileTasks     *filetasks.Service
 	ProtocolLogin *protocollogin.Service
 	OAuth         *openailogin.OAuth
-	DataDir       string
-	Version       string
-	DatabaseURL   string
+	CPA           *sources.CPA
+	Sub2API       *sources.Sub2API
+	// RefreshClearance fetches a Cloudflare clearance bundle (user agent, cookies) for the target.
+	RefreshClearance func(ctx context.Context, target string) (string, map[string]string, error)
+	DataDir          string
+	Version          string
+	DatabaseURL      string
 }
 
 // Migrate creates the compat tables.
@@ -89,6 +95,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerImageTasks(engine, d)
 	registerFileTasks(engine, d)
 	registerLogin(admin, d)
+	registerSources(admin, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

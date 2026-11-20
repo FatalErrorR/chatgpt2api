@@ -32,6 +32,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/repository"
 	"github.com/basketikun/chatgpt2api/internal/service"
 	"github.com/basketikun/chatgpt2api/internal/settings"
+	"github.com/basketikun/chatgpt2api/internal/sources"
 	"github.com/basketikun/chatgpt2api/internal/textapi"
 	"github.com/basketikun/chatgpt2api/internal/upstream"
 	"github.com/gin-gonic/gin"
@@ -260,12 +261,24 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 			return &chatgptweb.Backend{API: api, Settings: store, Health: proxyList}, nil
 		}}
 	textDeps.Catalog = &textapi.Catalog{Deps: textDeps}
+	cpaSources, err := sources.NewCPA(docstore.New(db), accountPool, store.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	sub2apiSources, err := sources.NewSub2API(docstore.New(db), accountPool)
+	if err != nil {
+		return nil, err
+	}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
 		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, FileTasks: fileTasks,
-		ProtocolLogin: &protocollogin.Service{Pool: accountPool, Proxies: proxyOps, Login: loginFunc}, OAuth: &openailogin.OAuth{Proxy: store.Proxy}, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
+		ProtocolLogin: &protocollogin.Service{Pool: accountPool, Proxies: proxyOps, Login: loginFunc}, OAuth: &openailogin.OAuth{Proxy: store.Proxy}, CPA: cpaSources, Sub2API: sub2apiSources,
+		RefreshClearance: func(ctx context.Context, target string) (string, map[string]string, error) {
+			bundle, err := proxyService.RefreshClearance(ctx, target)
+			return bundle.UserAgent, bundle.Cookies, err
+		}, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

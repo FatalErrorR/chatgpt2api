@@ -185,3 +185,8 @@ Python 只有连真实服务的手动脚本（test_gpt_ppt.py、test_gpt_psd.py�
 | MfaHelperTests（2 个） | `TestMFAHelpers` |
 | LoginFlowTests（7 个） | `TestPasswordOnlyLogin`、`TestMFALoginSubmitsTOTPAndFollowsRedirect`、`TestLoginFailures`（5 种失败）、`TestLoginUsesTheAccountProxyElseTheGlobalOne`、`TestReloginPassesTheStoredSecretAndProxyAndDisablesDeactivated`；用真实 TLS 客户端打假的 auth 服务（重定向、cookie、sentinel 都走一遍） |
 | （新增） | `TestSentinelProofMeetsTheDifficulty`、`TestOAuthBridge`、`TestDistributionOnlyGivesNewEmailsAProxyAndReleasesOnce`、`chatgptweb.TestMissingValuesAreEmptyNotNil` |
+
+## CPA、sub2api（`internal/sources`）
+
+Python 没有对应的单元测试。Go 新增：`TestCPAPoolsAreSanitizedPersistedAndImported`、`TestOldSinglePoolDocumentIsRead`、
+`TestSub2APILoginIsCachedAndPagesAreFollowed`、`TestSub2APIWithoutCredentialsFails`（假的 CPA 管理接口和 sub2api 服务）。
