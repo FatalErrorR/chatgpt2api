@@ -1,7 +1,8 @@
 <h1 align="center">ChatGPT2API</h1>
 
+<p align="center">把 ChatGPT 网页端的生图、改图和文本对话封装成 OpenAI 兼容 API，并提供号池、代理池、图片管理和后台面板的自托管服务。</p>
 
-<p align="center">ChatGPT2API 主要是对 ChatGPT 官网相关能力进行逆向整理与封装，提供面向 ChatGPT 图片生成、图片编辑、多图组图编辑场景的 OpenAI 兼容图片 API / 代理，并集成在线画图、号池管理、多种账号导入方式与 Docker 自托管部署能力。</p>
+本仓库在开源项目 chatgpt2api（MIT，见 [LICENSE](./LICENSE)）的基础上二次开发，生产环境按本仓库 `main` 分支部署。
 
 > [!WARNING]
 > 免责声明：
@@ -15,170 +16,130 @@
 > - 使用本项目即视为你已充分理解并同意本免责声明全部内容；如因滥用、违规或违法使用造成任何后果，均由使用者自行承担。
 > - 本项目基于对 ChatGPT 官网相关能力的逆向研究实现，存在账号受限、临时封禁或永久封禁的风险。请勿使用你自己的重要账号、常用账号或高价值账号进行测试。
 
-
 ## 快速开始
 
 ### Docker 运行
 
 ```bash
-git clone git@github.com:basketikun/chatgpt2api.git
+git clone git@github.com:FatalErrorR/chatgpt2api.git
 cd chatgpt2api
 docker compose up -d
 ```
 
-启动前请先在 `config.json` 中设置 `auth-key`，也可以在 `docker-compose.yml` 中通过 `CHATGPT2API_AUTH_KEY` 覆盖。
+- 启动前在 `config.json` 里设置 `auth-key`（后台管理员密钥），也可以用环境变量 `CHATGPT2API_AUTH_KEY` 覆盖
+- Web 面板：`http://localhost:3000`，API 地址：`http://localhost:3000/v1`
+- 数据目录：`./data`（账号、日志、图片、任务记录）
+- `docker-compose.yml` 使用本仓库发布的镜像 `ghcr.io/fatalerrorr/chatgpt2api:latest`（每次推送 `main` 由 GitHub Actions 构建），
+  并在本机构建 `sentinel-solver`（生图遇到 Turnstile 挑战时使用，只在内部网络，不要把它的 8080 端口映射到公网）
 
-- Web 面板：`http://localhost:3000`
-- API 地址：`http://localhost:3000/v1`
-- 数据目录：`./data`
+从源码构建镜像：
 
-### WARP / FlareSolverr 稳定代理部署
+```bash
+docker compose -f docker-compose.local.yml up -d --build   # 端口 8000，默认 SQLite 存储
+```
 
-如果图片链路经常遇到 Cloudflare 拦截，可以启用附带的 WARP + Privoxy + FlareSolverr 方案：
+升级：
+
+```bash
+git pull
+docker compose pull && docker compose up -d
+```
+
+升级前备份 `config.json` 和 `data/`。更完整的部署、升级和迁移说明见 [部署与升级指南](./docs/deployment.md)。
+
+### WARP / FlareSolverr 稳定代理
+
+图片链路经常遇到 Cloudflare 拦截时，可以使用附带的 WARP + Privoxy + FlareSolverr 方案：
 
 ```bash
 cp .env.example .env
 docker compose -f docker-compose.warp.yml up -d --build
 ```
 
-该 compose 会启动：
-
-- `warp-proxy`：提供 WARP SOCKS5 出口。
-- `privoxy`：把 WARP SOCKS5 转成 HTTP 代理。
-- `flaresolverr`：刷新 Cloudflare clearance。
-- `init-config`：幂等写入 `proxy_runtime` 默认配置。
-- `app`：启动 ChatGPT2API 主服务。
-
-默认只让上游 OpenAI / ChatGPT 请求走稳定代理，账号邮箱、CPA 等辅助链路不会被强制接管。账号自身配置的代理优先级最高，其次是稳定代理运行时，再其次是显式代理和旧版全局代理。
-
-可在 `.env` 中调整端口和代理运行时参数，也可在后台设置页的「稳定代理运行时」面板手动保存、测试代理和测试 clearance。
+会启动 `warp-proxy`（WARP SOCKS5 出口）、`privoxy`（转成 HTTP 代理）、`flaresolverr`（刷新 Cloudflare clearance）、
+`init-config`（幂等写入 `proxy_runtime` 默认配置）和主服务。默认只有发往 ChatGPT 的请求走稳定代理。
+代理优先级：账号自己的代理 > 稳定代理运行时 > 全局代理。端口和参数在 `.env` 里调整，也可以在设置页的「稳定代理运行时」里保存和测试。
 
 ### 本地开发
 
-启动后端：
-
 ```bash
-git clone git@github.com:basketikun/chatgpt2api.git
-cd chatgpt2api
 uv sync
-uv run main.py
-```
+uv run main.py            # 后端，http://localhost:8000
 
-启动前端：
-
-```bash
-cd chatgpt2api/web
+cd web
 bun install
-bun run dev
+bun run dev               # 前端
 ```
 
-运行测试：
+测试：
 
 ```bash
-uv run python -m unittest discover -s test -t .   # 单元测试，需要真实上游的集成测试默认跳过
+uv run python -m unittest discover -s test -t .
 cd web && npx tsc --noEmit -p . && node --test test/*.test.ts
 ```
 
-集成测试需要先在 `localhost:8000` 启动服务并准备 `assets/image.png`，再加上 `CHATGPT2API_INTEGRATION=1` 运行。每次 push 和 PR 会由
-GitHub Actions 的 `Test` 工作流自动跑上面这些检查。
+默认测试不依赖真实上游（测试里用假上游，`CHATGPT2API_UPSTREAM_BASE_URL` 可把客户端指向它）；需要真实上游的集成测试要先在
+`localhost:8000` 启动服务、准备 `assets/image.png`，再设置 `CHATGPT2API_INTEGRATION=1`。每次 push 和 PR 都会由 GitHub Actions 的
+`Test` 工作流运行上述检查，推送 `main` 还会构建并发布镜像。
 
-后续更新新版本：
+### 存储后端
 
-```bash
-docker pull ghcr.io/basketikun/chatgpt2api:latest
-docker-compose down
-docker-compose up -d
-
-```
-
-### 存储后端配置
-
-支持通过环境变量 `STORAGE_BACKEND` 切换存储方式：
-
-- `json` - 本地 JSON 文件（默认）
-- `sqlite` - 本地 SQLite 数据库
-- `postgres` - 外部 PostgreSQL（需配置 `DATABASE_URL`）
-- `git` - Git 私有仓库（需配置 `GIT_REPO_URL` 和 `GIT_TOKEN`）
-
-示例：使用 PostgreSQL
-
-```yaml
-environment:
-  - STORAGE_BACKEND=postgres
-  - DATABASE_URL=postgresql://user:password@host:5432/dbname
-```
+账号和 API key 的存储方式由环境变量 `STORAGE_BACKEND` 决定：`json`（默认，本地文件）、`sqlite`、`postgres`（配合 `DATABASE_URL`）、
+`git`（配合 `GIT_REPO_URL`、`GIT_TOKEN`）。日志、图片索引、代理清单等其它数据始终在 `data/` 目录。
 
 ## 功能
 
-### API 兼容能力
+### 后台页面
 
-- 兼容 `POST /v1/images/generations` 图片生成接口
-- 兼容 `POST /v1/images/edits` 图片编辑接口
-- 兼容面向图片场景的 `POST /v1/chat/completions`
-- 兼容面向图片场景的 `POST /v1/responses`
-- `GET /v1/models` 返回 `gpt-image-2`、`gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`codex-gpt-image-2`、
-  `codex-gpt-image-2.5*`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini`
-- 支持通过 `n` 返回多张生成结果
-- 支持 GPT Image 2.6（`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst`、`codex-gpt-image-2.6*`）。Codex 链路生成时传
-  `output_format: "gif"` 可输出 GIF 动图，可选 `frame_count`、`frame_duration_ms`（图片编辑不支持 GIF）；网页链路上游返回的 GIF 会原样保留
-- `/v1/images/generations` 请求里带了参考图（`images` / `image` / `image_url`）时，自动按图片编辑处理
-- 非 Codex 模型支持 `2K` 尺寸；可在设置里开启图片放大（`image_upscale_enabled`，Lanczos 或 ONNX 模型，目标长边
-  `image_upscale_target_edge`），以及按请求尺寸精确输出（`image_exact_size_enabled`）
-- 支持生成可编辑 PPT 文件
-- 支持生成可编辑 PSD 文件
-- 支持 Codex 中的画图接口逆向，仅 `Plus` / `Team` / `Pro` 订阅可用，模型别名为 `codex-gpt-image-2` 与 `codex-gpt-image-2.5*`，如有需要可自行在其他场景映射回
-  网页模型，用于和官网画图区分；也就意味着同一账号会同时有官网和 Codex 两份生图额度
+| 页面 | 内容 |
+|:--|:--|
+| 总览 | 号池状态（可用、限流、异常、额度）、今日 / 近 7 天 / 近 30 天出图数、账号列表与管理 |
+| 代理 | 代理清单：批量添加、按厂商命名、健康检测、停用并把账号迁走、重新平均分配、每个代理挂多少账号的上限 |
+| 生图 | 在线生图 / 改图 / 多图编辑，进度追踪，超时后可继续等待，本地保存会话历史 |
+| 图片 | 服务端保存的图片：按日期和标签筛选、分页、批量下载、按日期批量删除（带进度条）、按自然日的定时清理规则 |
+| 日志 | 调用日志和账号日志，按类型和日期筛选 |
+| 设置 | 生图参数、代理与稳定代理运行时、AI 审核与敏感词、用户 API key、CPA / Sub2API 连接、图片存储（本地 / WebDAV）、R2 备份 |
+| 调试 | 在页面上直接试调用对话、搜索、PPT、PSD 等接口 |
 
-### 在线画图功能
+另有 `/health`（号池健康看板，`?format=json` 返回 JSON）。
 
-- 内置在线画图工作台，支持生成、图片编辑与多图组图编辑
-- 支持 `gpt-image-2`、`gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`codex-gpt-image-2`、`codex-gpt-image-2.5*`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini` 模型选择
-- 编辑模式支持参考图上传，参考图过大时会自动压缩到上游可接受的大小
-- 选择 GIF 模型时可设置帧数和帧间隔
-- 前端支持多图生成交互
-- 本地保存图片会话历史，支持回看、删除和清空
-- 支持服务端缓存图片URL
-- 图片生成进度追踪，超时后可继续等待
-- 图片懒加载与滚动位置记忆，优化大量图片场景性能
+### 生图
 
-### 号池管理功能
+- 兼容 `POST /v1/images/generations`、`POST /v1/images/edits`，也可以通过 `/v1/chat/completions`、`/v1/responses` 生图；`n` 支持 1–4
+- 模型：`gpt-image-2`、`gpt-image-2.5*`、`gpt-image-2.6*`（网页链路）和 `codex-gpt-image-*`（Codex 链路，仅 Plus / Team / Pro，
+  与网页链路额度分开）；Codex 链路传 `output_format: "gif"` 可输出 GIF 动图
+- `/v1/images/generations` 请求里带参考图时自动按图片编辑处理；参考图过大时自动压缩到上游可接受的大小
+- 请求尺寸会换算成画幅比例发给上游；可选按请求尺寸精确输出、按目标长边放大（Lanczos 或 ONNX 模型）
+- 后台生图任务：`/api/image-tasks/*` 提交后轮询结果，页面刷新不丢任务
+- 可编辑 PPT / PSD 文件生成（`/v1/ppt/generations`、`/v1/psd/generations`，需要 Plus / Team / Pro 账号）
 
-- 自动刷新账号邮箱、类型、额度和恢复时间（异步进度追踪）
-- 轮询可用账号执行图片生成与图片编辑
-- 遇到 Token 失效类错误时自动剔除无效 Token
-- 定时检查限流账号并自动刷新
-- 支持密码重新登录恢复异常账号，刷新后可自动重登
-- 支持网页端配置全局 HTTP / HTTPS / SOCKS5 / SOCKS5H 代理
-- 支持 WARP / FlareSolverr 稳定代理运行时
-- 支持搜索、筛选、批量刷新、导出、手动编辑和清理账号；异常账号会显示具体原因，可对选中账号逐个测试生图
-- 支持批量协议登录：每行 `邮箱----密码----TOTP密钥`（TOTP 可省略），登录走账号自己的代理
-- 代理管理：账号页「代理」可给代理起名字、查看健康状况（连续 3 次被 Cloudflare 挑战或连接失败标记异常，重启后清零），
-  按代理筛选账号；导入时可选「平均分配到多个代理」，新账号依次分给账号数最少的代理，跳过异常代理
-- 上游稳定性：Cloudflare 挑战页自动重试（清掉 Cloudflare Cookie 后最多 3 次）；生图遇到 403 时冷却该账号并换其它出口重试；
-  图生图上传达上限的账号自动冷却；已生成图片下载失败时退避重试
-- `api_threadpool_tokens`（默认 256）控制接口线程池大小，避免大量生图长任务拖住其它接口
-- 支持四种导入方式：本地 CPA JSON 文件导入、远程 CPA 服务器导入、`sub2api` 服务器导入、`access_token` 导入
-- 支持在设置页配置 `sub2api` 服务器，筛选并批量导入其中的 OpenAI OAuth 账号
+### 稳定性
 
-### 实验性 / 规划中
+- 按账号轮询并限制每个账号的并发；账号 token 失效时先尝试刷新，失败再换号或剔除
+- 换号重试：403、TLS / 连接超时、HTTP/2 流被重置（curl 92）、模型不可用、上传达到上限等情况会换一个账号重试；403 的账号冷却 10 分钟
+- 「换号生成」（`image_failover_enabled`）：单个账号出图超过设定时间仍没结果时换号重新生成，并归还卡住账号的并发名额
+- Cloudflare 挑战页自动重试；已生成图片下载失败时退避重试；生图 SSE 流有硬超时
+- Turnstile 挑战交给 `sentinel-solver` 求解，走与账号相同的出口
+- 接口线程池默认 256（`api_threadpool_tokens`），大量长时间生图不会拖住其它接口
 
-- 详细状态说明见：[功能清单](./docs/feature-status.en.md)
+### 号池与账号来源
 
-## 效果展示
+- 自动刷新账号的邮箱、类型、额度和恢复时间；定时检查限流账号，refresh token 定期保活
+- 异常账号显示具体原因；可对选中账号逐个测试生图；支持密码重新登录（可配合 TOTP 两步验证）
+- 导入方式：`access_token`、本地 CPA JSON 文件、远程 CPA、Sub2API、手动 OAuth、批量协议登录（每行 `邮箱----密码----TOTP密钥`）
+- 导入时可把新账号平均分配到多个代理，跳过异常代理
 
-<table width="100%">
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/Jj8nfwwP/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/pqf235v/image-edit.png" alt="image edit" border="0"></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/tPcqtVfd/chery-studio.png" alt="chery studio" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/PsT9YHBV/account-pool.png" alt="account pool" border="0"></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/rRWLG08q/new-api.png" alt="new api" border="0"></td>
-  </tr>
-</table>
+### 文本接口
+
+- `/v1/chat/completions`、`/v1/responses`、`/v1/messages`（Anthropic 格式，工具调用用 XML 约定模拟）、`/v1/search`
+- 按模型自动选择能用该模型的账号类型；支持网页搜索工具；相同请求在短时间内命中缓存
+
+### 其它
+
+- 用户 API key：管理员可以发放普通用户 key，用户只能调用生成接口
+- 请求内容审核：敏感词和可选的 AI 审核
+- 图片存储：本地、WebDAV 或两者同时；定时清理和磁盘空间不足时自动清理最旧的图片
+- 备份：定时把配置和数据打包上传到 Cloudflare R2，可加密、可轮换
 
 ## API
 
@@ -192,7 +153,7 @@ Authorization: Bearer <auth-key>
 <summary><code>GET /v1/models</code></summary>
 <br>
 
-返回当前暴露的图片模型列表。
+返回当前可用的模型列表。
 
 ```bash
 curl http://localhost:8000/v1/models \
@@ -205,7 +166,7 @@ curl http://localhost:8000/v1/models \
 
 | 字段   | 说明                                                                                                         |
 |:-----|:-----------------------------------------------------------------------------------------------------------|
-| 返回模型 | `gpt-image-2`、`gpt-image-2.5`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`codex-gpt-image-2`、`codex-gpt-image-2.5*`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini` |
+| 返回模型 | 号池里各类账号在官网可用的文本模型（按账号类型汇总，5 分钟缓存），加上图片模型 `gpt-image-2`、`gpt-image-2.5*`、`gpt-image-2.6*`；有 Plus / Team / Pro 的 Codex 账号时另有 `codex-gpt-image-*` 及 `plus-` / `team-` / `pro-` 前缀版本 |
 | 接入场景 | 可接入 Cherry Studio、New API 等上游或客户端                                                                          |
 
 <br>
@@ -367,6 +328,7 @@ curl http://localhost:8000/v1/responses \
 </details>
 </details>
 
-## 社区支持
+## 开发分支
 
-学 AI , 上 L 站：[LinuxDO](https://linux.do)
+- `main`：当前生产版本（Python）
+- `go-v2`：迁移到 Go 的分支，接口与 `main` 保持一致，开发中，计划和进度见该分支的 `docs/go-migration.md`
