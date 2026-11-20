@@ -182,7 +182,7 @@ def create_router(app_version: str) -> APIRouter:
     @router.post("/api/logs/delete")
     async def delete_logs(body: LogDeleteRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return log_service.delete(body.ids)
+        return await run_in_threadpool(log_service.delete, body.ids)
 
     @router.post("/api/proxy/test")
     async def test_proxy_endpoint(body: ProxyTestRequest, authorization: str | None = Header(default=None)):

@@ -225,26 +225,53 @@ class LogService:
             return None
         return occurred.strftime("%Y-%m-%d"), kind, count
     def delete(self, ids: list[str]) -> dict[str, int]:
+        """Drop lines by id without stopping writers.
+
+        The log is hundreds of MB. Lines are streamed into a temp file and only
+        lines that could match are parsed. add() keeps appending meanwhile;
+        whatever it wrote after the scan started is copied over under the lock
+        just before the swap, so no new line is lost.
+        """
         target_ids = {str(item or "").strip() for item in ids if str(item or "").strip()}
         if not self.path.exists() or not target_ids:
             return {"removed": 0}
-        lines = self.path.read_text(encoding="utf-8").splitlines()
-        kept_lines: list[str] = []
+        temporary = self.path.with_name(self.path.name + ".tmp")
         removed = 0
-        for line_number, raw_line in enumerate(lines):
-            item = self._parse_line(raw_line, line_number)
-            if item is None:
-                kept_lines.append(raw_line)
-                continue
-            if str(item.get("id") or "") in target_ids:
-                removed += 1
-                continue
-            kept_lines.append(self._serialize_item(item))
-        content = "\n".join(kept_lines)
-        if content:
-            content += "\n"
-        self.path.write_text(content, encoding="utf-8")
+        try:
+            with self.path.open("rb") as source, temporary.open("wb") as target:
+                scanned = source.seek(0, os.SEEK_END)
+                source.seek(0)
+                for raw in iter(source.readline, b""):
+                    if source.tell() > scanned or not raw.endswith(b"\n"):
+                        # Written after the scan began (or still being written); the tail copy keeps it.
+                        source.seek(source.tell() - len(raw))
+                        break
+                    if self._line_has_id(raw, target_ids):
+                        removed += 1
+                    else:
+                        target.write(raw)
+                scanned = source.tell()
+                if removed == 0:
+                    temporary.unlink()
+                    return {"removed": 0}
+                with self._lock:
+                    source.seek(scanned)
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        target.write(chunk)
+                    target.flush()
+                    os.replace(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
         return {"removed": removed}
+
+    def _line_has_id(self, raw: bytes, target_ids: set[str]) -> bool:
+        text = raw.rstrip(b"\r\n").decode("utf-8", "replace")
+        # add() writes the id first, so most lines are ruled out without json.loads.
+        if text.startswith('{"id":') and not any(target in text for target in target_ids):
+            return False
+        # list() derives ids for legacy id-less lines with line number 0; match that.
+        item = self._parse_line(text, 0)
+        return item is not None and item["id"] in target_ids
 
 
 def _parse_server_local_time(value: object, server_tz: datetime.tzinfo) -> datetime | None:
