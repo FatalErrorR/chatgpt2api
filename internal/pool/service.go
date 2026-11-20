@@ -64,8 +64,16 @@ type Service struct {
 	sideline map[string]time.Time
 	aliases  map[string]string
 
-	cumulative int
-	persisted  map[string]string // last saved JSON per token, to write only changed documents
+	cumulative   int
+	persisted    map[string]string // last saved JSON per token, to write only changed documents
+	persistedPos map[string]int    // last saved position per token
+	dirty        map[string]bool   // changed without a save yet; written by the next save
+	retryFull    bool              // a write failed: the next save compares everything
+
+	writeMu   sync.Mutex // guards queue and writing; taken after mu, never before it
+	writeCond *sync.Cond
+	queue     []saveBatch
+	writing   bool
 
 	refreshMu sync.Mutex
 
@@ -86,10 +94,11 @@ type Service struct {
 func New(store Store, cfg *settings.Store, log Logger) (*Service, error) {
 	s := &Service{
 		items: map[string]Account{}, inflight: map[string]int{}, sideline: map[string]time.Time{}, aliases: map[string]string{},
-		persisted: map[string]string{}, store: store, settings: cfg, log: log,
+		persisted: map[string]string{}, persistedPos: map[string]int{}, dirty: map[string]bool{}, store: store, settings: cfg, log: log,
 		refreshes: map[string]map[string]any{}, relogins: map[string]map[string]any{}, now: time.Now,
 	}
 	s.cond = sync.NewCond(&s.mu)
+	s.writeCond = sync.NewCond(&s.writeMu)
 	loaded, err := store.Load()
 	if err != nil {
 		return nil, err
@@ -121,40 +130,164 @@ func (s *Service) logAdd(summary string, detail map[string]any) {
 	}
 }
 
-// saveLocked writes the documents that changed since the last save (Python rewrote the whole list).
+// Saving. The pool lock is held by every request (picking an account, recording a result), so a
+// save must not hold it for long: only the accounts known to have changed are serialized
+// (saveTokensLocked), and the database write happens on a writer goroutine, in the order the saves
+// were made. A full comparison (saveLocked) is kept for the rare bulk changes (add, delete, proxy
+// reassignment, token rotation), which may change many accounts or the order.
+//
+// Flush waits until everything saved so far is in the database (shutdown, backups, tests).
+
+type saveBatch struct {
+	rows    []SavedRow
+	removed []string
+}
+
+// saveLocked compares every account and its position with what was saved and writes the difference.
 func (s *Service) saveLocked() {
-	changed := map[string]Account{}
+	s.retryFull = false
+	var batch saveBatch
 	present := make(map[string]bool, len(s.order))
-	for _, token := range s.order {
+	for i, token := range s.order {
 		present[token] = true
-		raw, _ := json.Marshal(s.items[token])
-		if s.persisted[token] != string(raw) {
-			changed[token] = s.items[token]
-			s.persisted[token] = string(raw)
-		}
+		s.collectLocked(&batch, token, i)
 	}
-	var removed []string
 	for token := range s.persisted {
 		if !present[token] {
-			removed = append(removed, token)
+			batch.removed = append(batch.removed, token)
 			delete(s.persisted, token)
+			delete(s.persistedPos, token)
 		}
 	}
-	if len(changed) == 0 && len(removed) == 0 {
+	clear(s.dirty)
+	s.enqueueLocked(batch)
+}
+
+// saveTokensLocked writes the given accounts (and any marked dirty) when they changed. The order
+// must be unchanged since the last save, except for accounts removed from it.
+func (s *Service) saveTokensLocked(tokens ...string) {
+	if s.retryFull {
+		s.saveLocked()
 		return
 	}
-	if err := s.store.Save(s.order, changed, removed); err != nil {
-		// keep going like Python would after a failed write, but remember what is still owed so the
-		// next save retries it: changed rows as unsaved, removed rows as still in the database
-		// (otherwise a deleted account would come back after a restart)
-		log.Printf("account save failed (will retry on the next save): %v", err)
-		for token := range changed {
-			delete(s.persisted, token)
-		}
-		for _, token := range removed {
-			s.persisted[token] = ""
+	for _, token := range tokens {
+		s.dirty[token] = true
+	}
+	var batch saveBatch
+	for i, token := range s.order {
+		if s.dirty[token] {
+			s.collectLocked(&batch, token, i)
+			delete(s.dirty, token)
 		}
 	}
+	for token := range s.dirty { // no longer in the pool
+		if _, saved := s.persisted[token]; saved {
+			batch.removed = append(batch.removed, token)
+			delete(s.persisted, token)
+			delete(s.persistedPos, token)
+		}
+	}
+	clear(s.dirty)
+	s.enqueueLocked(batch)
+}
+
+func (s *Service) collectLocked(batch *saveBatch, token string, position int) {
+	raw, _ := json.Marshal(s.items[token])
+	pos, saved := s.persistedPos[token]
+	if s.persisted[token] == string(raw) && saved && pos == position {
+		return
+	}
+	s.persisted[token] = string(raw)
+	s.persistedPos[token] = position
+	batch.rows = append(batch.rows, SavedRow{Token: token, Position: int64(position), Data: string(raw)})
+}
+
+func (s *Service) enqueueLocked(batch saveBatch) {
+	if len(batch.rows) == 0 && len(batch.removed) == 0 {
+		return
+	}
+	s.writeMu.Lock()
+	s.queue = append(s.queue, batch)
+	if !s.writing {
+		s.writing = true
+		go s.writeLoop()
+	}
+	s.writeMu.Unlock()
+}
+
+// writeLoop writes the queued batches, merged, until the queue is empty. A failed write marks its
+// accounts as unsaved and the next save compares everything, so it is retried (a removed account
+// stays owed as a removal; otherwise it would come back after a restart).
+func (s *Service) writeLoop() {
+	for {
+		s.writeMu.Lock()
+		if len(s.queue) == 0 {
+			s.writing = false
+			s.writeCond.Broadcast()
+			s.writeMu.Unlock()
+			return
+		}
+		batches := s.queue
+		s.queue = nil
+		s.writeMu.Unlock()
+
+		rows, removed := mergeBatches(batches)
+		if err := s.store.Save(rows, removed); err != nil {
+			log.Printf("account save failed (will retry on the next save): %v", err)
+			s.mu.Lock()
+			for _, row := range rows {
+				delete(s.persisted, row.Token)
+				delete(s.persistedPos, row.Token)
+			}
+			for _, token := range removed {
+				s.persisted[token] = ""
+				s.persistedPos[token] = -1
+			}
+			s.retryFull = true
+			s.mu.Unlock()
+		}
+	}
+}
+
+// mergeBatches applies the batches in order: the last write of an account wins, and a removal
+// cancels earlier writes (and the other way round).
+func mergeBatches(batches []saveBatch) ([]SavedRow, []string) {
+	rows := map[string]SavedRow{}
+	removed := map[string]bool{}
+	var order []string
+	for _, batch := range batches {
+		for _, token := range batch.removed {
+			delete(rows, token)
+			removed[token] = true
+		}
+		for _, row := range batch.rows {
+			if _, seen := rows[row.Token]; !seen {
+				order = append(order, row.Token)
+			}
+			rows[row.Token] = row
+			delete(removed, row.Token)
+		}
+	}
+	outRows := make([]SavedRow, 0, len(rows))
+	for _, token := range order {
+		if row, ok := rows[token]; ok {
+			outRows = append(outRows, row)
+		}
+	}
+	outRemoved := make([]string, 0, len(removed))
+	for token := range removed {
+		outRemoved = append(outRemoved, token)
+	}
+	return outRows, outRemoved
+}
+
+// Flush waits until every save made so far is written (or has failed and is owed to the next save).
+func (s *Service) Flush() {
+	s.writeMu.Lock()
+	for s.writing || len(s.queue) > 0 {
+		s.writeCond.Wait()
+	}
+	s.writeMu.Unlock()
 }
 
 func (s *Service) setLocked(token string, account Account) {
@@ -560,7 +693,7 @@ func (s *Service) MarkTextUsed(token string) {
 	next["last_used_at"] = nowLocal()
 	if account := NormalizeAccount(next, ""); account != nil {
 		s.items[token] = account
-		s.saveLocked()
+		s.saveTokensLocked(token)
 	}
 }
 
@@ -634,7 +767,13 @@ func (s *Service) UpdateAccount(token string, updates Account, quiet bool) Accou
 		return nil
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var later []func() // log writes, made once the lock is released
+	defer func() {
+		s.mu.Unlock()
+		for _, write := range later {
+			write()
+		}
+	}()
 	token = s.resolveLocked(token)
 	current := s.items[token]
 	if current == nil {
@@ -647,13 +786,14 @@ func (s *Service) UpdateAccount(token string, updates Account, quiet bool) Accou
 	if account["status"] == StatusLimited && s.settings.AutoRemoveRateLimitedAccounts() {
 		s.popLocked(token)
 		s.saveLocked()
-		s.logAdd("自动移除限流账号", map[string]any{"token": AnonymizeToken(token)})
+		later = append(later, func() { s.logAdd("自动移除限流账号", map[string]any{"token": AnonymizeToken(token)}) })
 		return nil
 	}
 	s.items[token] = account
-	s.saveLocked()
+	s.saveTokensLocked(token)
 	if !quiet {
-		s.logAdd("更新账号", map[string]any{"token": AnonymizeToken(token), "status": account["status"]})
+		status := account["status"] // read under the lock
+		later = append(later, func() { s.logAdd("更新账号", map[string]any{"token": AnonymizeToken(token), "status": status}) })
 	}
 	return copyAccount(account)
 }
@@ -733,7 +873,13 @@ func (s *Service) addPayloads(payloads []Account) AddResult {
 		return AddResult{Items: s.ListAccounts()}
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var later []func() // log writes, made once the lock is released
+	defer func() {
+		s.mu.Unlock()
+		for _, write := range later {
+			write()
+		}
+	}()
 	added, skipped := 0, 0
 	for _, token := range order {
 		payload := deduped[token]
@@ -762,7 +908,9 @@ func (s *Service) addPayloads(payloads []Account) AddResult {
 	}
 	s.saveLocked()
 	items := s.viewsLocked()
-	s.logAdd(fmt.Sprintf("新增 %d 个账号，跳过 %d 个", added, skipped), map[string]any{"added": added, "skipped": skipped})
+	later = append(later, func() {
+		s.logAdd(fmt.Sprintf("新增 %d 个账号，跳过 %d 个", added, skipped), map[string]any{"added": added, "skipped": skipped})
+	})
 	return AddResult{Added: added, Skipped: skipped, Items: items}
 }
 
@@ -778,7 +926,13 @@ func (s *Service) DeleteAccounts(tokens []string) (int, []Account) {
 		return 0, s.ListAccounts()
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var later []func() // log writes, made once the lock is released
+	defer func() {
+		s.mu.Unlock()
+		for _, write := range later {
+			write()
+		}
+	}()
 	resolved := map[string]bool{}
 	for token := range targets {
 		if token = s.resolveLocked(token); token != "" {
@@ -804,7 +958,7 @@ func (s *Service) DeleteAccounts(tokens []string) (int, []Account) {
 			s.index = 0
 		}
 		s.saveLocked()
-		s.logAdd(fmt.Sprintf("删除 %d 个账号", removed), map[string]any{"removed": removed})
+		later = append(later, func() { s.logAdd(fmt.Sprintf("删除 %d 个账号", removed), map[string]any{"removed": removed}) })
 	}
 	return removed, s.viewsLocked()
 }
@@ -816,7 +970,13 @@ func (s *Service) MarkImageResult(token string, success bool) Account {
 	}
 	s.ReleaseImageSlot(token)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var later []func() // log writes, made once the lock is released
+	defer func() {
+		s.mu.Unlock()
+		for _, write := range later {
+			write()
+		}
+	}()
 	token = s.resolveLocked(token)
 	current := s.items[token]
 	if current == nil {
@@ -844,11 +1004,11 @@ func (s *Service) MarkImageResult(token string, success bool) Account {
 	if account["status"] == StatusLimited && s.settings.AutoRemoveRateLimitedAccounts() {
 		s.popLocked(token)
 		s.saveLocked()
-		s.logAdd("自动移除限流账号", map[string]any{"token": AnonymizeToken(token)})
+		later = append(later, func() { s.logAdd("自动移除限流账号", map[string]any{"token": AnonymizeToken(token)}) })
 		return nil
 	}
 	s.items[token] = account
-	s.saveLocked()
+	s.saveTokensLocked(token)
 	return copyAccount(account)
 }
 
@@ -895,6 +1055,7 @@ func (s *Service) recordRefreshSuccess(token string) {
 	next["last_refresh_error_at"] = nil
 	if account := NormalizeAccount(next, ""); account != nil {
 		s.items[token] = account
+		s.dirty[token] = true // written with the next save, as before
 	}
 }
 
@@ -936,7 +1097,7 @@ func (s *Service) recordInvalidSeen(token, event, cause string, deferRemoval boo
 	next["last_refresh_error_at"] = isoUTC(now)
 	if account := NormalizeAccount(next, ""); account != nil {
 		s.items[token] = account
-		s.saveLocked()
+		s.saveTokensLocked(token)
 	}
 	s.mu.Unlock()
 	if shouldDefer {
@@ -1025,7 +1186,7 @@ func (s *Service) recordTokenRefreshError(token, event, cause string) {
 		next["last_token_refresh_error_at"] = isoUTC(s.now())
 		if account := NormalizeAccount(next, ""); account != nil {
 			s.items[resolved] = account
-			s.saveLocked()
+			s.saveTokensLocked(resolved)
 		}
 	}
 	s.mu.Unlock()

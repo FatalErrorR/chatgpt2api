@@ -33,7 +33,9 @@ func openDB(t *testing.T) *gorm.DB {
 
 func newService(t *testing.T, db *gorm.DB) *Service {
 	t.Helper()
-	s, err := New(db, settings.NewForTest(map[string]any{"image_retention_days": 30}, ""), logs.New(db))
+	callLogs := logs.New(db)
+	t.Cleanup(callLogs.Flush) // counts are written asynchronously; before the database closes
+	s, err := New(db, settings.NewForTest(map[string]any{"image_retention_days": 30}, ""), callLogs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +23,7 @@ type memoryStore struct {
 	ints     map[string]int
 	writes   int
 	lastSave map[string]Account
+	pos      map[string]int64
 }
 
 func newMemoryStore(accounts ...Account) *memoryStore {
@@ -44,21 +46,30 @@ func (m *memoryStore) Load() ([]Account, error) {
 	return out, nil
 }
 
-func (m *memoryStore) Save(order []string, changed map[string]Account, removed []string) error {
+func (m *memoryStore) Save(rows []SavedRow, removed []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.writes++
-	m.lastSave = changed
+	m.lastSave = map[string]Account{}
+	if m.pos == nil {
+		m.pos = map[string]int64{}
+	}
 	for _, token := range removed {
 		delete(m.docs, token)
+		delete(m.pos, token)
 	}
-	for token, account := range changed {
-		raw, _ := json.Marshal(account)
+	for _, row := range rows {
 		var copied Account
-		json.Unmarshal(raw, &copied)
-		m.docs[token] = copied
+		json.Unmarshal([]byte(row.Data), &copied)
+		m.docs[row.Token] = copied
+		m.pos[row.Token] = row.Position
+		m.lastSave[row.Token] = copied
 	}
-	m.order = append([]string(nil), order...)
+	m.order = m.order[:0]
+	for token := range m.docs {
+		m.order = append(m.order, token)
+	}
+	sort.SliceStable(m.order, func(i, j int) bool { return m.pos[m.order[i]] < m.pos[m.order[j]] })
 	return nil
 }
 
@@ -378,6 +389,7 @@ func TestSidelinedAccountIsSkipped(t *testing.T) {
 func TestReloadKeepsOrderAndFields(t *testing.T) {
 	s, store := newService(t, nil)
 	s.AddAccountItems([]Account{{"access_token": "z", "custom_field": "kept", "quota": 2}, {"access_token": "a"}})
+	s.Flush()
 	again, err := New(store, settings.NewForTest(nil, ""), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -391,12 +403,15 @@ func TestReloadKeepsOrderAndFields(t *testing.T) {
 func TestOnlyChangedAccountsAreWritten(t *testing.T) {
 	s, store := newService(t, nil)
 	s.AddAccounts([]string{"a", "b", "c"}, "web")
+	s.Flush()
 	s.UpdateAccount("b", Account{"quota": 9}, true)
+	s.Flush()
 	if len(store.lastSave) != 1 || store.lastSave["b"] == nil {
 		t.Fatalf("last save wrote %d accounts", len(store.lastSave))
 	}
 	writes := store.writes
 	s.UpdateAccount("b", Account{"quota": 9}, true)
+	s.Flush()
 	if store.writes != writes {
 		t.Fatal("an unchanged account was written again")
 	}

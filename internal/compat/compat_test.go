@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/basketikun/chatgpt2api/internal/docstore"
@@ -31,9 +32,14 @@ type harness struct {
 	failing map[string]string // proxy key -> error returned by the fake proxy test
 }
 
-type recordedLog struct{ summaries []string }
+type recordedLog struct {
+	mu        sync.Mutex
+	summaries []string
+}
 
 func (l *recordedLog) Add(kind, summary string, detail map[string]any) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.summaries = append(l.summaries, summary)
 	return nil
 }
@@ -77,6 +83,7 @@ func newHarness(t *testing.T, config ...map[string]any) *harness {
 		t.Fatal(err)
 	}
 	accounts.Remote = stubRemote{}
+	t.Cleanup(accounts.Flush) // before the database closes (cleanups run last-registered first)
 	list, err := proxylist.New(docstore.New(db))
 	if err != nil {
 		t.Fatal(err)

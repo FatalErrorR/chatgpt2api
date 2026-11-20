@@ -81,7 +81,7 @@ type Service struct {
 	dataDir  string
 	now      func() time.Time
 
-	mu            sync.Mutex // the index (IMAGE_INDEX_LOCK)
+	mu            sync.RWMutex // the index (IMAGE_INDEX_LOCK): saves of different images share it, whole-index work (reconcile, delete, sync) holds it alone
 	lastReconcile time.Time
 	lastCleanup   time.Time
 	seqMu         sync.Mutex
@@ -294,9 +294,9 @@ func (s *Service) Save(data []byte, baseURL string) (string, error) {
 	if w, h, ok := dimensions(data); ok {
 		it["width"], it["height"] = w, h
 	}
-	s.mu.Lock()
+	s.mu.RLock() // one new row: concurrent saves do not conflict, only whole-index work must wait
 	err := s.upsert(s.db, rowFor(rel, s.nextSeq(), it))
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	if err != nil {
 		return "", err
 	}

@@ -70,6 +70,7 @@ func newEnv(t *testing.T, tokens ...string) *env {
 		t.Fatal(err)
 	}
 	accounts.Remote = echoRemote{}
+	t.Cleanup(accounts.Flush) // account writes are asynchronous; finish them before the database closes
 	items := []pool.Account{}
 	for _, token := range tokens {
 		items = append(items, pool.Account{"access_token": token, "email": token + "@fake.test", "status": "正常", "quota": 5})

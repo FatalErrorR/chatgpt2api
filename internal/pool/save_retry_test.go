@@ -15,11 +15,11 @@ type flakyStore struct {
 	fail bool
 }
 
-func (f *flakyStore) Save(order []string, changed map[string]Account, removed []string) error {
+func (f *flakyStore) Save(rows []SavedRow, removed []string) error {
 	if f.fail {
 		return errors.New("database is down")
 	}
-	return f.DBStore.Save(order, changed, removed)
+	return f.DBStore.Save(rows, removed)
 }
 
 // A delete whose write failed must still reach the database with the next successful write;
@@ -39,10 +39,13 @@ func TestDeleteSurvivesAFailedWrite(t *testing.T) {
 	}
 	service.AddAccountItems([]Account{{"access_token": "keep", "email": "k@x"}, {"access_token": "gone", "email": "g@x"}})
 
+	service.Flush()
 	store.fail = true
 	service.DeleteAccounts([]string{"gone"})
+	service.Flush() // the write runs, and fails, while the database is down
 	store.fail = false
 	service.UpdateAccount("keep", Account{"email": "k2@x"}, true) // a later write that succeeds
+	service.Flush()
 
 	restarted, err := New(NewDBStore(repo.DB()), cfg, nil)
 	if err != nil {
@@ -58,8 +61,10 @@ func TestDeleteSurvivesAFailedWrite(t *testing.T) {
 	// a failed update is retried too
 	store.fail = true
 	service.UpdateAccount("keep", Account{"email": "k3@x"}, true)
+	service.Flush()
 	store.fail = false
 	service.AddAccountItems([]Account{{"access_token": "new", "email": "n@x"}})
+	service.Flush()
 	restarted, _ = New(NewDBStore(repo.DB()), cfg, nil)
 	if account := restarted.GetAccount("keep"); account == nil || account["email"] != "k3@x" || restarted.GetAccount("new") == nil {
 		t.Fatalf("after retry %v", restarted.ListAccounts())

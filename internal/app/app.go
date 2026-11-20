@@ -134,7 +134,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	}
 	accountPool.Remote.(*compat.ChatGPTRemote).Health = proxyList
 	proxyOps := &proxyops.Ops{List: proxyList, Pool: accountPool, Settings: store, Log: compatLogs,
-		Test: func(ctx context.Context, proxyURL string) map[string]any { return proxyService.Test(ctx, proxyURL) }}
+		Test: boundedProxyTest(proxyService.Test, proxyTestTimeout)}
 	dataDir := store.DataDir
 	if dataDir == "" {
 		dataDir = "data"
@@ -295,8 +295,11 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		ImageTasks: func() any { return imageTasks.Export() },
 		ImageIndex: func() (any, error) { return imageStore.ExportIndex() },
 		ImageTags:  func() (any, error) { return imageStore.Tags() },
-		Accounts:   func() (any, error) { return pool.NewDBStore(db).Load() },
-		AuthKeys:   compatAuth.Snapshot,
+		Accounts: func() (any, error) {
+			accountPool.Flush() // account writes are asynchronous; the snapshot must include them
+			return pool.NewDBStore(db).Load()
+		},
+		AuthKeys: compatAuth.Snapshot,
 		StorageBackend: func() any {
 			return map[string]any{"type": "database", "description": "数据库存储"}
 		},
@@ -323,7 +326,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	main.NoRoute(compat.ServeWeb(webDir))
 	_ = scheduler
 	return &App{Engine: main, Upstream: engine, repo: repo, pool: accountPool, images: imageStore, backups: backups, settings: store,
-		waiters: []func(){imageTasks.Wait, fileTasks.Wait, protocolLogin.Wait}}, nil
+		waiters: []func(){imageTasks.Wait, fileTasks.Wait, protocolLogin.Wait, accountPool.Flush, compatLogs.Flush}}, nil
 }
 
 // Start resets state left over from a previous run and starts the background jobs.
@@ -339,6 +342,18 @@ func (a *App) Start(ctx context.Context) {
 	go a.pool.Watch(ctx)
 	go a.images.Run(ctx)
 	go a.backups.Start(ctx)
+}
+
+// proxyTestTimeout is test_proxy's timeout=15.0. Without it a proxy that accepts the connection and
+// never answers held a check worker for the client's 300 s, and 检测并清理 could take many minutes.
+var proxyTestTimeout = 15 * time.Second
+
+func boundedProxyTest(test func(context.Context, string) map[string]any, timeout time.Duration) func(context.Context, string) map[string]any {
+	return func(ctx context.Context, proxyURL string) map[string]any {
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return test(ctx, proxyURL)
+	}
 }
 
 // BackgroundJobsEnabled is false when CHATGPT2API_BACKGROUND_JOBS is "off". An instance started on

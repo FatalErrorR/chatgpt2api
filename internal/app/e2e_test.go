@@ -60,6 +60,11 @@ func e2eAppCounting(t *testing.T, imageDelay time.Duration) (*App, *settings.Sto
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { // finish the asynchronous writes before the database closes
+		for _, wait := range application.waiters {
+			wait()
+		}
+	})
 	return application, store, requests
 }
 

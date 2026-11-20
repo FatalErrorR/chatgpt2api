@@ -28,9 +28,16 @@ type kvRow struct {
 func (kvRow) TableName() string { return "compat_kv" }
 
 // Store persists accounts. The service writes only the documents that changed.
+// SavedRow is one account as written: its position in the pool order and its JSON.
+type SavedRow struct {
+	Token    string
+	Position int64
+	Data     string
+}
+
 type Store interface {
 	Load() ([]Account, error)
-	Save(order []string, changed map[string]Account, removed []string) error
+	Save(rows []SavedRow, removed []string) error
 	LoadInt(key string) (int, bool)
 	SaveInt(key string, value int) error
 }
@@ -65,30 +72,22 @@ func (s *DBStore) Load() ([]Account, error) {
 	return out, nil
 }
 
-func (s *DBStore) Save(order []string, changed map[string]Account, removed []string) error {
-	position := make(map[string]int64, len(order))
-	for i, token := range order {
-		position[token] = int64(i)
-	}
+func (s *DBStore) Save(rows []SavedRow, removed []string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if len(removed) > 0 {
 			if err := tx.Where("token IN ?", removed).Delete(&accountRow{}).Error; err != nil {
 				return err
 			}
 		}
-		rows := make([]accountRow, 0, len(changed))
-		for token, account := range changed {
-			raw, err := json.Marshal(account)
-			if err != nil {
-				return err
-			}
-			rows = append(rows, accountRow{Token: token, Position: position[token], Data: string(raw)})
-		}
 		if len(rows) == 0 {
 			return nil
 		}
+		out := make([]accountRow, len(rows))
+		for i, row := range rows {
+			out[i] = accountRow{Token: row.Token, Position: row.Position, Data: row.Data}
+		}
 		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "token"}}, DoUpdates: clause.AssignmentColumns([]string{"position", "data"})}).
-			CreateInBatches(rows, 200).Error
+			CreateInBatches(out, 200).Error
 	})
 }
 

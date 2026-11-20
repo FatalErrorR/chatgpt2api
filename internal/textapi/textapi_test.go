@@ -138,6 +138,7 @@ func newHarness(t *testing.T, accounts []pool.Account, config map[string]any) *h
 		t.Fatal(err)
 	}
 	accountPool.Remote = keepRemote{}
+	t.Cleanup(accountPool.Flush) // account writes are asynchronous; finish them before the database closes
 	if accounts == nil {
 		accounts = []pool.Account{{"access_token": "tok-1", "type": "Plus", "status": "正常", "email": "a@test"}}
 	}

@@ -41,6 +41,7 @@ func newPool(t *testing.T, accounts ...pool.Account) *pool.Service {
 		t.Fatal(err)
 	}
 	p.Remote = keepRemote{}
+	t.Cleanup(p.Flush) // account writes are asynchronous; finish them before the database closes
 	if len(accounts) > 0 {
 		p.AddAccountItems(accounts)
 	}

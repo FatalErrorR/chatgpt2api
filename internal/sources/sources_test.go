@@ -41,6 +41,7 @@ func setup(t *testing.T) (*docstore.Store, *pool.Service) {
 		t.Fatal(err)
 	}
 	accounts.Remote = echoRemote{}
+	t.Cleanup(accounts.Flush) // account writes are asynchronous; finish them before the database closes
 	return docstore.New(repo.DB()), accounts
 }
 

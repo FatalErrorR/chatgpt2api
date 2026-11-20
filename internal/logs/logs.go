@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,7 +48,18 @@ type Service struct {
 	db      *gorm.DB
 	now     func() time.Time
 	lastSeq atomic.Int64
+
+	// Daily image counts are added up in memory and written by one goroutine: every successful
+	// image call bumps the same row, and doing that inside each call's transaction made concurrent
+	// calls wait for each other's commit. Reads add what is not written yet, so counts stay exact.
+	countMu   sync.Mutex
+	countCond *sync.Cond
+	pending   map[countKey]int64 // not written yet
+	inWrite   map[countKey]int64 // being written
+	countBusy bool
 }
+
+type countKey struct{ day, column string }
 
 // nextSeq is strictly increasing: nanoseconds, bumped past the previous value when the clock repeats.
 func (s *Service) nextSeq() int64 {
@@ -59,7 +72,11 @@ func (s *Service) nextSeq() int64 {
 	}
 }
 
-func New(db *gorm.DB) *Service { return &Service{db: db, now: time.Now} }
+func New(db *gorm.DB) *Service {
+	s := &Service{db: db, now: time.Now, pending: map[countKey]int64{}}
+	s.countCond = sync.NewCond(&s.countMu)
+	return s
+}
 
 // Migrate creates the log tables.
 func Migrate(db *gorm.DB) error { return db.AutoMigrate(&Entry{}, &DailyCount{}) }
@@ -83,25 +100,97 @@ func (s *Service) Add(kind, summary string, detail map[string]any) error {
 	}
 	now := s.now()
 	entry := Entry{ID: newID(), Seq: s.nextSeq(), Time: now.Format("2006-01-02 15:04:05"), Type: kind, Summary: summary, Detail: string(raw)}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&entry).Error; err != nil {
-			return err
+	if err := s.db.Create(&entry).Error; err != nil {
+		return err
+	}
+	if day, column, count, ok := successImages(kind, detail, now); ok {
+		s.addCount(countKey{day, column}, int64(count))
+	}
+	return nil
+}
+
+func (s *Service) addCount(key countKey, n int64) {
+	s.countMu.Lock()
+	defer s.countMu.Unlock()
+	s.pending[key] += n
+	if !s.countBusy {
+		s.countBusy = true
+		go s.writeCounts()
+	}
+}
+
+// writeCounts writes the pending counts, merged, until there are none. After a failed write the
+// counts stay pending (still included in reads) and the next count or Flush tries again.
+func (s *Service) writeCounts() {
+	for {
+		s.countMu.Lock()
+		if len(s.pending) == 0 {
+			s.countBusy = false
+			s.countCond.Broadcast()
+			s.countMu.Unlock()
+			return
 		}
-		day, column, count, ok := successImages(kind, detail, now)
-		if !ok {
+		s.inWrite, s.pending = s.pending, map[countKey]int64{}
+		batch := s.inWrite
+		s.countMu.Unlock()
+
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			for key, n := range batch {
+				row := DailyCount{Day: key.day}
+				if key.column == "edits" {
+					row.Edits = n
+				} else {
+					row.Generations = n
+				}
+				if err := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "day"}},
+					DoUpdates: clause.Assignments(map[string]any{key.column: gorm.Expr("compat_image_output_counts."+key.column+" + ?", n)}),
+				}).Create(&row).Error; err != nil {
+					return err
+				}
+			}
 			return nil
+		})
+		s.countMu.Lock()
+		s.inWrite = nil
+		if err != nil {
+			log.Printf("image count write failed (kept, retried with the next count): %v", err)
+			for key, n := range batch {
+				s.pending[key] += n
+			}
+			s.countBusy = false
+			s.countCond.Broadcast()
+			s.countMu.Unlock()
+			return
 		}
-		row := DailyCount{Day: day}
-		if column == "edits" {
-			row.Edits = int64(count)
-		} else {
-			row.Generations = int64(count)
+		s.countMu.Unlock()
+	}
+}
+
+// unwritten is what the database does not have yet.
+func (s *Service) unwritten() map[countKey]int64 {
+	s.countMu.Lock()
+	defer s.countMu.Unlock()
+	out := map[countKey]int64{}
+	for _, m := range []map[countKey]int64{s.pending, s.inWrite} {
+		for key, n := range m {
+			out[key] += n
 		}
-		return tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "day"}},
-			DoUpdates: clause.Assignments(map[string]any{column: gorm.Expr("compat_image_output_counts."+column+" + ?", count)}),
-		}).Create(&row).Error
-	})
+	}
+	return out
+}
+
+// Flush waits until every count added so far is written (shutdown, backups, tests).
+func (s *Service) Flush() {
+	s.countMu.Lock()
+	defer s.countMu.Unlock()
+	if !s.countBusy && len(s.pending) > 0 { // left over from a failed write: one more try
+		s.countBusy = true
+		go s.writeCounts()
+	}
+	for s.countBusy {
+		s.countCond.Wait()
+	}
 }
 
 // successImages is log_service._success_images: a successful /v1/images/* call counts its urls,
@@ -183,6 +272,15 @@ func (s *Service) ImageOutputCounts(now time.Time) (map[string]map[string]int64,
 	var rows []DailyCount
 	if err := s.db.Find(&rows).Error; err != nil {
 		return nil, err
+	}
+	for key, n := range s.unwritten() {
+		row := DailyCount{Day: key.day}
+		if key.column == "edits" {
+			row.Edits = n
+		} else {
+			row.Generations = n
+		}
+		rows = append(rows, row)
 	}
 	today := now.In(beijing)
 	day := func(offset int) string { return today.AddDate(0, 0, -offset).Format("2006-01-02") }

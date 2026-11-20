@@ -3,6 +3,7 @@ package logs
 import (
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,7 +22,53 @@ func newService(t *testing.T) *Service {
 	if err := Migrate(repo.DB()); err != nil {
 		t.Fatal(err)
 	}
-	return New(repo.DB())
+	s := New(repo.DB())
+	t.Cleanup(s.Flush) // counts are written asynchronously; before the database closes
+	return s
+}
+
+// Concurrent successful calls all bump the same day's row. They are added up off the call's path;
+// the counts read the same before and after the write, and the table ends up exact.
+func TestConcurrentCountsAreExact(t *testing.T) {
+	s := newService(t)
+	at := time.Date(2026, 11, 20, 12, 0, 0, 0, beijing)
+	s.now = func() time.Time { return at }
+	var wg sync.WaitGroup
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			endpoint := "/v1/images/generations"
+			if i%4 == 0 {
+				endpoint = "/v1/images/edits"
+			}
+			s.Add("call", "", map[string]any{"endpoint": endpoint, "status": "success", "urls": []any{"a", "b"}})
+		}(i)
+	}
+	wg.Wait()
+	want := map[string]int64{"edits": 100, "generations": 300}
+	check := func(when string) {
+		counts, err := s.ImageOutputCounts(at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if counts["edits"]["today"] != want["edits"] || counts["generations"]["today"] != want["generations"] {
+			t.Fatalf("%s: edits %d generations %d", when, counts["edits"]["today"], counts["generations"]["today"])
+		}
+	}
+	check("before the write")
+	s.Flush()
+	check("after the write")
+	var rows []DailyCount
+	s.db.Find(&rows)
+	if len(rows) != 1 || rows[0].Edits != 100 || rows[0].Generations != 300 {
+		t.Fatalf("table %+v", rows)
+	}
+	var entries int64
+	s.db.Model(&Entry{}).Count(&entries)
+	if entries != 200 {
+		t.Fatalf("%d log entries", entries)
+	}
 }
 
 func call(s *Service, at time.Time, endpoint string, urls []any, status string) {
@@ -88,5 +135,29 @@ func TestDeleteByID(t *testing.T) {
 	}
 	if items, _ := s.List("", "", "", 200); len(items) != 1 || items[0]["summary"] != "a" {
 		t.Fatalf("left %v", items)
+	}
+}
+
+// A failed count write loses nothing: the counts stay pending and the next Flush writes them.
+func TestCountsSurviveAFailedWrite(t *testing.T) {
+	s := newService(t)
+	at := time.Date(2026, 11, 20, 12, 0, 0, 0, beijing)
+	s.now = func() time.Time { return at }
+	if err := s.db.Exec("ALTER TABLE compat_image_output_counts RENAME TO counts_away").Error; err != nil {
+		t.Fatal(err)
+	}
+	s.Add("call", "", map[string]any{"endpoint": "/v1/images/generations", "status": "success", "urls": []any{"a", "b", "c"}})
+	s.Flush() // the write fails
+	if err := s.db.Exec("ALTER TABLE counts_away RENAME TO compat_image_output_counts").Error; err != nil {
+		t.Fatal(err)
+	}
+	if counts, _ := s.ImageOutputCounts(at); counts["generations"]["today"] != 3 {
+		t.Fatalf("pending count not read: %v", counts)
+	}
+	s.Flush() // written now
+	var rows []DailyCount
+	s.db.Find(&rows)
+	if len(rows) != 1 || rows[0].Generations != 3 {
+		t.Fatalf("table %+v", rows)
 	}
 }

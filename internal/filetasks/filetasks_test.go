@@ -43,8 +43,11 @@ func setup(t *testing.T, accounts []pool.Account) (*Service, *gorm.DB) {
 		t.Fatal(err)
 	}
 	accountPool.Remote = keepRemote{}
+	t.Cleanup(accountPool.Flush) // account writes are asynchronous; finish them before the database closes
 	accountPool.AddAccountItems(accounts)
-	s, err := New(db, accountPool, logs.New(db), filepath.Join(dir, "files"))
+	callLogs := logs.New(db)
+	t.Cleanup(callLogs.Flush) // counts are written asynchronously; before the database closes
+	s, err := New(db, accountPool, callLogs, filepath.Join(dir, "files"))
 	if err != nil {
 		t.Fatal(err)
 	}
