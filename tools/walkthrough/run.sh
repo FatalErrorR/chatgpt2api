@@ -1,11 +1,15 @@
 #!/bin/bash
 # usage: run.sh — production-shaped data, Python (:8400) and Go (:3400) on the same data, then walk
 # every admin page on both and compare (API calls, failures, screenshots). Needs tools/contract/setup.sh
-# done once, and the frontend built in ../chatgpt2api/web/out (npm run build).
+# done once, and the frontend built in ../chatgpt2api/web/out (npm run build). Exits non-zero if any
+# flow step fails, a page throws, or the two sides differ (compare.py); every part still runs first.
 set -e
 G=$(cd "$(dirname "$0")/../.." && pwd); W=/tmp/c2a-walk; PY=${PY_DIR:-/tmp/c2a-pyfake}; WEB=${WEB_OUT:-$G/../chatgpt2api/web/out}
 CLEAN="env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy -u NO_PROXY -u no_proxy"
-lsof -ti tcp:8400,3400 -sTCP:LISTEN | xargs kill 2>/dev/null || true; sleep 1
+TUNNEL_PORT=${TUNNEL_PORT:-18200}; export TUNNEL_PORT
+lsof -ti tcp:8400,3400,$TUNNEL_PORT -sTCP:LISTEN | xargs kill 2>/dev/null || true; sleep 1
+$CLEAN python3 $G/tools/walkthrough/tunnel.py $TUNNEL_PORT > /dev/null 2>&1 < /dev/null &
+TUNNEL_PID=$!; trap 'kill $TUNNEL_PID 2>/dev/null' EXIT
 rm -rf $W && mkdir -p $W/go && python3 $G/tools/walkthrough/mockdata.py $W/data
 python3 -c "
 import json;c=json.load(open('$PY/config.json'));c['image_retention_days']=30
@@ -23,10 +27,13 @@ $W/migrate -data $W/data -database-url "$DB" > $W/migrate.log
 for p in 8400 3400; do for i in $(seq 1 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$p/version)" = 200 ] && break; sleep 0.5; done; done
 export CHROME_PATH=${CHROME_PATH:-$(ls -d ~/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell 2>/dev/null | head -1)}
 export NODE_PATH=${NODE_PATH:-$(ls -d ~/.npm/_npx/*/node_modules/playwright/.. 2>/dev/null | head -1)}
-node $G/tools/walkthrough/walk.js http://127.0.0.1:8400 "$K" $W/py-shots
-node $G/tools/walkthrough/walk.js http://127.0.0.1:3400 "$K" $W/go-shots
-$PY/.venv/bin/python $G/tools/walkthrough/compare.py $W/py-shots $W/go-shots
-# flows change data (batch add, delete by date): run them last, on both
-node $G/tools/walkthrough/flows.js http://127.0.0.1:8400 "$K" $W/py-flows
-node $G/tools/walkthrough/flows.js http://127.0.0.1:3400 "$K" $W/go-flows
-$PY/.venv/bin/python $G/tools/walkthrough/compare.py $W/py-flows $W/go-flows flows
+status=0
+node $G/tools/walkthrough/walk.js http://127.0.0.1:8400 "$K" $W/py-shots || status=1
+node $G/tools/walkthrough/walk.js http://127.0.0.1:3400 "$K" $W/go-shots || status=1
+$PY/.venv/bin/python $G/tools/walkthrough/compare.py $W/py-shots $W/go-shots || status=1
+# flows change data (reassign, retire, batch add, delete by date, settings): run them last, on both
+node $G/tools/walkthrough/flows.js http://127.0.0.1:8400 "$K" $W/py-flows || status=1
+node $G/tools/walkthrough/flows.js http://127.0.0.1:3400 "$K" $W/go-flows || status=1
+$PY/.venv/bin/python $G/tools/walkthrough/compare.py $W/py-flows $W/go-flows flows || status=1
+echo "walkthrough exit $status"
+exit $status
