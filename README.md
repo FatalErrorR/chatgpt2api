@@ -16,43 +16,6 @@
 > - 本项目基于对 ChatGPT 官网相关能力的逆向研究实现，存在账号受限、临时封禁或永久封禁的风险。请勿使用你自己的重要账号、常用账号或高价值账号进行测试。
 
 
-## 赞助商
-
-<table>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://kunrouai.com/?utm_source=chatgpt2api"><img src="assets/kunrouai.svg" width="163" alt="坤肉AI"></a>
-    </td>
-    <td>
-      <a href="https://kunrouai.com/?utm_source=chatgpt2api">坤肉AI</a> 是一站式 AI 视觉创作平台，集 AI 生图、视频生成、多人协作画布及 Agent/MCP 连接于一体，适合个人创作与团队协作，同时面向企业提供源码出售及私有化部署服务，欢迎企业咨询合作！另有 <a href="https://api.kunrouai.com/?utm_source=chatgpt2api">API 开放平台</a>，提供丰富的 AI 模型 API 接口，支持快速接入与集成，欢迎开发者及企业对接合作！
-    </td>
-  </tr>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://88api.ai/sign-up?aff=py0a"><img src="assets/88api.png" width="163" alt="88API"></a>
-    </td>
-    <td>
-      <a href="https://88api.ai/sign-up?aff=py0a">88API</a> 是一家由香港企业运营、主要面向开发者、创作者与 AI 应用用户的一站式多模型 API 平台，通过统一接口接入文本、图片、语音和视频模型，覆盖 AI 编程、智能翻译、内容创作、配音、图像生成、视频生成等常见工作流。支持在常用客户端中完成 Provider 添加并切换，支持国际主流付款方式，可提供发票，提供企业级稳定服务。通过 <a href="https://88api.ai/sign-up?aff=py0a">此链接注册</a> 可以获取专属赠送额度！
-    </td>
-  </tr>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://www.ipwo.net/?ref=githubbasketikunchatgpt2api"><img src="assets/ipwo.png" width="163" alt="IPWO"></a>
-    </td>
-    <td>
-      <a href="https://www.ipwo.net/?ref=githubbasketikunchatgpt2api">IPWO</a> 住宅代理提供动态、静态及不限量住宅代理，覆盖 195+ 个国家和地区，支持 HTTP(S) 与 SOCKS5 协议。<br>对于使用 ChatGPT2API 进行 AI 图片生成、图片编辑和 API 集成的开发者，IPWO 支持免费测试，支持地区选择与网络连接配置，满足多种开发和测试需求。优惠折扣码：<b>0200</b>。
-    </td>
-  </tr>
-  <tr>
-    <td width="190" align="center">
-      <a href="https://www.atlascloud.ai/zh?utm_source=github&utm_medium=link&utm_campaign=chatgpt2api"><img src="assets/atlascloud.svg" width="163" alt="Atlas Cloud"></a>
-    </td>
-    <td>
-      <a href="https://www.atlascloud.ai/zh?utm_source=github&utm_medium=link&utm_campaign=chatgpt2api">Atlas Cloud</a> is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities. Check out <a href="https://www.atlascloud.ai/console/coding-plan">Atlas Cloud's new coding plan promotion</a> for more budget-friendly API access.
-    </td>
-  </tr>
-</table>
-
 ## 快速开始
 
 ### Docker 运行
@@ -385,16 +348,3 @@ curl http://localhost:8000/v1/audio/transcriptions \
 ## 社区支持
 
 学 AI , 上 L 站：[LinuxDO](https://linux.do)
-
-## Contributors
-
-感谢所有为本项目做出贡献的开发者：
-
-<a href="https://github.com/basketikun/chatgpt2api/graphs/contributors">
-  <img alt="Contributors" src="https://contrib.rocks/image?repo=basketikun/chatgpt2api" />
-</a>
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=basketikun/chatgpt2api&type=date&legend=top-left)](https://www.star-history.com/?repos=basketikun%2Fchatgpt2api&type=date&legend=top-left)
-
