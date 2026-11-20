@@ -9,7 +9,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /chatgpt2api .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /chatgpt2api . \
+    && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /chatgpt2api-migrate ./cmd/migrate
 
 
 FROM alpine:3.22 AS app
@@ -18,7 +19,7 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
-COPY --from=build /chatgpt2api ./
+COPY --from=build /chatgpt2api /chatgpt2api-migrate ./
 COPY web ./web
 COPY VERSION ./
 COPY config.example.yaml ./config.yaml

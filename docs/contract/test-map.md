@@ -196,3 +196,8 @@ Python 没有对应的单元测试。Go 新增：`TestCPAPoolsAreSanitizedPersis
 Python 没有备份的单元测试。Go 新增：`TestSigV4MatchesPython`（黄金值取自 main 的 `_aws_v4_headers`）、
 `TestEncryptionIsOpenSSLCompatible`（与 openssl 命令行双向互解，命令同 backup_service.py）、`TestRunUploadsDescribesAndRotates`、
 `TestEncryptedBackupNeedsAPassphraseAndDecrypts`、`TestValidationAndSchedule`（假 R2）。
+
+## 数据迁移（`internal/migrate`）
+
+`TestMigrationIsFaithfulIdempotentAndReadOnly`（两次运行对账全过、源文件不变、重复 token、旧日志 id、窗口与顺序）、
+`TestDailyCountsComeFromTheFileOrAreRebuiltFromAllLogs`、`TestRerunFollowsTheSource`、`TestMissingFilesAreReportedNotFatal`。

@@ -104,7 +104,18 @@
   - [x] 本机 PostgreSQL 16（docker `c2a-pg`，127.0.0.1:55432，用户/密码/库 c2a），上游 Go 版在其上建表启动正常
   - [x] 契约对比 `tools/contract`：60 个场景，Python 版自身两次录制 60/60 一致。**起点：上游 Go 原样 9/60 一致**
   - [x] PostgreSQL：`tools/contract/run-go.sh` 每次新建 `c2a_contract` 库，Go 版在 PostgreSQL 上跑契约
-- [ ] 1. 数据层与迁移脚本
+- [x] 1. 数据层与迁移脚本
+  - 命令 `cmd/migrate`（镜像里是 `/app/chatgpt2api-migrate`）：`chatgpt2api-migrate -data <Python 的 data 目录> -database-url <PostgreSQL>`
+  - 账号、API key、代理清单、图片索引与标签、生图任务、可编辑文件任务、CPA / Sub2API 配置、备份状态：整表镜像（一个事务内替换），重跑结果相同；
+    重复 token 与 Python 一致（保留首次出现的位置、取最后一条的值）
+  - 日志：只迁近 30 天（`-log-days`），按 id 覆盖；没有 id 的旧行用 Python 列表页显示的同一个 id；保持文件顺序
+  - 每日出图计数：取 `image_output_counts.json`，没有该文件时与 Python 一样从全部日志重新统计
+  - `config.json`、`data/images`、`data/image_thumbnails`、`data/files` 不复制，Go 版原地读取
+  - 自带对账（D1/D2）：各表行数、每个账号逐字段与源文件一致（含顺序）、代理等文档内容一致；不一致时退出码 1
+  - 演练（本机数据：21 个账号、28 张图片、1928 行近 30 天日志）：对账全部通过；重跑两次结果相同；源文件校验和不变（D3、D4）；
+    在迁移后的库上启动 Go 服务，与 Python 自己的函数对同一份数据的结果对比：日志列表（最新 200 条及顺序）、出图计数、图片列表顺序、代理一致；
+    调用日志条数和图片数的差别分别来自「只迁 30 天日志」和启动时按 15 天保留期的清理，属预期
+  - 生产数据副本上的演练放在第 12 步（测试实例）
 - [x] 2. 鉴权与设置
   - 路由结构：`app.Engine` 先挂兼容层（`internal/compat`，Python 版接口），没匹配到的请求转给 `app.Upstream`（上游 v2 的全部路由），迁移期间服务始终可用
   - `internal/settings`：直接读写 Python 格式的 `config.json`；用 Python `ConfigStore` 生成的 656 组向量逐一比对（`tools/vectors/settings_vectors.py`）
