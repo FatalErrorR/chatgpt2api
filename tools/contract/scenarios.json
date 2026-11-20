@@ -52,6 +52,14 @@
   {"name": "061-logs-image-counts", "method": "GET", "path": "/api/logs/image-counts", "ignore": []},
   {"name": "062-image-tasks", "method": "GET", "path": "/api/image-tasks"},
 
+  {"name": "063-image-task-submit", "method": "POST", "path": "/api/image-tasks/generations", "body": {"client_task_id": "contract-task-1", "prompt": "a red apple", "size": "1024x1024"}, "known_diff": "Python 在后台线程启动后才生成返回值（共享 dict，通常已是 running、没有 elapsed_secs）；Go 返回提交时的 queued 快照，带 elapsed_secs=0"},
+  {"name": "064-image-task-missing-field", "method": "POST", "path": "/api/image-tasks/generations", "body": {"prompt": "a red apple"}},
+  {"name": "065-psd-task-submit", "method": "POST", "path": "/v1/psd/generations", "body": {"client_task_id": "contract-psd-1", "prompt": "poster"}},
+  {"name": "066-ppt-bad-images", "method": "POST", "path": "/v1/ppt/generations", "body": {"base64_images": "x"}},
+  {"name": "067-editable-tasks-missing", "method": "GET", "path": "/v1/editable-file-tasks?ids=nope"},
+  {"name": "068-file-missing", "method": "GET", "path": "/files/ppt/nope.pptx", "auth": "none"},
+  {"name": "069-search-empty-prompt", "method": "POST", "path": "/v1/search", "body": {"prompt": ""}},
+
   {"name": "070-images", "method": "GET", "path": "/api/images?page=1&page_size=48"},
   {"name": "071-images-paths", "method": "GET", "path": "/api/images/paths", "save": {"first_image": "paths.0"}},
   {"name": "072-images-storage", "method": "GET", "path": "/api/images/storage"},

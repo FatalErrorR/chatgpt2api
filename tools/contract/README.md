@@ -2,7 +2,7 @@
 
 同一组场景（`scenarios.json`）分别打到 Python 版和 Go 版，比较状态码和 JSON 结构。
 
-准备：
+准备（重启后 /tmp 会清空，跑一次 `tools/contract/setup.sh` 即可全部重建）：
 - 假上游：`go run ./tools/fakeupstream -addr 127.0.0.1:18100 -delay 2s`
 - Python 版：一个 `main` 的 worktree 放在 `$PY_DIR`（默认 `/tmp/c2a-pyfake`），里面有 `config.json` 和 `.venv`
 - PostgreSQL：docker 容器 `c2a-pg`（127.0.0.1:55432，用户、密码、库都是 c2a）

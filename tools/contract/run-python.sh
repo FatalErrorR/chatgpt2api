@@ -8,7 +8,7 @@ lsof -ti tcp:8200 -sTCP:LISTEN | xargs kill 2>/dev/null || true
 sleep 1
 rm -rf $W/data && mkdir -p $W/data
 # 整个子 shell 重定向到日志，后台服务就不会占住调用方的管道
-(cd $W && exec env CHATGPT2API_UPSTREAM_BASE_URL=http://127.0.0.1:18100 .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8200) > /tmp/c2a-pyfake.log 2>&1 < /dev/null &
+(cd $W && exec env TIKTOKEN_CACHE_DIR=${TIKTOKEN_CACHE_DIR:-$HOME/.cache/c2a-tiktoken} CHATGPT2API_UPSTREAM_BASE_URL=http://127.0.0.1:18100 .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8200) > /tmp/c2a-pyfake.log 2>&1 < /dev/null &
 for i in $(seq 1 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8200/health)" = 200 ] && break; sleep 0.5; done
 K=$(python3 -c "import json;print(json.load(open('$W/config.json'))['auth-key'])")
 rm -rf $OUT

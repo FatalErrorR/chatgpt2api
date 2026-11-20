@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/basketikun/chatgpt2api/internal/filetasks"
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
 	"github.com/basketikun/chatgpt2api/internal/imagestore"
 	"github.com/basketikun/chatgpt2api/internal/imagetasks"
@@ -30,6 +31,7 @@ type Deps struct {
 	ImageStore  *imagestore.Service
 	Text        *textapi.Deps
 	ImageTasks  *imagetasks.Service
+	FileTasks   *filetasks.Service
 	DataDir     string
 	Version     string
 	DatabaseURL string
@@ -81,6 +83,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerImageManagement(engine, admin, d)
 	registerText(engine, d)
 	registerImageTasks(engine, d)
+	registerFileTasks(engine, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

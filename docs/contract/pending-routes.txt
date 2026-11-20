@@ -7,7 +7,3 @@ POST /api/backups/delete
 GET /api/backups/detail
 GET /api/backups/download
 POST /api/backups/run
-GET /files/{file_path:path}
-GET /v1/editable-file-tasks
-POST /v1/ppt/generations
-POST /v1/psd/generations

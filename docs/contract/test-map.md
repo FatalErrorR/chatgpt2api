@@ -167,3 +167,10 @@ model 方式直接走 Lanczos（等同 Python 的失败回退）。
 | test_image_task_service.py（5 个） | `TestDuplicateSubmitUsesExistingTask`、`TestDifferentOwnerCannotQueryTask`、`TestSuccessTaskPersistsToNewServiceInstance`、`TestStartupMarksUnfinishedTasksAsError`；GIF 参数在 compat 层组装请求，契约与端到端覆盖 |
 | test_image_tasks_api.py、test_generations_reference_images.py | 契约 062 及冒烟（生成任务、缺失 id）；带参考图转 edits 走与 `/v1/images/generations` 相同的 `hasJSONImageReference` |
 | （新增） | `TestEmptyResultFailsAndTimeoutCanBeResumed`、`TestFinishedTasksPastRetentionAreDropped` |
+
+## 可编辑文件任务（`internal/filetasks`、`chatgptweb/editable.go`）
+
+Python 只有连真实服务的手动脚本（test_gpt_ppt.py、test_gpt_psd.py），没有单元测试。Go 新增：
+`TestPPTTaskUsesLeastRecentlyUsedPaidAccountAndServesFiles`、`TestPSDWithoutImagesAndNoPaidAccountFail`、
+`TestRestartFailsUnfinishedTasksAndOwnersAreSeparate`、`TestEditableArtifactsPickTheNewestPrimaryAndZip`、`TestFileIDsSkipTheFileServiceScheme`；
+真实导出放在第 12 步的测试实例里验证。

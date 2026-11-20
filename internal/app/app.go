@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/compat"
 	"github.com/basketikun/chatgpt2api/internal/config"
 	"github.com/basketikun/chatgpt2api/internal/docstore"
+	"github.com/basketikun/chatgpt2api/internal/filetasks"
 	"github.com/basketikun/chatgpt2api/internal/handler"
 	"github.com/basketikun/chatgpt2api/internal/imagefit"
 	"github.com/basketikun/chatgpt2api/internal/imagegen"
@@ -94,7 +96,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	scheduler := service.NewScheduler(accountService, imageService, taskService, logService, cfg)
 
 	db := repo.DB()
-	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate, docstore.Migrate, imagestore.Migrate, imagetasks.Migrate} {
+	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate, docstore.Migrate, imagestore.Migrate, imagetasks.Migrate, filetasks.Migrate} {
 		if err := migrate(db); err != nil {
 			return nil, err
 		}
@@ -223,6 +225,18 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		data, _ := formatted["data"].([]map[string]any)
 		return data, nil
 	}
+	fileTasks, err := filetasks.New(db, accountPool, compatLogs, filepath.Join(dataDir, "files"))
+	if err != nil {
+		return nil, err
+	}
+	fileTasks.Export = func(ctx context.Context, token, kind string, refs []string, prompt, dir string) (string, string, string, error) {
+		backend, err := images.NewBackend(token, accountPool.GetAccount(token))
+		if err != nil {
+			return "", "", "", err
+		}
+		result, err := backend.(*chatgptweb.Backend).ExportEditable(ctx, kind, refs, prompt, dir)
+		return result.ConversationID, result.PrimaryPath, result.ZipPath, err
+	}
 	textDeps := &textapi.Deps{Settings: store, Pool: accountPool, Generator: images, Cache: textapi.NewCache(store),
 		Images: textapi.Images{Proxy: store.Proxy},
 		NewBackend: func(token string) (textapi.Backend, error) {
@@ -242,7 +256,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
-		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
+		Images: images, ImageStore: imageStore, Text: textDeps, ImageTasks: imageTasks, FileTasks: fileTasks, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

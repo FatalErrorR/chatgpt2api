@@ -75,6 +75,8 @@
 - 文本接口里的生图（chat 的 image 模型、Responses 的 image_generation 工具）：Go 版等全部图片完成后一次性输出流式分片，
   与 `/v1/images/*` 的流式一致；Python 边生成边推进度。
 - 续轮询：Python 用不带 token 的客户端去轮询，必然失败；Go 版记下出错的账号邮箱，用同一个账号续轮询。
+- 提交生图任务的返回值：Python 在后台线程启动后才序列化共享的任务 dict，多数时候返回 running；Go 返回提交时的 queued 快照。
+- 未知路径的 404：Python 是 FastAPI 的 `{"detail":"Not Found"}`，Go 目前走上游路由的纯文本 404，第 11 步接前端静态文件时一并处理。
 - 保存图片前的过期清理：Python 每保存一张都遍历一次图片目录；Go 版最多每分钟一次（结果相同，另有每 30 分钟的定时清理）。
 
 ## 与上游 v2 的取舍
@@ -146,11 +148,15 @@
   - `internal/chatgptweb/text.go`：文本对话、模型列表、搜索的请求体；上游 Go 客户端加了匿名线路（`/backend-anon/*`，不带 Authorization）
   - 流式：拿到第一个分片才开始写 SSE，之前的错误按普通错误返回（同 `LoggedCall.run`），之后逐片 flush
   - 契约：**57/60 一致**，2 个已知差异；只剩 062（第 9 步）
-- [ ] 9. 任务类
+- [x] 9. 任务类
   - [x] 生图任务 `internal/imagetasks`（表 `compat_image_tasks`）：提交去重、按 key 隔离、重启后未完成的标为失败、按保留天数清理、进度、调用日志、续轮询；
     `/api/image-tasks`、`/api/image-tasks/generations`（带参考图转 edits）、`/api/image-tasks/edits`、`/api/image-tasks/{id}/resume-poll`
   - 契约：**60/60 一致**（含 2 个已知差异）
-  - [ ] PPT/PSD 可编辑文件任务、`/files/*`
+  - [x] PPT/PSD 可编辑文件任务 `internal/filetasks`（表 `compat_editable_file_tasks`，文件在 `data/files/<kind>/<id>/`）与导出流程
+    `chatgptweb/editable.go`（上传、prepare、thinking 对话、轮询产物、四种下载地址依次尝试）；`/v1/ppt/generations`、`/v1/psd/generations`、
+    `/v1/editable-file-tasks`、`/files/*`
+  - 契约新增 063–069（任务提交、缺字段、PSD/PPT、文件 404、搜索空 prompt），**67/67 一致**，3 个已知差异
+  - 测试环境：`tools/contract/setup.sh` 一键重建（PostgreSQL、假上游、Python 参照实例、tiktoken 缓存）
 - [ ] 10. 账号来源与备份
 - [ ] 11. 前端适配与走查
 - [ ] 12. 完整测试
