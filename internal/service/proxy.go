@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -188,7 +189,13 @@ func (s *ProxyService) Test(ctx context.Context, proxyURL string) map[string]any
 	if proxyURL == "" {
 		proxyURL, proxySource = s.proxy("", false, true)
 	}
-	client, err := s.TLSClient(proxyURL, false)
+	// the client ignores ctx while it connects through the proxy, so a deadline on ctx becomes the
+	// client's own timeout (otherwise a proxy that never answers is waited on for 300 s)
+	var timeout []int
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = append(timeout, max(1, int(math.Ceil(time.Until(deadline).Seconds()))))
+	}
+	client, err := s.TLSClient(proxyURL, false, timeout...)
 	if err != nil {
 		return map[string]any{"ok": false, "status": 0, "latency_ms": time.Since(started).Milliseconds(), "error": redactProxyCredentials(err.Error()), "proxy_source": proxySource, "has_proxy": proxyURL != ""}
 	}
