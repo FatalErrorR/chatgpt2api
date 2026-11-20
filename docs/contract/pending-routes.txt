@@ -15,4 +15,3 @@ GET /files/{file_path:path}
 GET /v1/editable-file-tasks
 POST /v1/ppt/generations
 POST /v1/psd/generations
-POST /v1/search

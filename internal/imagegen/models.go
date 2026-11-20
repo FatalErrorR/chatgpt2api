@@ -78,3 +78,18 @@ func ImageModels() []string {
 	sort.Strings(out)
 	return out
 }
+
+// WebImageModels is WEB_IMAGE_MODELS, sorted.
+func WebImageModels() []string { return sortedSet(webImageModels) }
+
+// CodexImageModels is CODEX_IMAGE_MODELS, sorted.
+func CodexImageModels() []string { return sortedSet(codexImageModels) }
+
+func sortedSet(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for item := range set {
+		out = append(out, item)
+	}
+	sort.Strings(out)
+	return out
+}

@@ -375,11 +375,14 @@ func (b *Backend) StreamPicture(ctx context.Context, prompt, model string, image
 }
 
 // capStream is _iter_sse_payloads_capped: data payloads, and the connection is closed once the
-// hard cap passes so a hung stream cannot block forever.
+// hard cap passes so a hung stream cannot block forever. capSecs <= 0 means no cap (iter_sse_payloads).
 func (b *Backend) capStream(response *http.Response, capSecs float64) (<-chan string, func() error, error) {
 	out := make(chan string, 16)
 	var streamErr error
 	done := make(chan struct{})
+	if capSecs <= 0 {
+		capSecs = 100 * 365 * 24 * 3600
+	}
 	deadline := time.Now().Add(time.Duration(capSecs * float64(time.Second)))
 	var once sync.Once
 	closeBody := func() { once.Do(func() { response.Body.Close() }) }

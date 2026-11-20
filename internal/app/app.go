@@ -23,6 +23,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/repository"
 	"github.com/basketikun/chatgpt2api/internal/service"
 	"github.com/basketikun/chatgpt2api/internal/settings"
+	"github.com/basketikun/chatgpt2api/internal/textapi"
 	"github.com/basketikun/chatgpt2api/internal/upstream"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -166,11 +167,26 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		}
 		return status, reason
 	}
+	textDeps := &textapi.Deps{Settings: store, Pool: accountPool, Generator: images, Cache: textapi.NewCache(store),
+		Images: textapi.Images{Proxy: store.Proxy},
+		NewBackend: func(token string) (textapi.Backend, error) {
+			account := pool.Account{}
+			if token != "" {
+				account = accountPool.GetAccount(token)
+			}
+			proxy, _ := account["proxy"].(string)
+			api := upstream.NewOpenAIBackendAPI(token, strings.TrimSpace(proxy), proxyService, cfg)
+			if accountID, _ := account["account_id"].(string); accountID != "" {
+				api.WithAccountID(accountID)
+			}
+			return &chatgptweb.Backend{API: api, Settings: store, Health: proxyList}, nil
+		}}
+	textDeps.Catalog = &textapi.Catalog{Deps: textDeps}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
 		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
-		Images: images, ImageStore: imageStore, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
+		Images: images, ImageStore: imageStore, Text: textDeps, Logs: compatLogs, DataDir: dataDir, ImageProbe: imageProbe,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })

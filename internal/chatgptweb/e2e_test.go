@@ -270,3 +270,26 @@ func TestAspectRatioIsSent(t *testing.T) {
 		t.Fatal("auto has no ratio")
 	}
 }
+
+// The text conversation goes through the same transport (sentinel, headers) as images.
+func TestTextConversationThroughTheFakeUpstream(t *testing.T) {
+	e := newEnv(t, "fake-ok-1")
+	cfg := &config.Config{}
+	backend := &chatgptweb.Backend{API: upstream.NewOpenAIBackendAPI("fake-ok-1", "", service.NewProxyService(cfg), cfg), Settings: settings.NewForTest(nil, "")}
+	payloads, wait, err := backend.StreamText(context.Background(), []map[string]any{{"role": "user", "content": "hi"}}, "auto", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := ""
+	imagegen.IterConversationPayloads(payloads, "", nil, func(event imagegen.Event) {
+		if event.Type == "conversation.delta" {
+			text += event.Delta
+		}
+	})
+	if err := wait(); err != nil || text != "Hello from the fake upstream." {
+		t.Fatalf("text %q err %v", text, err)
+	}
+	if e.fake.Count("POST /backend-api/conversation") != 1 || e.fake.Count("POST /backend-api/sentinel/chat-requirements/finalize") == 0 {
+		t.Fatal("conversation or sentinel not called")
+	}
+}

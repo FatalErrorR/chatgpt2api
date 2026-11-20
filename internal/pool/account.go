@@ -298,3 +298,6 @@ type Filter struct {
 func (f Filter) matches(account Account) bool {
 	return matchesPlanType(account, f.PlanType) && matchesAnyPlanType(account, f.PlanTypes) && matchesSourceType(account, f.SourceType)
 }
+
+// NormalizeSourceType is _normalize_source_type.
+func NormalizeSourceType(value any) string { return normalizeSourceType(value) }

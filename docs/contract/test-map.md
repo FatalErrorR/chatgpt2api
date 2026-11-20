@@ -146,3 +146,16 @@ model 方式直接走 Lanczos（等同 Python 的失败回退）。
 | test_image_retention.py（3 个） | `TestKeepsTheLastNCalendarDaysIncludingToday`、`TestImagesOutsideDateFoldersUseTheirModifiedDay`、`TestOneDayKeepsOnlyToday` |
 | test_gif_output.py test_saved_name_uses_gif_suffix | `TestSavedGIFUsesGIFSuffix` |
 | （新增） | `TestDeleteAllMatchingUsesTheDateRange`、`TestWebDAVFailureFailsTheSave`、`TestSyncNeedsWebDAV`、`TestDeleteTagCountsImages`、`TestThumbnailFitsIn320AndIsReused`、`TestThumbnailFitMatchesPIL`、`TestZipRenamesDuplicatesAndNeedsOneFile` |
+
+## 文本接口（`internal/textapi`）
+
+| Python | Go |
+| --- | --- |
+| test_chat_completion_cache.py 缓存类（7 个） | `TestRepeatedNonStreamTextCompletionUsesCache`、`TestCacheKeyDistinguishesThinkingEffortInputs`、`TestReasoningEffortReachesConversation`（chat 与 responses 两个）、`TestRepeatedStreamTextCompletionReplaysCachedChunks`、`TestAdjacentDuplicateMessagesAreRemovedBeforeUpstreamCall`、`TestUsageIncludesCachedAndReasoningTokens`（两个）、`TestRepeatedResponsesTextRequestUsesCache` |
+| 输出清洗与流解析（8 个） | `TestOutputSanitizer`（4 个合并）、`TestStreamSanitizerDoesNotEmitPartialAnnotation`、`TestStreamIgnoresInternalHiddenAndNonFinalMessages`（3 个合并） |
+| 工具与联网搜索（8 个） | `TestResponsesToolsAddHonestNoToolGuard`、`TestResponsesWebSearchToolReturnsSearchOutput`（含版本化工具）、`TestResponsesWebSearchToolStreamsSearchEvents`、`TestChatCompletionsWebSearchTriggers`（工具/选项/搜索模型）、`TestSearchLikeModelDoesNotTriggerSearch` |
+| 图片输入（4 个） | `TestChatCompletionsAcceptsRemoteImageURL`、`TestResponsesTextRequestPreservesInputImage`、`TestImageExtractorSupportsExtraImageObjectShapes`；远程 input_image 走同一函数 |
+| test_text_model_routing.py（9 个） | `TestExplicitModelSelectsOnlyAdvertisingAccountType`、`TestAutoModelKeepsUnfilteredRotation`、`TestAnonymousModelUsesAnonymousBackend`、`TestModelWithoutEligibleAccountFailsClosed`、`TestEndpointsPassTheRequestedModel`（4 个合并）、`TestInvalidTokenRetryKeepsRequestedModelFilter` |
+| test_model_catalog_service.py（5 个） | `TestCatalogUnionsAnonymousAndEachActiveAccountType`、`TestCatalogIsCachedUntilTTLExpires`、`TestConcurrentReadersShareOneCatalogRefresh`、`TestFailedRefreshKeepsLastModelsForThatType`、`TestRemovedAccountTypeDropsItsCapabilities` |
+| test_v1_messages.py、test_v1_responses.py 文本部分 | `TestMessageResponseAndStream`、`TestMessageToolCallsBecomeToolUse`、`TestTextResponseStreamEvents`；生图部分由 `/v1/images` 的端到端测试覆盖同一生成器 |
+| （新增） | `TestChatAndResponsesNeverShareACacheEntry`、`TestSourcesBecomeCitationsWithCodePointOffsets`、`chatgptweb.TestTextConversationThroughTheFakeUpstream` |

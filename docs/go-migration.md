@@ -68,6 +68,12 @@
   仍按原判断，避免一次请求等五遍 600 秒。测试：`TestResetAfterProgressSwitchesAccount`、
   `TestPlainTimeoutAfterProgressStillDoesNotSwitch`、`TestDroppedStreamAfterProgressSwitchesAccount`。
 
+- 文本请求的全局系统提示词：Python 在 `text_chat_parts` 和 `conversation_events` 各调一次 `normalize_messages`，
+  设置了 `global_system_prompt` 时上游会收到两遍；Go 版只加一次。
+- 文本缓存：Python 的 chat 非流式与 Responses 在请求体刚好对上时共用一个缓存键（一个存 JSON、一个当流式分片读，会报错）；
+  Go 版把两类条目分开存。工具 schema 写进提示词时 Go 的 JSON 键按字母序（Python 按传入顺序）。
+- 文本接口里的生图（chat 的 image 模型、Responses 的 image_generation 工具）：Go 版等全部图片完成后一次性输出流式分片，
+  与 `/v1/images/*` 的流式一致；Python 边生成边推进度。
 - 保存图片前的过期清理：Python 每保存一张都遍历一次图片目录；Go 版最多每分钟一次（结果相同，另有每 30 分钟的定时清理）。
 
 ## 与上游 v2 的取舍
@@ -132,7 +138,13 @@
     `/api/image-storage/test`、`/api/image-storage/sync`
   - 顺带补上账号巡检 `pool.Watch`（之前没迁，上游定时器刷的是另一张表）
   - 契约：**53/60 一致**，2 个已知差异；剩下 5 个属于第 8、9 步（054–056 文本接口，060 依赖文本调用日志，062 生图任务）
-- [ ] 8. 文本接口
+- [x] 8. 文本接口
+  - `internal/textapi`：消息规整（含远程图片、data URL、base64、Anthropic source）、token 计数、无效 token 换号重试、
+    回答缓存与在途去重、联网搜索工具、模型目录（按账号类型路由，匿名线路兜底）、`/v1/chat/completions`（文本/生图/搜索）、
+    `/v1/responses`（文本/生图/搜索）、`/v1/messages`（XML 工具调用）、`/v1/search`
+  - `internal/chatgptweb/text.go`：文本对话、模型列表、搜索的请求体；上游 Go 客户端加了匿名线路（`/backend-anon/*`，不带 Authorization）
+  - 流式：拿到第一个分片才开始写 SSE，之前的错误按普通错误返回（同 `LoggedCall.run`），之后逐片 flush
+  - 契约：**57/60 一致**，2 个已知差异；只剩 062（第 9 步）
 - [ ] 9. 任务类
 - [ ] 10. 账号来源与备份
 - [ ] 11. 前端适配与走查

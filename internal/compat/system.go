@@ -10,6 +10,7 @@ import (
 	"github.com/basketikun/chatgpt2api/internal/pool"
 	"github.com/basketikun/chatgpt2api/internal/proxyops"
 	"github.com/basketikun/chatgpt2api/internal/settings"
+	"github.com/basketikun/chatgpt2api/internal/textapi"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -26,6 +27,7 @@ type Deps struct {
 	Images      *imagegen.Generator
 	Logs        *logs.Service
 	ImageStore  *imagestore.Service
+	Text        *textapi.Deps
 	DataDir     string
 	Version     string
 	DatabaseURL string
@@ -75,6 +77,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerImages(engine, d)
 	registerLogs(admin, d)
 	registerImageManagement(engine, admin, d)
+	registerText(engine, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

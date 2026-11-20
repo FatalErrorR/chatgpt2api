@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"encoding/base64"
 	"image"
+	_ "image/gif" // the decoders image.DecodeConfig needs, whoever imports this package
+	_ "image/jpeg"
+	_ "image/png"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/tiktoken-go/tokenizer"
+	_ "golang.org/x/image/webp"
 )
 
 // Token counting of utils/image_tokens.py and conversation.count_text_tokens.

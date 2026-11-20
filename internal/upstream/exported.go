@@ -48,3 +48,6 @@ func (u *OpenAIBackendAPI) UserAgent() string { return upstreamUserAgent }
 
 // AccountProxy is the proxy this client uses ("" for the global/runtime one).
 func (u *OpenAIBackendAPI) AccountProxy() string { return u.accountProxy }
+
+// AccessToken is the account's token ("" for the anonymous routes).
+func (u *OpenAIBackendAPI) AccessToken() string { return u.accessToken }

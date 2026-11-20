@@ -441,7 +441,11 @@ func (u *OpenAIBackendAPI) GenerateImage(ctx context.Context, prompt string, mod
 func (u *OpenAIBackendAPI) chatRequirements(ctx context.Context) error {
 	pow := POW{}
 	pToken := pow.BuildPToken(upstreamUserAgent, scriptSources, u.version)
-	response, err := u.requestRetry(ctx, http.MethodPost, "/backend-api/sentinel/chat-requirements/prepare", map[string]string{"p": pToken}, nil)
+	base := "/backend-api/sentinel/chat-requirements"
+	if u.accessToken == "" {
+		base = "/backend-anon/sentinel/chat-requirements"
+	}
+	response, err := u.requestRetry(ctx, http.MethodPost, base+"/prepare", map[string]string{"p": pToken}, nil)
 	if err != nil {
 		return err
 	}
@@ -461,7 +465,7 @@ func (u *OpenAIBackendAPI) chatRequirements(ctx context.Context) error {
 	if value, ok := prepare["turnstile"].(map[string]any); ok && value["required"] == true {
 		turnstile = (Turnstile{}).Solve(fmt.Sprint(value["dx"]), pToken)
 	}
-	response, err = u.requestRetry(ctx, http.MethodPost, "/backend-api/sentinel/chat-requirements/finalize", map[string]any{"prepare_token": prepare["prepare_token"], "proof_token": proof, "turnstile_token": turnstile}, nil)
+	response, err = u.requestRetry(ctx, http.MethodPost, base+"/finalize", map[string]any{"prepare_token": prepare["prepare_token"], "proof_token": proof, "turnstile_token": turnstile}, nil)
 	if err != nil {
 		return err
 	}
@@ -609,7 +613,9 @@ func (u *OpenAIBackendAPI) requestBody(ctx context.Context, method string, path 
 // Targets outside /backend-api (for example signed content URLs) still need the
 // bearer token, so the caller only tunes the target path headers.
 func (u *OpenAIBackendAPI) applyHeaders(req *http.Request, path string, targetPath bool) {
-	req.Header.Set("Authorization", "Bearer "+u.accessToken)
+	if u.accessToken != "" { // no token: the anonymous /backend-anon routes
+		req.Header.Set("Authorization", "Bearer "+u.accessToken)
+	}
 	req.Header.Set("User-Agent", upstreamUserAgent)
 	req.Header.Set("Origin", u.baseURL)
 	req.Header.Set("Referer", u.baseURL+"/")
