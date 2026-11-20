@@ -106,12 +106,17 @@
   - [x] PostgreSQL：`tools/contract/run-go.sh` 每次新建 `c2a_contract` 库，Go 版在 PostgreSQL 上跑契约
 - [x] 1. 数据层与迁移脚本
   - 命令 `cmd/migrate`（镜像里是 `/app/chatgpt2api-migrate`）：`chatgpt2api-migrate -data <Python 的 data 目录> -database-url <PostgreSQL>`
-  - 账号、API key、代理清单、图片索引与标签、生图任务、可编辑文件任务、CPA / Sub2API 配置、备份状态：整表镜像（一个事务内替换），重跑结果相同；
-    重复 token 与 Python 一致（保留首次出现的位置、取最后一条的值）
-  - 日志：只迁近 30 天（`-log-days`），按 id 覆盖；没有 id 的旧行用 Python 列表页显示的同一个 id；保持文件顺序
+  - 先读完并校验全部源文件，再在**一个事务**里替换所有表并对账，任何一步失败都整体回滚，目标库保持原样（d268a45，Codex 评审）：
+    `accounts.json` 不是列表、不是有效 JSON、有内容却没有一个可用 token，或后面任一文件格式错误，都在写库前报错退出，退出码 1
+  - 账号、API key、代理清单、图片索引与标签、生图任务、可编辑文件任务、CPA / Sub2API 配置、备份状态：整表镜像，重跑结果相同；
+    重复 token 与 Python 一致（保留首次出现的位置、取最后一条的值）；旧的 `accessToken` 写法与 Python 号池一样迁入
+  - 日志：只迁近 30 天（`-log-days`），保持文件顺序；没有 id 的旧行，第一次出现用 Python 列表页显示的 id，内容完全相同的后续行各自另给 id，不合并
   - 每日出图计数：取 `image_output_counts.json`，没有该文件时与 Python 一样从全部日志重新统计
-  - `config.json`、`data/images`、`data/image_thumbnails`、`data/files` 不复制，Go 版原地读取
-  - 自带对账（D1/D2）：各表行数、每个账号逐字段与源文件一致（含顺序）、代理等文档内容一致；不一致时退出码 1
+  - `config.json`、`data/images`、`data/image_thumbnails`、`data/files` 不复制，Go 版原地读取（测试实例必须用副本，见 `docs/go-staging.md`）
+  - 对账（D1/D2）重新读取源文件、独立算出应迁数据再与库比对（不依赖写入过程的统计）：账号逐字段与顺序、API key 哈希与启用状态、
+    各文档内容、图片索引条目与内容、标签、任务数、窗口内每一行日志（id、时间、类型、摘要）、每日计数
+  - 回归测试 `internal/migrate`：设置 `C2A_TEST_POSTGRES_URL` 时每个测试新建独立的 PostgreSQL 库，覆盖格式错误不改库、后续文件损坏不留半截、
+    `accessToken`、相同无 id 日志、写入后被篡改则对账失败并回滚
   - 演练（本机数据：21 个账号、28 张图片、1928 行近 30 天日志）：对账全部通过；重跑两次结果相同；源文件校验和不变（D3、D4）；
     在迁移后的库上启动 Go 服务，与 Python 自己的函数对同一份数据的结果对比：日志列表（最新 200 条及顺序）、出图计数、图片列表顺序、代理一致；
     调用日志条数和图片数的差别分别来自「只迁 30 天日志」和启动时按 15 天保留期的清理，属预期
@@ -194,5 +199,14 @@
   - 结果（C1–C3）：`tsc` 与 41 个 node 测试通过；8 个页面 + 登录、画布弹窗、深色模式 7 页、C3 的 11 个流程步骤
     （账号筛选与翻页、重新分配代理、批量添加代理、检测并清理、定时清理规则、按日期删除含进度条、换号生成设置）：两边都 19/19 步成功，
     没有控制台错误、页面错误和接口失败；截图除报错措辞外一致（差异 ≤0.15%，检测并清理弹窗 0.86% 也是报错措辞）
+- [x] Codex 评审（基准 4074cb3）修复
+  - 号池删除在一次写库失败后重启会复活：失败时恢复待删记录（ef2fadf，`internal/pool/save_retry_test.go`）
+  - SIGTERM 截断进行中的生图：`App.Serve` 停止接新连接后，等待请求与后台任务，最长 `image_poll_timeout_secs + 60` 秒（58c0aae，`TestStopWaitsForAGenerationInFlight`）
+  - 生图 SSE 末尾补 `data: [DONE]`（da39629，`TestImageStreamEndsWithDone`）
+  - 迁移：见第 1 步（d268a45、e2012f1）
+  - 前端走查：重新分配代理、检测后停用、换号设置三个流程实际提交，并通过接口和刷新后的页面重读验证；任一步失败或两边不一致，脚本退出码非 0（3860121）。
+    两边都 22/22 步通过；在已改过的数据上重跑同一脚本，6 步失败、退出码 1
+  - `CHATGPT2API_BACKGROUND_JOBS=off`：在生产数据副本上起实例时不启动账号巡检、图片清理、定时备份，避免轮换真实账号的 refresh token（e2012f1）
+  - 第 12 步测试实例与第 13 步回切方案：`docs/go-staging.md`
 - [ ] 12. 完整测试
 - [ ] 13. 并行上线

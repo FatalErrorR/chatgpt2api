@@ -13,6 +13,7 @@
 - 未做：第 12 步完整测试（含真实账号测试实例、压测）、第 13 步并行上线（第 1 步迁移脚本、第 11 步前端走查已完成，见 go-migration.md）
 - Python 的 93 个路由全部由兼容层实现（`docs/contract/pending-routes.txt` 已空，`TestPythonRoutesAreServed` 只认兼容层注册的路由）
 - 契约对比 88 个场景：**88/88 一致**，3 个已登记差异（`tools/contract/scenarios.json` 的 `known_diff`）
+- 第一轮评审（基准 4074cb3）的修复见 `docs/go-migration.md` 进度中的「Codex 评审修复」；测试实例与回切方案见 `docs/go-staging.md`
 - `go vet ./...`、`go test ./...` 全过；并发相关包用 `-race` 跑过
 
 ## 架构
