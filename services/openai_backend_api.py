@@ -228,7 +228,8 @@ class OpenAIBackendAPI:
         参数：
         - `access_token`：可选。传入后表示使用已登录链路；不传则使用未登录链路。
         """
-        self.base_url = "https://chatgpt.com"
+        # 测试时可指向假上游（Go 迁移的契约测试和压测用），生产不设置
+        self.base_url = os.environ.get("CHATGPT2API_UPSTREAM_BASE_URL", "").strip().rstrip("/") or "https://chatgpt.com"
         self.client_version = DEFAULT_CLIENT_VERSION
         self.client_build_number = DEFAULT_CLIENT_BUILD_NUMBER
         self.access_token = access_token
