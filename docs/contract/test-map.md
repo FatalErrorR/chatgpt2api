@@ -125,3 +125,11 @@ model 方式直接走 Lanczos（等同 Python 的失败回退）。
 
 `TestUnderBudgetReturnsOriginals`、`TestOverBudgetFitsThePackage`、`TestLongEdgeIsCapped`、`TestUnreadableImagesAreLeftAlone`、
 `TestLeftoverBudget`、`TestExifOrientationIsApplied`。Python 用例中依赖 WebP 编码的断言不迁（Go 无 WebP 编码器）。
+
+## test_image_output_counts.py（`internal/logs`）
+
+| Python | Go |
+| --- | --- |
+| test_counts_successful_images_in_beijing_windows | `TestCountsSuccessfulImagesInBeijingWindows` |
+| test_new_success_updates_the_daily_file | 同上（Go 版计数在 `Add` 里同一事务累加，没有单独的文件） |
+| test_list_reads_the_newest_lines | `TestListReturnsNewestFirstWithFilters`（另加 `TestDeleteByID`） |

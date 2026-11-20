@@ -110,7 +110,10 @@
   - `internal/proxylist`（清单、健康、预留、按负载最少分配、批量添加与厂商命名）、`internal/proxyops`（检测、停用并迁移、启用、重新分配、代理商故障判定）、`internal/docstore`（proxies.json 等整份 JSON 文档）
   - `/api/proxies*`、`/api/accounts/reassign-proxy`、`/api/proxy/test`、`/api/proxy/runtime`；导入时按代理平均分配已接通
   - 契约：**39/60 一致**，2 个已知差异；Python 的 48 个代理测试中 34 个已对应（其余在第 4、10 步）
-- [ ] 6. 日志与统计
+- [x] 6. 日志与统计
+  - `internal/logs`：`List`（类型、起止日期按北京时间日期，最新在前，最多 200 条；按写入顺序 `seq` 排，同一秒内也不乱）、`Delete`、`ImageOutputCounts`（今天/昨天/近 7/14/15/30 天/全部，按每日合计）
+  - `/api/logs`、`/api/logs/delete`、`/api/logs/image-counts`
+  - 契约：061 一致；060 只差在 Python 最新一条是文本接口的调用日志（第 8 步接上后一致），生图与账号日志的字段两边相同
 - [ ] 7. 图片管理
 - [ ] 8. 文本接口
 - [ ] 9. 任务类

@@ -15,7 +15,9 @@ import (
 func (u *OpenAIBackendAPI) Bootstrap(ctx context.Context) error { return u.bootstrap(ctx) }
 
 // ChatRequirements runs the sentinel prepare/finalize handshake; later requests carry its tokens.
-func (u *OpenAIBackendAPI) ChatRequirements(ctx context.Context) error { return u.chatRequirements(ctx) }
+func (u *OpenAIBackendAPI) ChatRequirements(ctx context.Context) error {
+	return u.chatRequirements(ctx)
+}
 
 // Request sends one backend request with the browser headers. Non-2xx answers become
 // *UpstreamHTTPError (401 becomes ErrTokenInvalidated).

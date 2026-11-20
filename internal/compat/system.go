@@ -71,6 +71,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	registerAccounts(admin, d)
 	registerProxies(admin, d)
 	registerImages(engine, d)
+	registerLogs(admin, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 
