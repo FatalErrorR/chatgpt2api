@@ -1223,3 +1223,19 @@ func (s *Service) Health() map[string]any {
 	}
 	return out
 }
+
+// ProxiesInOrder lists the configured proxies in account order, each once per spelling
+// (the iteration order of proxy_account_counts() in Python).
+func (s *Service) ProxiesInOrder() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[string]bool{}
+	out := []string{}
+	for _, token := range s.order {
+		if proxy := str(s.items[token]["proxy"]); proxy != "" && !seen[proxy] {
+			seen[proxy] = true
+			out = append(out, proxy)
+		}
+	}
+	return out
+}

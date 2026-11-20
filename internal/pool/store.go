@@ -93,11 +93,11 @@ func (s *DBStore) Save(order []string, changed map[string]Account, removed []str
 }
 
 func (s *DBStore) LoadInt(key string) (int, bool) {
-	var row kvRow
-	if err := s.db.Where("key = ?", key).Take(&row).Error; err != nil {
+	var rows []kvRow
+	if err := s.db.Where("key = ?", key).Limit(1).Find(&rows).Error; err != nil || len(rows) == 0 {
 		return 0, false
 	}
-	n, err := strconv.Atoi(row.Value)
+	n, err := strconv.Atoi(rows[0].Value)
 	return n, err == nil
 }
 

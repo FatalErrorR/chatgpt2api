@@ -51,3 +51,47 @@
 `TestRoundRobinAndConcurrencyLimit`（轮询、并发上限、等待被唤醒、并发位全部释放）、`TestNoQuotaMessages`、
 `TestSidelinedAccountIsSkipped`、`TestReloadKeepsOrderAndFields`、`TestOnlyChangedAccountsAreWritten`、
 `TestTokenRotationMovesSlotsAndAlias`、`TestStatsCountsStatuses`、`internal/compat` 的鉴权与设置接口测试。
+
+## test_proxy_list.py
+
+| Python | Go |
+| --- | --- |
+| ProxyListTests.test_mask_hides_only_the_password | `internal/proxylist` `TestMaskHidesOnlyThePassword` |
+| test_list_seeds_account_proxies_and_keeps_names | `TestListSeedsAccountProxiesAndKeepsNames` |
+| test_rename_add_and_delete_rules | `TestRenameAddAndDeleteRules` |
+| test_consecutive_failures_mark_abnormal_and_success_recovers | `TestFailuresMarkAbnormalAndSuccessRecovers` |
+| test_reserve_fills_least_loaded_counting_existing_accounts | `TestReserveFillsLeastLoadedCountingExistingAccounts` |
+| test_reserve_skips_abnormal_unless_all_are_abnormal | `TestReserveSkipsAbnormalUnlessAllAre` |
+| test_reserve_requires_a_candidate | `TestReserveRequiresACandidate` |
+| test_reservations_count_until_released | `TestReservationsCountUntilReleased` |
+| test_spellings_of_one_proxy_share_entry_health_and_load | `TestSpellingsOfOneProxyShareEntryHealthAndLoad` |
+| ProxyHealthHookTests（4 个，Cloudflare 挑战与代理健康） | 第 4 步：上游请求层 |
+| ImportDistributionTests（13 个，导入/协议登录的平均分配与预留） | 导入部分：`internal/compat` `TestImportRespectsThePerProxyCapAndSkipsDisabled`、`TestEnableBringsAProxyBackIntoDistribution`；协议登录部分：第 10 步 |
+| ProxyBatchAddTests.test_colon_format_is_saved_as_url_and_the_password_is_hidden | `internal/compat` `TestBatchColonFormatIsStoredAsURLAndPasswordHidden` |
+| test_numbering_continues_from_the_vendors_highest_number | `TestBatchNumberingContinuesFromVendorsHighest` |
+| test_duplicates_and_invalid_lines_are_reported_and_do_not_use_numbers | `TestBatchDuplicatesAndInvalidLines` |
+| test_without_vendor_names_stay_empty | `TestBatchWithoutVendorKeepsNamesEmpty` |
+| test_empty_and_oversized_batches_are_rejected | `TestBatchRejectsEmptyAndOversized` |
+| test_colon_format_proxy_on_an_account_is_masked_in_the_list | `TestColonProxyOnAnAccountIsMaskedInTheList` |
+
+## test_proxy_reassign.py（全部走 HTTP 接口，在 `internal/compat/proxies_test.go`）
+
+| Python | Go |
+| --- | --- |
+| RetireTests.test_dry_run_plans_least_loaded_moves_and_changes_nothing | `TestRetireDryRunPlansAndChangesNothing` |
+| test_apply_moves_accounts_then_disables_and_logs | `TestRetireApplyMovesThenDisablesAndLogs` |
+| test_capacity_shortfall_previews_and_blocks_apply | `TestRetireCapacityShortfallPreviewsAndBlocksApply` |
+| test_abnormal_and_disabled_proxies_never_receive_accounts | `TestAbnormalAndDisabledProxiesNeverReceiveAccounts` |
+| test_no_usable_target_is_an_error | `TestNoUsableTargetIsAnError` |
+| test_retiring_an_empty_proxy_just_disables_it | `TestRetiringAnEmptyProxyJustDisablesIt` |
+| test_enable_brings_a_proxy_back_into_distribution | `TestEnableBringsAProxyBackIntoDistribution` |
+| DistributionCapTests.test_import_respects_the_per_proxy_cap_and_skips_disabled | `TestImportRespectsThePerProxyCapAndSkipsDisabled`（另查预留全部释放） |
+| test_pick_least_loaded_is_all_or_nothing | `internal/proxylist` `TestPickLeastLoadedIsAllOrNothing` |
+| ReassignTests.test_reassign_selected_accounts_to_all_usable_proxies | `TestReassignSelectedAccountsToAllUsableProxies` |
+| test_reassign_to_chosen_proxies_only | `TestReassignToChosenProxiesOnly` |
+| test_unknown_accounts_are_an_error | `TestReassignUnknownAccountsIsAnError` |
+| CheckTests.test_one_failed_round_is_offered_for_retirement | `TestOneFailedRoundIsOfferedForRetirement` |
+| test_disabled_proxies_are_not_tested | `TestDisabledProxiesAreNotTested` |
+| test_widespread_failure_is_a_provider_outage_without_a_plan | `TestWidespreadFailureIsAProviderOutageWithoutAPlan` |
+| test_all_402_failures_are_a_provider_outage | `internal/proxyops` `TestAll402FailuresAreAProviderOutage` |
+| MaxAccountsConfigTests.test_defaults_and_bounds | `TestMaxAccountsSettingBounds` |

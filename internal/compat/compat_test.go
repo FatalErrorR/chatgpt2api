@@ -2,29 +2,54 @@ package compat
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/basketikun/chatgpt2api/internal/docstore"
+	"github.com/basketikun/chatgpt2api/internal/pool"
+	"github.com/basketikun/chatgpt2api/internal/proxylist"
+	"github.com/basketikun/chatgpt2api/internal/proxyops"
+	"github.com/basketikun/chatgpt2api/internal/repository"
 	"github.com/basketikun/chatgpt2api/internal/settings"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-
-	"github.com/basketikun/chatgpt2api/internal/repository"
 )
 
 const adminKey = "admin-secret"
 
 type harness struct {
-	t      *testing.T
-	engine *gin.Engine
-	deps   *Deps
+	t       *testing.T
+	engine  *gin.Engine
+	deps    *Deps
+	log     *recordedLog
+	failing map[string]string // proxy key -> error returned by the fake proxy test
 }
 
-func newHarness(t *testing.T) *harness {
+type recordedLog struct{ summaries []string }
+
+func (l *recordedLog) Add(kind, summary string, detail map[string]any) error {
+	l.summaries = append(l.summaries, summary)
+	return nil
+}
+
+// stubRemote stands in for ChatGPT: user info leaves the account unchanged (like the Python tests
+// that patch refresh_accounts away).
+type stubRemote struct{}
+
+func (stubRemote) UserInfo(context.Context, pool.Account) (pool.Account, error) {
+	return pool.Account{}, nil
+}
+func (stubRemote) RefreshAccessToken(context.Context, string, pool.Account) (map[string]string, error) {
+	return nil, errors.New("no refresh in tests")
+}
+
+func newHarness(t *testing.T, config ...map[string]any) *harness {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	t.Setenv("CHATGPT2API_AUTH_KEY", "")
@@ -34,14 +59,38 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { repo.Close() })
 	db := repo.DB()
-	if err := Migrate(db); err != nil {
+	for _, migrate := range []func(*gorm.DB) error{Migrate, pool.Migrate, docstore.Migrate} {
+		if err := migrate(db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := map[string]any{"auth-key": adminKey}
+	for _, extra := range config {
+		for key, value := range extra {
+			cfg[key] = value
+		}
+	}
+	store := settings.NewForTest(cfg, filepath.Join(t.TempDir(), "config.json"))
+	h := &harness{t: t, log: &recordedLog{}, failing: map[string]string{}}
+	accounts, err := pool.New(pool.NewDBStore(db), store, h.log)
+	if err != nil {
 		t.Fatal(err)
 	}
-	store := settings.NewForTest(map[string]any{"auth-key": adminKey}, filepath.Join(t.TempDir(), "config.json"))
-	deps := &Deps{DB: db, Settings: store, Auth: NewAuthService(db, store), Version: "9.9.9", DatabaseURL: "postgres://u:pw@h/db"}
-	engine := gin.New()
-	Register(engine, deps)
-	return &harness{t: t, engine: engine, deps: deps}
+	accounts.Remote = stubRemote{}
+	list, err := proxylist.New(docstore.New(db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := &proxyops.Ops{List: list, Pool: accounts, Settings: store, Log: h.log, Test: func(_ context.Context, url string) map[string]any {
+		if cause, failing := h.failing[proxylist.Key(url)]; failing {
+			return map[string]any{"ok": false, "status": 0, "latency_ms": 5, "error": cause}
+		}
+		return map[string]any{"ok": true, "status": 200, "latency_ms": 5, "error": nil}
+	}}
+	h.deps = &Deps{DB: db, Settings: store, Auth: NewAuthService(db, store), Pool: accounts, Proxies: ops, ProxyOps: ops, Version: "9.9.9", DatabaseURL: "postgres://u:pw@h/db"}
+	h.engine = gin.New()
+	Register(h.engine, h.deps)
+	return h
 }
 
 func (h *harness) do(method, path, key string, body any) (int, map[string]any) {

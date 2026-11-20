@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/basketikun/chatgpt2api/internal/pool"
+	"github.com/basketikun/chatgpt2api/internal/proxyops"
 	"github.com/basketikun/chatgpt2api/internal/settings"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -16,7 +17,8 @@ type Deps struct {
 	Settings    *settings.Store
 	Auth        *AuthService
 	Pool        *pool.Service
-	Proxies     ProxyReserver   // proxy list reservations (step 5); nil until wired
+	Proxies     ProxyReserver // proxy list reservations for imports
+	ProxyOps    *proxyops.Ops
 	ImageProbe  pool.ImageProbe // one small test image per account (step 4); nil until wired
 	Version     string
 	DatabaseURL string
@@ -62,6 +64,7 @@ func Register(engine *gin.Engine, d *Deps) {
 	})
 	registerUserKeys(admin, d)
 	registerAccounts(admin, d)
+	registerProxies(admin, d)
 	engine.GET("/health", func(c *gin.Context) { health(c, d) })
 }
 

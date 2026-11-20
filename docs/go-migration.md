@@ -94,7 +94,10 @@
   - 契约：**29/60 一致**，2 个已知差异（存储后端结构）。导入时按代理平均分配依赖第 5 步的代理清单
   - 测试对照：`docs/contract/test-map.md`
 - [ ] 4. 生图链路
-- [ ] 5. 代理池
+- [x] 5. 代理池
+  - `internal/proxylist`（清单、健康、预留、按负载最少分配、批量添加与厂商命名）、`internal/proxyops`（检测、停用并迁移、启用、重新分配、代理商故障判定）、`internal/docstore`（proxies.json 等整份 JSON 文档）
+  - `/api/proxies*`、`/api/accounts/reassign-proxy`、`/api/proxy/test`、`/api/proxy/runtime`；导入时按代理平均分配已接通
+  - 契约：**39/60 一致**，2 个已知差异；Python 的 48 个代理测试中 34 个已对应（其余在第 4、10 步）
 - [ ] 6. 日志与统计
 - [ ] 7. 图片管理
 - [ ] 8. 文本接口

@@ -8,9 +8,12 @@ import (
 
 	"github.com/basketikun/chatgpt2api/internal/compat"
 	"github.com/basketikun/chatgpt2api/internal/config"
+	"github.com/basketikun/chatgpt2api/internal/docstore"
 	"github.com/basketikun/chatgpt2api/internal/handler"
 	"github.com/basketikun/chatgpt2api/internal/logs"
 	"github.com/basketikun/chatgpt2api/internal/pool"
+	"github.com/basketikun/chatgpt2api/internal/proxylist"
+	"github.com/basketikun/chatgpt2api/internal/proxyops"
 	"github.com/basketikun/chatgpt2api/internal/repository"
 	"github.com/basketikun/chatgpt2api/internal/service"
 	"github.com/basketikun/chatgpt2api/internal/settings"
@@ -77,7 +80,7 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 	scheduler := service.NewScheduler(accountService, imageService, taskService, logService, cfg)
 
 	db := repo.DB()
-	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate} {
+	for _, migrate := range []func(*gorm.DB) error{compat.Migrate, logs.Migrate, pool.Migrate, docstore.Migrate} {
 		if err := migrate(db); err != nil {
 			return nil, err
 		}
@@ -91,10 +94,16 @@ func New(cfg *config.Config, repo *repository.Repository, store *settings.Store)
 		return nil, err
 	}
 	accountPool.Remote = &compat.ChatGPTRemote{Proxy: proxyService, Config: cfg}
+	proxyList, err := proxylist.New(docstore.New(db))
+	if err != nil {
+		return nil, err
+	}
+	proxyOps := &proxyops.Ops{List: proxyList, Pool: accountPool, Settings: store, Log: compatLogs,
+		Test: func(ctx context.Context, proxyURL string) map[string]any { return proxyService.Test(ctx, proxyURL) }}
 	main := gin.New()
 	main.Use(gin.Recovery(), handler.CORS, handler.LimitBody(cfg))
 	compat.Register(main, &compat.Deps{
-		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool,
+		DB: db, Settings: store, Auth: compat.NewAuthService(db, store), Pool: accountPool, Proxies: proxyOps, ProxyOps: proxyOps,
 		Version: cfg.Version, DatabaseURL: cfg.DatabaseURL,
 	})
 	main.NoRoute(func(c *gin.Context) { engine.ServeHTTP(c.Writer, c.Request) })
