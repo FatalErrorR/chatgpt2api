@@ -62,6 +62,10 @@
 
 - `_decode_image_base64`：base64 短于 512 字符时先当文件路径检查，超过 255 字符会抛「File name too long」。只影响约 380 字节以下的极小图片。
 
+- 断流换号重试（main 1162271）实际很少触发：`emitted_for_token` 收到任何输出（含进度事件）就为真，
+  而真实的 curl 92 发生在流开始 30~180 秒后，此时早已收到进度，重试分支被跳过。Go 版暂与 Python 一致
+  （`internal/chatgptweb` `TestDroppedStreamAfterProgressDoesNotSwitch`），是否改为「只有结果或消息才算已输出」待用户决定。
+
 ## 不迁移
 
 - 压缩优化（`main` 上已删除，会卡死容器）
