@@ -7,6 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator
 
 import tiktoken
@@ -18,6 +19,7 @@ from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeou
 from utils.helper import (
     IMAGE_MODELS,
     UpstreamHTTPError,
+    anonymize_token,
     extract_image_from_message_content,
     gif_frame_count,
     gif_frame_duration_ms,
@@ -408,6 +410,8 @@ class ConversationRequest:
     poll_timeout_secs: int | None = None
     # 换号生成：这次尝试最多等多少秒出图，超时就抛 ImagePollTimeoutError 让上层换号（由 _generate_single_image 设置）
     failover_timeout_secs: int | None = None
+    # 确认上游已经开画时，在原账号上最多等多久（换号生成剩下的总时限，由 _generate_single_image 设置）
+    task_poll_timeout_secs: int | None = None
     progress_callback: Any = None  # Callable[[str], None] | None
 
 
@@ -421,6 +425,11 @@ class ConversationState:
     blocked: bool = False
     tool_invoked: bool | None = None
     turn_use_case: str = ""
+    # 上游在 SSE 里给的结构化错误，如 {"error": "你提交的消息过长…", "error_code": "input_too_large"}
+    error_code: str = ""
+    error_message: str = ""
+    # SSE 里出现了生图工具的消息：上游已经开画
+    image_tool_called: bool = False
 
 
 @dataclass
@@ -691,6 +700,18 @@ def _is_user_message_event(event: dict[str, Any]) -> bool:
     return False
 
 
+def _is_image_tool_call_message(message: dict[str, Any]) -> bool:
+    """会话文档里助手发给工具的生图调用：recipient 不是 all，内容是带 prompt 的参数 JSON。
+    （代码执行等其它工具也会 recipient 不是 all，所以还要看内容。）"""
+    author = message.get("author") or {}
+    recipient = str(message.get("recipient") or "").strip()
+    if str(author.get("role") or "") != "assistant" or recipient in {"", "all"}:
+        return False
+    content = message.get("content") or {}
+    parts = [content.get("text")] + list(content.get("parts") or [])
+    return any(isinstance(part, str) and '"prompt"' in part for part in parts)
+
+
 def update_conversation_state(state: ConversationState, payload: str, event: dict[str, Any] | None = None) -> None:
     conversation_id, file_ids, sediment_ids = extract_conversation_ids(payload)
     if conversation_id and not state.conversation_id:
@@ -718,6 +739,12 @@ def update_conversation_state(state: ConversationState, payload: str, event: dic
     value = event.get("v")
     if isinstance(value, dict):
         state.conversation_id = str(value.get("conversation_id") or state.conversation_id)
+    if isinstance(event.get("error_code"), str) and event["error_code"].strip():
+        state.error_code = event["error_code"].strip()
+    if isinstance(event.get("error"), str) and event["error"].strip():
+        state.error_message = event["error"].strip()
+    if is_image_tool_event(event):
+        state.image_tool_called = True
     if event.get("type") == "moderation":
         moderation = event.get("moderation_response")
         if isinstance(moderation, dict) and moderation.get("blocked") is True:
@@ -740,6 +767,9 @@ def conversation_base_event(event_type: str, state: ConversationState, **extra: 
         "blocked": state.blocked,
         "tool_invoked": state.tool_invoked,
         "turn_use_case": state.turn_use_case,
+        "error_code": state.error_code,
+        "error_message": state.error_message,
+        "image_tool_called": state.image_tool_called,
         **extra,
     }
 
@@ -943,6 +973,191 @@ def _remove_image_conversation_later(
     threading.Thread(target=_run, name=f"remove-image-conversation-{conversation_id}", daemon=True).start()
 
 
+# ── 上游这一轮有没有开画 ───────────────────────────────────────
+# 先判断开没开画，再决定等图、换号还是报错：没开画就不空等，开了画就不换号（换号会重复开画）。
+INPUT_TOO_LARGE_CODE = "input_too_large"
+# tool_invoked=false 后查一次会话和任务前先等一下：SSE 关闭后会话文档要几百毫秒才落库
+NOT_STARTED_PROBE_WAIT_SECS = 2.0
+# 只回文案或空回复：本次请求最多换一个没试过的号
+MAX_NOT_STARTED_SWITCHES = 1
+# 账号自己的问题（此对话无法生图、生图额度用完）：最多换这么多个没试过的号
+MAX_ACCOUNT_ISSUE_SWITCHES = 3
+# 「此对话无法生图」：同一账号在这么多个不同请求里出现，才短暂停止给它派新的生图
+CANNOT_GENERATE_REPEAT_LIMIT = 2
+CANNOT_GENERATE_WINDOW_SECS = 6 * 60 * 60
+CANNOT_GENERATE_COOLDOWN_SECS = 30 * 60
+# 上游说生图额度用完：按它给的重置时间暂停派工；没给就用账号记录的重置时间，再没有就暂停 1 小时
+QUOTA_EXHAUSTED_DEFAULT_SECS = 60 * 60
+QUOTA_EXHAUSTED_MAX_SECS = 48 * 60 * 60
+
+NOT_STARTED_REASONS = {
+    "text_only": "只回了文字，没有调用生图工具",
+    "empty": "没有任何回复",
+    "cannot_generate": "账号回复此对话无法生成图片",
+    "quota_exhausted": "账号的生图额度已用完",
+}
+
+_CANNOT_GENERATE_RE = re.compile(
+    r"(无法|不能|没法|没办法|無法)[^。！？!?\n]{0,20}(此|这个|這個|这|這|本|当前|當前)[个個]?(对话|對話|聊天|会话|會話)"
+    r"[^。！？!?\n]{0,12}(生成|创建|創建|编辑|編輯|绘制|繪製|制作|製作|画|畫)"
+    r"|(can't|cannot|can not|unable to|not able to)\s+(directly\s+)?(generate|create|edit|make|produce|draw)"
+    r"[^.!?\n]{0,30}\b(images?|pictures?)\b[^.!?\n]{0,20}\b(this|the current)\s+(chat|conversation)",
+    re.IGNORECASE,
+)
+_QUOTA_IMAGE_RE = re.compile(r"图片|图像|圖片|圖像|生图|生圖|\bimages?\b", re.IGNORECASE)
+_QUOTA_LIMIT_RE = re.compile(r"上限|限额|限額|额度|額度|\blimit\b", re.IGNORECASE)
+_QUOTA_EXHAUSTED_RE = re.compile(r"已达|已達|达到|達到|用完|用尽|用盡|重置|\bhit\b|\breached\b|\bused up\b|\bresets?\b", re.IGNORECASE)
+_RESET_HOURS_RE = re.compile(r"(\d+)\s*(?:hours?|hrs?|小时|小時)", re.IGNORECASE)
+_RESET_MINUTES_RE = re.compile(r"(\d+)\s*(?:minutes?|mins?|分钟|分鐘)", re.IGNORECASE)
+
+_cannot_generate_seen: dict[str, list[tuple[float, int]]] = {}
+_cannot_generate_lock = threading.Lock()
+
+
+class ImageInputTooLargeError(ImageGenerationError):
+    """上游明确回了 input_too_large，且这一轮没有图也没有生图任务：是请求太长，不是账号故障。"""
+
+    def __init__(self, upstream_message: str = "", conversation_id: str = "") -> None:
+        message = "输入过长，上游拒绝处理：请缩短提示词或减少参考图后重试。"
+        if upstream_message:
+            message += f"（上游：{upstream_message[:200]}）"
+        super().__init__(message, status_code=400, error_type="invalid_request_error",
+                         code=INPUT_TOO_LARGE_CODE, conversation_id=conversation_id)
+        self.error_code = INPUT_TOO_LARGE_CODE
+        self.tool_invoked = False
+        self.task_state = "none"
+
+
+class ImageNotStartedError(ImageGenerationError):
+    """上游这一轮没有开画（tool_invoked=false，查过会话和任务也没有生图任务）。
+    由 _generate_single_image 按 reason 决定换号还是结束。"""
+
+    def __init__(self, reason: str, upstream_text: str = "", *, error_code: str = "", conversation_id: str = "") -> None:
+        message = f"上游未启动生图：{NOT_STARTED_REASONS.get(reason, reason)}"
+        if error_code:
+            message += f"（上游错误码 {error_code}）"
+        if upstream_text:
+            message += f"。上游回复：{upstream_text[:200]}"
+        super().__init__(message, status_code=502, error_type="server_error",
+                         code="image_generation_not_started", conversation_id=conversation_id)
+        self.reason = reason
+        self.upstream_text = upstream_text
+        self.error_code = error_code
+        self.tool_invoked = False
+        self.task_state = "none"
+
+
+@dataclass
+class ImageTaskProbe:
+    # images：会话里已经有图；running：有生图任务（还没出图）；none：确认没有；unknown：查不到
+    state: str
+    file_ids: list[str] = field(default_factory=list)
+    sediment_ids: list[str] = field(default_factory=list)
+    task_error: str = ""
+
+
+def classify_not_started_text(text: str) -> str:
+    """没开画时上游回的文字属于哪一类：cannot_generate / quota_exhausted / policy / text_only / empty。"""
+    from services.openai_backend_api import _is_content_policy_error
+
+    text = str(text or "").strip()
+    if not text:
+        return "empty"
+    if _CANNOT_GENERATE_RE.search(text):
+        return "cannot_generate"
+    if _QUOTA_IMAGE_RE.search(text) and _QUOTA_LIMIT_RE.search(text) and _QUOTA_EXHAUSTED_RE.search(text):
+        return "quota_exhausted"
+    if _is_content_policy_error(text):
+        return "policy"
+    return "text_only"
+
+
+def quota_reset_secs(text: str, account: dict | None = None) -> int:
+    """额度用完后多久重置：先看上游文字里的「N 小时 M 分钟」，再看账号记录的 image_gen 重置时间。"""
+    hours = _RESET_HOURS_RE.search(str(text or ""))
+    minutes = _RESET_MINUTES_RE.search(str(text or ""))
+    secs = (int(hours.group(1)) * 3600 if hours else 0) + (int(minutes.group(1)) * 60 if minutes else 0)
+    if not secs:
+        for item in (account or {}).get("limits_progress") or []:
+            if isinstance(item, dict) and item.get("feature_name") == "image_gen" and item.get("reset_after"):
+                try:
+                    reset_at = datetime.fromisoformat(str(item["reset_after"]).replace("Z", "+00:00"))
+                    secs = int((reset_at - datetime.now(timezone.utc)).total_seconds())
+                except ValueError:
+                    secs = 0
+    if secs <= 0:
+        secs = QUOTA_EXHAUSTED_DEFAULT_SECS
+    return min(secs, QUOTA_EXHAUSTED_MAX_SECS)
+
+
+def note_cannot_generate(account_key: str, request_key: int) -> bool:
+    """记一次「此对话无法生图」；同一账号在窗口内出现在足够多的不同请求里时返回 True。"""
+    now = time.monotonic()
+    with _cannot_generate_lock:
+        seen = [(at, key) for at, key in _cannot_generate_seen.get(account_key, []) if now - at < CANNOT_GENERATE_WINDOW_SECS]
+        seen.append((now, request_key))
+        _cannot_generate_seen[account_key] = seen
+        return len({key for _, key in seen}) >= CANNOT_GENERATE_REPEAT_LIMIT
+
+
+def probe_image_task(backend: OpenAIBackendAPI, conversation_id: str) -> ImageTaskProbe:
+    """tool_invoked=false 时查一次会话文档和任务列表，确认上游到底有没有开画。
+
+    会话文档查不到就是 unknown（不能当成没开画，免得误判仍在跑的任务）；
+    任务列表查不到不影响结论，会话文档里有没有工具调用才是准的。
+    """
+    if not conversation_id:
+        return ImageTaskProbe("unknown")
+    time.sleep(NOT_STARTED_PROBE_WAIT_SECS)
+    try:
+        document = backend._get_conversation(conversation_id)
+    except Exception as exc:
+        logger.warning({"event": "image_task_probe_failed", "conversation_id": conversation_id,
+                        "source": "conversation", "error": repr(exc)[:300]})
+        return ImageTaskProbe("unknown")
+    probe = ImageTaskProbe("none")
+    running = False
+    for record in backend._extract_image_tool_records(document):
+        running = True
+        add_unique(probe.file_ids, record.get("file_ids") or [])
+        add_unique(probe.sediment_ids, record.get("sediment_ids") or [])
+    for node in (document.get("mapping") or {}).values():
+        message = (node or {}).get("message") or {}
+        if _is_image_tool_call_message(message) or (message.get("metadata") or {}).get("async_task_type") == "image_gen":
+            running = True
+    if probe.file_ids or probe.sediment_ids:
+        probe.state = "images"
+        return probe
+    try:
+        tasks = backend._query_backend_tasks(conversation_id=conversation_id, timeout_secs=5.0)
+    except Exception as exc:
+        logger.warning({"event": "image_task_probe_failed", "conversation_id": conversation_id,
+                        "source": "tasks", "error": repr(exc)[:300]})
+        tasks = []
+    for task in tasks:
+        is_error, error_msg, _ = backend.check_task_error(task)
+        if is_error:
+            probe.task_error = error_msg or probe.task_error
+        else:
+            running = True
+    probe.state = "running" if running else "none"
+    return probe
+
+
+def _log_turn_assessment(conversation_id: str, tool_invoked: bool | None, error_code: str, task_state: str,
+                         text_kind: str, *, started: bool = False) -> None:
+    """每次尝试读完上游后的判断。不写提示词和 token。"""
+    logger.info({
+        "event": "image_turn_assessed",
+        "conversation_id": conversation_id,
+        "tool_invoked": tool_invoked,
+        "error_code": error_code,
+        "task_state": task_state,
+        "text_kind": text_kind,
+        "next": "wait_same_account" if started else ("not_started" if task_state == "none" else "resolve"),
+    })
+
+
 def stream_image_outputs(
         backend: OpenAIBackendAPI,
         request: ConversationRequest,
@@ -989,13 +1204,20 @@ def stream_image_outputs(
     file_ids = [str(item) for item in last.get("file_ids") or []]
     sediment_ids = [str(item) for item in last.get("sediment_ids") or []]
     message = str(last.get("text") or "").strip()
+    tool_invoked = last.get("tool_invoked")
+    error_code = str(last.get("error_code") or "")
+    # 已经开画：SSE 里有生图工具消息，或 tool_invoked=true 且这一轮是生图。
+    # tool_invoked=true 但用途是 data analysis 等时调的可能是别的工具，不算开画，按原流程处理。
+    started = bool(last.get("image_tool_called")) or (tool_invoked is True and last.get("turn_use_case") == "image gen")
     logger.info({
         "event": "image_stream_resolve_start",
         "conversation_id": conversation_id,
         "file_ids": file_ids,
         "sediment_ids": sediment_ids,
-        "tool_invoked": last.get("tool_invoked"),
+        "tool_invoked": tool_invoked,
         "turn_use_case": last.get("turn_use_case"),
+        "error_code": error_code,
+        "image_tool_called": bool(last.get("image_tool_called")),
     })
     if request.progress_callback:
         request.progress_callback("image_stream_resolve_start")
@@ -1005,7 +1227,37 @@ def stream_image_outputs(
         error_text = detailed_error or message or "Image generation was rejected by upstream policy."
         yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=error_text, conversation_id=conversation_id)
         return
-    should_poll_for_image = bool(request.images) or last.get("turn_use_case") == "image gen"
+
+    # 上游明确说没调生图工具（tool_invoked=false）：查一次会话和任务确认真的没开画，没开画就不等图。
+    # tool_invoked 缺失或查不到时保持「未知」，走下面原来的等图流程，免得误判仍在跑的任务。
+    task_state = "sse_images" if (file_ids or sediment_ids) else ("started" if started else "not_checked")
+    text_kind = ""
+    if not file_ids and not sediment_ids and not started and tool_invoked is False:
+        text_kind = classify_not_started_text(message)
+        if text_kind != "policy" or error_code:
+            probe = probe_image_task(backend, conversation_id)
+            task_state = probe.state
+            if probe.state == "images":
+                add_unique(file_ids, probe.file_ids)
+                add_unique(sediment_ids, probe.sediment_ids)
+            elif probe.state == "running":
+                started = True
+            elif probe.state == "none":
+                _log_turn_assessment(conversation_id, tool_invoked, error_code, task_state,
+                                     "input_too_large" if error_code == INPUT_TOO_LARGE_CODE else text_kind)
+                if error_code == INPUT_TOO_LARGE_CODE:
+                    raise ImageInputTooLargeError(str(last.get("error_message") or ""), conversation_id)
+                if text_kind != "policy":
+                    if request.message_as_error:
+                        raise ImageNotStartedError(text_kind, message, error_code=error_code, conversation_id=conversation_id)
+                    # 对话类接口：上游的文字可能就是回答，原样给出；空回复给一句明确的说明
+                    yield ImageOutput(kind="message", model=request.model, index=index, total=total,
+                                      text=message or f"上游未启动生图：{NOT_STARTED_REASONS['empty']}",
+                                      conversation_id=conversation_id)
+                    return
+    _log_turn_assessment(conversation_id, tool_invoked, error_code, task_state, text_kind or "", started=started)
+
+    should_poll_for_image = started or bool(request.images) or last.get("turn_use_case") == "image gen"
     if message and not file_ids and not sediment_ids and not should_poll_for_image:
         yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=message, conversation_id=conversation_id)
         return
@@ -1071,6 +1323,9 @@ def stream_image_outputs(
     # 因为上游可能将图片生成作为异步任务执行，SSE 流在工具完成前就断开了，
     # 导致对话文档中尚未写入图片工具的响应记录。
     poll_timeout = request.failover_timeout_secs or request.poll_timeout_secs or config.image_poll_timeout_secs
+    if started and request.task_poll_timeout_secs:
+        # 确认已经开画：在原账号上把剩下的总时限等完，不按换号生成的单号时限换号（换号会重复开画）
+        poll_timeout = max(poll_timeout, request.task_poll_timeout_secs)
     if is_text_reply and conversation_id and not request.poll_timeout_secs and not request.failover_timeout_secs:
         # 文本回复场景下图片可能仍在异步生成，使用更长超时（默认 120s → 额外 180s = 300s）
         poll_timeout = max(poll_timeout, 300)
@@ -1085,6 +1340,9 @@ def stream_image_outputs(
             conversation_id, file_ids, sediment_ids, poll_timeout_secs=poll_timeout,
         )
     except (ImageContentPolicyError, ImagePollTimeoutError) as exc:
+        if started and isinstance(exc, ImagePollTimeoutError):
+            exc.task_started = True  # 上层看到这个标记就不换号
+            exc.waited_secs = poll_timeout
         # 当检测到文本回复时，task error 不应直接判定为内容策略违规，
         # 因为图片可能仍在后台异步生成中
         if is_text_reply and isinstance(exc, ImageContentPolicyError):
@@ -1410,6 +1668,43 @@ def stream_codex_image_outputs(
     raise ImageGenerationError("No image result found in response")
 
 
+class _ImageSlot:
+    """取到一个号就占它 1 个并发名额。不管这次尝试怎么结束，名额只还一次：
+    success=True/False 记成功/失败（mark_image_result 里会还名额），None 只还名额不记失败。"""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+        self.finished = False
+
+    def finish(self, success: bool | None) -> None:
+        if self.finished:
+            return
+        self.finished = True
+        if success is None:
+            account_service.release_image_slot(self.token)
+        else:
+            account_service.mark_image_result(self.token, success)
+
+
+def _log_attempt(index: int, token: str, account_email: str, decision: str, reason: str,
+                 exc: Exception | None = None, conversation_id: str = "", **extra: Any) -> None:
+    """每次尝试的结局：成功、在原号上等、换号还是结束，以及原因。不写提示词和完整 token。"""
+    logger.warning({
+        "event": "image_attempt_outcome",
+        "index": index,
+        "token": anonymize_token(token),
+        "account_email": account_email,
+        "conversation_id": conversation_id or str(getattr(exc, "conversation_id", "") or ""),
+        "error_code": str(getattr(exc, "error_code", "") or ""),  # 上游给的错误码
+        "code": str(getattr(exc, "code", "") or ""),  # 回给调用方的错误码
+        "tool_invoked": getattr(exc, "tool_invoked", None),
+        "task_state": str(getattr(exc, "task_state", "") or ""),
+        "decision": decision,
+        "reason": reason,
+        **extra,
+    })
+
+
 def _generate_single_image(
         request: ConversationRequest,
         index: int,
@@ -1443,7 +1738,12 @@ def _generate_single_image(
     model_not_found_retry_count = 0
     forbidden_retry_count = 0
     stream_reset_retry_count = 0
+    not_started_switch_count = 0
+    account_issue_switch_count = 0
     tried_upload_tokens: set[str] = set()
+    # 上游没开画后换下来的号：本次请求不再选（和 avoided_tokens 不同，没号可选时也不清空）
+    not_started_tokens: set[str] = set()
+    last_not_started: ImageGenerationError | None = None
     # 换号生成：每个号最多等 image_failover_secs 出图，超时换号；所有尝试合计不超过总的等图时限。
     # 调用方显式给了 poll_timeout_secs（如账号测试）时不换号。
     failover_enabled = config.image_failover_enabled and not request.poll_timeout_secs
@@ -1452,6 +1752,7 @@ def _generate_single_image(
     avoided_tokens: set[str] = set()
     for_edits = bool(request.images)
     account_email = ""
+    request_key = id(request)
 
     while True:
         try:
@@ -1463,7 +1764,7 @@ def _generate_single_image(
                 plan_type=plan_type,
                 source_type="codex" if codex_model else None,
                 plan_types=("plus", "team", "pro") if codex_model and not plan_type else None,
-                excluded_tokens=tried_upload_tokens | avoided_tokens,
+                excluded_tokens=tried_upload_tokens | avoided_tokens | not_started_tokens,
                 for_edits=for_edits,
             )
         except RuntimeError as exc:
@@ -1471,8 +1772,12 @@ def _generate_single_image(
                 # 其他出口没有可用的号，退回同出口的号
                 avoided_tokens.clear()
                 continue
+            if last_not_started is not None:
+                # 没有没试过的号了：报上一次没开画的原因，比「没有可用额度」更有用
+                raise last_not_started from exc
             raise ImageGenerationError(str(exc) or "image generation failed", account_email=account_email) from exc
 
+        slot = _ImageSlot(token)
         emitted_for_token = False
         returned_message = False
         returned_result = False
@@ -1480,12 +1785,13 @@ def _generate_single_image(
         attempt_wait_secs = 0
         if failover_enabled:
             attempt_wait_secs = max(1, min(config.image_failover_secs, failover_budget_secs))
-            attempt_request = replace(request, failover_timeout_secs=attempt_wait_secs)
+            attempt_request = replace(request, failover_timeout_secs=attempt_wait_secs,
+                                      task_poll_timeout_secs=failover_budget_secs)
         account = account_service.get_account(token) or {}
         account_email = str(account.get("email") or "").strip()
         logger.debug({
             "event": "image_account_lookup",
-            "token_prefix": token[:12] + "..." if len(token) > 12 else token,
+            "token": anonymize_token(token),
             "account_email": account_email,
             "account_found": bool(account),
             "index": index,
@@ -1523,10 +1829,11 @@ def _generate_single_image(
             finally:
                 _remove_image_conversation_later(backend, last_conversation_id, success=returned_result)
             if returned_message:
-                account_service.mark_image_result(token, False)
+                slot.finish(False)
+                _log_attempt(index, token, account_email, "finish", "returned_message", conversation_id=last_conversation_id)
                 return outputs
             if not returned_result:
-                account_service.mark_image_result(token, False)
+                slot.finish(False)
                 if emitted_for_token:
                     conv_id = outputs[-1].conversation_id if outputs else ""
                     raise ImageGenerationError(
@@ -1538,11 +1845,64 @@ def _generate_single_image(
                         conversation_id=conv_id,
                     )
                 return outputs
-            account_service.mark_image_result(token, True)
+            slot.finish(True)
+            _log_attempt(index, token, account_email, "success", "image_returned", conversation_id=last_conversation_id)
             return outputs
+        except ImageInputTooLargeError as exc:
+            # 请求本身太长，换哪个号都一样；也不算账号故障
+            slot.finish(None)
+            exc.account_email = exc.account_email or account_email
+            _log_attempt(index, token, account_email, "finish", "input_too_large", exc)
+            raise
+        except ImageNotStartedError as exc:
+            exc.account_email = exc.account_email or account_email
+            reason = exc.reason
+            if reason == "cannot_generate":
+                # 这个号在此对话里生不了图：记账号失败；同一个号在不同请求里反复这样才暂停给它派新的生图
+                slot.finish(False)
+                if note_cannot_generate(account_email or token, request_key):
+                    account_service.sideline_image_account(token, CANNOT_GENERATE_COOLDOWN_SECS)
+                    _log_attempt(index, token, account_email, "sideline", "cannot_generate_repeated", exc,
+                                 sideline_secs=CANNOT_GENERATE_COOLDOWN_SECS)
+            elif reason == "quota_exhausted":
+                # 额度用完：按重置时间暂停派新的生图，账号状态和已在跑的任务都不动
+                slot.finish(None)
+                reset_secs = quota_reset_secs(exc.upstream_text, account)
+                account_service.sideline_image_account(token, reset_secs)
+                _log_attempt(index, token, account_email, "sideline", "quota_exhausted", exc, sideline_secs=reset_secs)
+            else:
+                # 只回文案或空回复：多半跟这次的请求有关，不算账号失败
+                slot.finish(None)
+            not_started_tokens.add(token)
+            last_not_started = exc
+            if reason in {"cannot_generate", "quota_exhausted"}:
+                can_switch = account_issue_switch_count < MAX_ACCOUNT_ISSUE_SWITCHES
+                if can_switch:
+                    account_issue_switch_count += 1
+            else:
+                can_switch = not_started_switch_count < MAX_NOT_STARTED_SWITCHES
+                if can_switch:
+                    not_started_switch_count += 1
+            _log_attempt(index, token, account_email, "switch" if can_switch else "finish", f"not_started:{reason}", exc)
+            if can_switch:
+                continue
+            raise
         except ImagePollTimeoutError as exc:
             if account_email:
                 setattr(exc, "account_email", account_email)
+            if getattr(exc, "task_started", False):
+                # 上游已经开画，已经在原号上把剩下的时限等完：不换号（换号会重复开画）
+                slot.finish(False)
+                waited = int(getattr(exc, "waited_secs", 0) or failover_budget_secs)
+                _log_attempt(index, token, account_email, "finish", "task_started_timeout", exc, waited_secs=waited)
+                started_error = ImagePollTimeoutError(
+                    f"ChatGPT 生图超时：上游已经开始生成，同一个账号等了 {waited} 秒仍没有出图。"
+                    f"为免重复生成没有换号，请稍后重试。",
+                    exc.conversation_id,
+                )
+                if account_email:
+                    setattr(started_error, "account_email", account_email)
+                raise started_error from exc
             if failover_enabled:
                 # 换号生成：超时是这次对话卡住，不算账号失败；换一个号重新生成
                 failover_budget_secs -= attempt_wait_secs
@@ -1554,26 +1914,15 @@ def _generate_single_image(
                 if can_retry:
                     poll_timeout_retry_count += 1
                     avoided_tokens.add(token)
-                    # 不记账号失败，但并发名额必须还：mark_image_result 不调就只能在这里释放，否则名额一直占着
-                    account_service.release_image_slot(token)
-                    logger.warning({
-                        "event": "image_failover_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "waited_secs": attempt_wait_secs,
-                        "budget_left_secs": failover_budget_secs,
-                        "retry_count": poll_timeout_retry_count,
-                        "index": index,
-                    })
+                    # 不记账号失败，但并发名额必须还
+                    slot.finish(None)
+                    _log_attempt(index, token, account_email, "switch", "failover_timeout", exc,
+                                 waited_secs=attempt_wait_secs, budget_left_secs=failover_budget_secs,
+                                 retry_count=poll_timeout_retry_count)
                     continue
-                account_service.mark_image_result(token, False)
-                logger.warning({
-                    "event": "image_failover_exhausted",
-                    "request_token": token,
-                    "account_email": account_email,
-                    "retry_count": poll_timeout_retry_count,
-                    "index": index,
-                })
+                slot.finish(False)
+                _log_attempt(index, token, account_email, "finish", "failover_exhausted", exc,
+                             retry_count=poll_timeout_retry_count)
                 failover_error = ImagePollTimeoutError(
                     f"ChatGPT 生图超时：换了 {poll_timeout_retry_count + 1} 个账号，"
                     f"每个最多等 {config.image_failover_secs} 秒都没有出图，上游可能正拥堵，请稍后重试。",
@@ -1582,38 +1931,21 @@ def _generate_single_image(
                 if account_email:
                     setattr(failover_error, "account_email", account_email)
                 raise failover_error from exc
-            account_service.mark_image_result(token, False)
+            slot.finish(False)
             # 轮询超时：换账号重试
             if not emitted_for_token:
                 poll_timeout_retry_count += 1
                 if poll_timeout_retry_count <= MAX_POLL_TIMEOUT_RETRIES:
-                    logger.warning({
-                        "event": "image_poll_timeout_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "retry_count": poll_timeout_retry_count,
-                        "index": index,
-                        "error": str(exc)[:200],
-                    })
+                    _log_attempt(index, token, account_email, "switch", "poll_timeout", exc,
+                                 retry_count=poll_timeout_retry_count)
                     continue
-                logger.warning({
-                    "event": "image_poll_timeout_exhausted_retries",
-                    "request_token": token,
-                    "account_email": account_email,
-                    "retry_count": poll_timeout_retry_count,
-                    "index": index,
-                })
+                _log_attempt(index, token, account_email, "finish", "poll_timeout_exhausted", exc,
+                             retry_count=poll_timeout_retry_count)
                 raise
             raise
         except ImageContentPolicyError as exc:
-            account_service.mark_image_result(token, False)
-            logger.warning({
-                "event": "image_stream_content_policy_error",
-                "request_token": token,
-                "account_email": account_email,
-                "error": str(exc),
-                "index": index,
-            })
+            slot.finish(False)
+            _log_attempt(index, token, account_email, "finish", "content_policy", exc, error=str(exc)[:200])
             raise ImageGenerationError(
                 str(exc) or "Image generation was rejected by upstream policy.",
                 status_code=400,
@@ -1623,30 +1955,21 @@ def _generate_single_image(
                 conversation_id=getattr(exc, "conversation_id", ""),
             ) from exc
         except ImageGenerationError as exc:
-            account_service.mark_image_result(token, False)
+            slot.finish(False)
             if account_email and not getattr(exc, "account_email", ""):
                 exc.account_email = account_email
             error_text = str(exc)
-            # 如果是模型返回文本而非图片，尝试换账号重试
-            if is_model_text_reply_instead_of_image(error_text) and not emitted_for_token:
+            # 模型回了带生图参数 JSON 的文字、等图后仍没有图：换一个没试过的号重试。
+            # 只看这次有没有出图，普通的 SSE 进度不挡重试。
+            if is_model_text_reply_instead_of_image(error_text) and not returned_result:
                 text_reply_retry_count += 1
+                not_started_tokens.add(token)
                 if text_reply_retry_count <= MAX_TEXT_REPLY_RETRIES:
-                    logger.warning({
-                        "event": "image_model_text_reply_retry",
-                        "request_token": token,
-                        "account_email": account_email,
-                        "retry_count": text_reply_retry_count,
-                        "index": index,
-                        "error": error_text[:200],
-                    })
+                    _log_attempt(index, token, account_email, "switch", "text_reply_with_tool_params", exc,
+                                 retry_count=text_reply_retry_count)
                     continue
-                logger.warning({
-                    "event": "image_model_text_reply_exhausted_retries",
-                    "request_token": token,
-                    "account_email": account_email,
-                    "retry_count": text_reply_retry_count,
-                    "index": index,
-                })
+                _log_attempt(index, token, account_email, "finish", "text_reply_retries_exhausted", exc,
+                             retry_count=text_reply_retry_count)
                 raise ImageGenerationError(
                     "Image generation failed: the upstream model returned a text description "
                     "instead of generating an image. Please try again later.",
@@ -1656,20 +1979,14 @@ def _generate_single_image(
                     account_email=account_email,
                     conversation_id=getattr(exc, "conversation_id", ""),
                 ) from exc
-            logger.warning({
-                "event": "image_stream_generation_error",
-                "request_token": token,
-                "account_email": account_email,
-                "error": error_text,
-                "index": index,
-            })
+            _log_attempt(index, token, account_email, "finish", "generation_error", exc, error=error_text[:200])
             raise
         except Exception as exc:
-            account_service.mark_image_result(token, False)
+            slot.finish(False)
             last_error = str(exc)
             logger.warning({
                 "event": "image_stream_fail",
-                "request_token": token,
+                "token": anonymize_token(token),
                 "account_email": account_email,
                 "error": last_error,
                 "index": index,
@@ -1695,7 +2012,7 @@ def _generate_single_image(
                     avoided_tokens |= account_service.same_proxy_tokens(token)
                     logger.warning({
                         "event": "image_forbidden_retry",
-                        "request_token": token,
+                        "token": anonymize_token(token),
                         "account_email": account_email,
                         "retry_count": forbidden_retry_count,
                         "index": index,
@@ -1710,7 +2027,7 @@ def _generate_single_image(
                     avoided_tokens.add(token)
                     logger.warning({
                         "event": "image_stream_reset_retry",
-                        "request_token": token,
+                        "token": anonymize_token(token),
                         "account_email": account_email,
                         "retry_count": stream_reset_retry_count,
                         "index": index,
@@ -1729,7 +2046,7 @@ def _generate_single_image(
                 if tls_retry_count <= MAX_TLS_RETRIES:
                     logger.warning({
                         "event": "image_stream_tls_retry",
-                        "request_token": token,
+                        "token": anonymize_token(token),
                         "account_email": account_email,
                         "retry_count": tls_retry_count,
                         "index": index,
@@ -1744,7 +2061,7 @@ def _generate_single_image(
                     wait_secs = min(3.0 * conn_timeout_retry_count, 9.0)
                     logger.warning({
                         "event": "image_stream_conn_timeout_retry",
-                        "request_token": token,
+                        "token": anonymize_token(token),
                         "account_email": account_email,
                         "retry_count": conn_timeout_retry_count,
                         "index": index,
@@ -1765,7 +2082,7 @@ def _generate_single_image(
                 if edit_upload_retry_count <= MAX_EDIT_UPLOAD_THROTTLE_RETRIES:
                     logger.warning({
                         "event": "image_edit_upload_throttle_retry",
-                        "request_token": token,
+                        "token": anonymize_token(token),
                         "account_email": account_email,
                         "retry_count": edit_upload_retry_count,
                         "index": index,
@@ -1774,13 +2091,15 @@ def _generate_single_image(
                     continue
                 logger.warning({
                     "event": "image_edit_upload_throttle_exhausted_retries",
-                    "request_token": token,
+                    "token": anonymize_token(token),
                     "account_email": account_email,
                     "retry_count": edit_upload_retry_count,
                     "index": index,
                 })
             raise ImageGenerationError(image_stream_error_message(last_error), account_email=account_email, conversation_id="") from exc
         finally:
+            # 兜底：任何没走到 finish 的路径也把名额还掉（只还一次，不记失败）
+            slot.finish(None)
             if backend is not None:
                 backend.close()
 
