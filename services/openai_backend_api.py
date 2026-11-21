@@ -27,6 +27,7 @@ from services.account_service import account_service
 from services.config import config
 from services.proxy_list_service import proxy_list
 from services.proxy_service import proxy_settings
+from utils.image_refusal import is_policy_refusal
 from utils.helper import (
     UpstreamHTTPError,
     codex_tool_model,
@@ -156,24 +157,9 @@ CODEX_RESPONSES_INSTRUCTIONS = (
 )
 
 # 内容政策违规错误关键词（上游拒绝生成图片的各种表述）
-_CONTENT_POLICY_KEYWORDS = (
-    # 明确的内容政策违规
-    "内容政策", "防护限制", "违反", "moderation", "policy", "blocked",
-    # 拒绝生成类
-    "不能生成", "无法生成", "不能帮助", "无法帮助",
-    # 敏感内容类
-    "裸体", "裸露", "色情", "性内容", "未成年",
-    # 通用拒绝
-    "抱歉，我不能",
-)
-
-
 def _is_content_policy_error(error_msg: str) -> bool:
-    """检查错误消息是否为内容政策违规。"""
-    if not error_msg:
-        return False
-    msg_lower = error_msg.lower()
-    return any(keyword in msg_lower for keyword in _CONTENT_POLICY_KEYWORDS)
+    """检查错误消息是否为内容政策拒绝。和串流文字、任务查询用同一套整句判断（utils.image_refusal）。"""
+    return is_policy_refusal(error_msg)
 
 
 @dataclass

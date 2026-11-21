@@ -33,6 +33,7 @@ from utils.helper import (
     is_supported_image_model,
     split_image_model,
 )
+from utils.image_refusal import is_policy_refusal
 from utils.image_tokens import count_image_content_tokens
 from utils.image_upscale import fit_to_size, requested_dimensions, requested_long_edge, upscale_to_edge
 from utils.log import logger
@@ -1009,8 +1010,13 @@ _CANNOT_GENERATE_RE = re.compile(
     r"[^.!?\n]{0,30}\b(images?|pictures?)\b[^.!?\n]{0,20}\b(this|the current)\s+(chat|conversation)",
     re.IGNORECASE,
 )
-# 明确的内容政策字眼优先：「无法生成这张图片，因为违反了内容政策」是拒绝，不是账号生不了图
-_STRONG_POLICY_RE = re.compile(r"违反|違反|内容政策|內容政策|防护限制|防護限制|content policy|violat", re.IGNORECASE)
+# 上游服务自己出错：「生图服务暂时不可用，请稍后再试」
+_SERVICE_ERROR_RE = re.compile(
+    r"暂时不可用|暫時不可用|服务(?:繁忙|异常|出错|故障|不可用)|服務(?:繁忙|異常|出錯|故障|不可用)"
+    r"|稍后再试|稍後再試|出了点问题|出了點問題|temporarily unavailable|service unavailable|try again later"
+    r"|something went wrong",
+    re.IGNORECASE,
+)
 # 线上原话：「我目前无法直接在此对图片进行生成或编辑」
 _CANNOT_GENERATE_HERE_RE = re.compile(
     r"(无法|不能|没法|没办法|無法)[^。！？!?\n]{0,6}在(此|这|這)[^。！？!?\n]{0,10}"
@@ -1069,26 +1075,21 @@ class ImageTaskProbe:
 
 
 def classify_not_started_text(text: str) -> str:
-    """没开画时上游回的文字属于哪一类：cannot_generate / quota_exhausted / policy / text_only / empty。"""
-    from services.openai_backend_api import _is_content_policy_error
-
+    """没开画时上游回的文字属于哪一类：
+    policy / cannot_generate / quota_exhausted / service_error / text_only / empty。
+    政策拒绝要整句判断（utils.image_refusal），只提到「内容政策」「无法生成」不算。"""
     text = str(text or "").strip()
     if not text:
         return "empty"
-    if _STRONG_POLICY_RE.search(text):
+    if is_policy_refusal(text):
         return "policy"
     if _CANNOT_GENERATE_RE.search(text) or _CANNOT_GENERATE_HERE_RE.search(text):
         return "cannot_generate"
     if _QUOTA_IMAGE_RE.search(text) and _QUOTA_LIMIT_RE.search(text) and _QUOTA_EXHAUSTED_RE.search(text):
         return "quota_exhausted"
-    if _is_content_policy_error(text):
-        return "policy"
+    if _SERVICE_ERROR_RE.search(text):
+        return "service_error"
     return "text_only"
-
-
-def is_policy_refusal(text: str) -> bool:
-    """上游的文字是不是明确的内容政策拒绝。"""
-    return classify_not_started_text(text) == "policy"
 
 
 def quota_reset_secs(text: str, account: dict | None = None) -> int:
@@ -1291,6 +1292,9 @@ def stream_image_outputs(
                                      "input_too_large" if error_code == INPUT_TOO_LARGE_CODE else text_kind)
                 if error_code == INPUT_TOO_LARGE_CODE:
                     raise ImageInputTooLargeError(str(last.get("error_message") or ""), conversation_id)
+                if text_kind == "service_error":
+                    # 上游说生图服务出错：回上游服务错误，不换号、不算账号故障
+                    raise ImageUpstreamTaskError(message, conversation_id)
                 if text_kind != "policy":
                     if request.message_as_error:
                         raise ImageNotStartedError(text_kind, message, error_code=error_code, conversation_id=conversation_id)

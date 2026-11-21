@@ -61,6 +61,15 @@ SERVICE_DOWN_TASK = {"conversation_id": CONV_ID, "image_gen_message": {
     "author": {"role": "assistant"}, "metadata": {"is_error": True},
     "content": {"content_type": "text", "parts": ["服务暂时不可用，请稍后再试。"]}}}
 IMAGE_POLICY = "非常抱歉，生成的图片可能违反了关于裸露、色情或情色内容的防护限制。如果你认为此判断有误，请重试或修改提示语。"
+# 用户给的两句上游原话
+POSTER_REPLY = "好的，我会为你制作这张介绍内容政策的海报。"
+SERVICE_DOWN = "生图服务暂时不可用，无法生成图片，请稍后再试。"
+SERVICE_DOWN_TASK_2 = {"conversation_id": CONV_ID, "image_gen_message": {
+    "author": {"role": "assistant"}, "metadata": {"is_error": True},
+    "content": {"content_type": "text", "parts": [SERVICE_DOWN]}}}
+DOC_IMAGE = {"author": {"role": "tool"}, "recipient": "all", "metadata": {"async_task_type": "image_gen"},
+             "content": {"content_type": "multimodal_text", "parts": [
+                 {"content_type": "image_asset_pointer", "asset_pointer": "sediment://file_0000000099aa"}]}}
 POLICY_TASK = {"conversation_id": CONV_ID, "image_gen_message": {
     "author": {"role": "assistant"}, "metadata": {"is_error": True},
     "content": {"content_type": "text", "parts": ["非常抱歉，生成的图片可能违反了我们的内容政策。"]}}}
@@ -119,6 +128,34 @@ class FakeBackend(OpenAIBackendAPI):
 
     def close(self):
         pass
+
+
+class RealPollBackend(FakeBackend):
+    """用真实的等图轮询和结果解析读会话文档（会话里的助手文字也走真实的政策判断）。
+    docs 按读取顺序返回；poll_task_error 不为空时模拟「等图超时后读到任务错误」。"""
+
+    resolve_conversation_image_urls = OpenAIBackendAPI.resolve_conversation_image_urls
+    _real_poll = OpenAIBackendAPI._poll_image_results
+
+    def __init__(self, payloads, docs=(), tasks=None, poll_task_error=""):
+        super().__init__(payloads, doc=document(), tasks=tasks)
+        self.docs = list(docs)
+        self.poll_task_error = poll_task_error
+
+    def _get_conversation(self, conversation_id):
+        self.doc_reads += 1
+        return self.docs.pop(0) if len(self.docs) > 1 else (self.docs[0] if self.docs else self.doc)
+
+    def _poll_image_results(self, conversation_id, timeout_secs=120.0, initial_file_ids=None, initial_sediment_ids=None):
+        self.poll_timeouts.append(timeout_secs)
+        if self.poll_task_error:
+            timeout = ImagePollTimeoutError(f"ChatGPT 生图超时（已等待 {timeout_secs} 秒）。", conversation_id)
+            timeout.task_error = self.poll_task_error
+            raise timeout
+        return self._real_poll(conversation_id, timeout_secs, initial_file_ids, initial_sediment_ids)
+
+    def _resolve_image_urls(self, conversation_id, file_ids, sediment_ids):
+        return [f"https://files.example/{item}.png" for item in [*file_ids, *sediment_ids]]
 
 
 class Sleeps:
@@ -529,8 +566,10 @@ class ImageApiEntryTests(unittest.TestCase):
                 return free[0]
 
         service.get_available_access_token.side_effect = pick
+        self.service = service
         settings = {"image_failover_enabled": True, "image_failover_secs": 60, "image_poll_timeout_secs": 600,
-                    "image_parallel_generation": parallel}
+                    "image_parallel_generation": parallel, "image_check_before_hit_enabled": False,
+                    "image_settle_enabled": False}
         with contextlib.ExitStack() as stack:
             for name, value in settings.items():
                 stack.enter_context(mock.patch.object(type(conversation.config), name, new_callable=mock.PropertyMock,
@@ -615,6 +654,56 @@ class ImageApiEntryTests(unittest.TestCase):
                 self.assertEqual(len(picked), 1)
                 self.assertEqual(backend.poll_timeouts, [])
 
+    def test_drawing_turn_whose_text_mentions_content_policy_returns_the_image(self):
+        # 同一轮已标记生图，图已写进会话，但 SSE 还没有图片 ID；助手文字只是提到「内容政策」
+        for name, docs in (
+            ("image already in the conversation", [document(doc_text(POSTER_REPLY), DOC_IMAGE)]),
+            ("text first, image on the next read", [document(doc_text(POSTER_REPLY)), document(doc_text(POSTER_REPLY), DOC_IMAGE)]),
+        ):
+            with self.subTest(case=name):
+                backend = RealPollBackend(sse(START, PROGRESS, assistant(POSTER_REPLY), metadata(True, "image gen")), docs=docs)
+                response, picked = self.post({"one": backend, "two": backend}, path="/v1/images/edits")
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(len(response.json()["data"]), 1)
+                self.assertEqual(len(picked), 1)
+                self.assertEqual(backend.poll_timeouts, [600])  # 在原账号上取回，不换号
+                self.service.mark_image_result.assert_called_once_with("one", True)
+
+    def test_service_down_in_the_task_list_is_502_on_one_account(self):
+        backend = FakeBackend(sse(START, metadata(False, "unknown")), tasks=[SERVICE_DOWN_TASK_2])
+        response, picked = self.post({"one": backend, "two": backend}, path="/v1/images/edits")
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(self.code(response), "upstream_service_error")
+        self.assertIn(SERVICE_DOWN, response.json()["error"]["message"])
+        self.assertEqual(len(picked), 1)  # 不换号
+        self.service.mark_image_result.assert_not_called()  # 不记账号故障
+        self.service.release_image_slot.assert_called_once_with("one")
+        self.assertEqual(backend.poll_timeouts, [])
+
+    def test_service_down_after_the_poll_times_out_is_502_too(self):
+        # 已开画，等图超时后读到任务错误：同一句服务错误也要是 502
+        backend = RealPollBackend(sse(START, PROGRESS, metadata(True, "image gen")), poll_task_error=SERVICE_DOWN)
+        response, picked = self.post({"one": backend, "two": backend}, path="/v1/images/edits")
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(self.code(response), "upstream_service_error")
+        self.assertEqual(len(picked), 1)
+        self.service.mark_image_result.assert_not_called()
+
+    def test_service_down_in_the_stream_text_is_502_on_one_account(self):
+        backend = FakeBackend(sse(START, assistant(SERVICE_DOWN), metadata(False, "chat")), doc=document(doc_text(SERVICE_DOWN)))
+        response, picked = self.post({"one": backend, "two": backend}, path="/v1/images/edits")
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(self.code(response), "upstream_service_error")
+        self.assertEqual(len(picked), 1)
+
+    def test_real_refusal_in_the_conversation_document_still_ends_with_400(self):
+        # 会话文档里的助手文字走同一套判断：真正的拒绝仍然是 400，只用一个号
+        backend = RealPollBackend(sse(START, PROGRESS, metadata(True, "image gen")), docs=[document(doc_text(IMAGE_POLICY))])
+        response, picked = self.post({"one": backend, "two": backend}, path="/v1/images/edits")
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(self.code(response), "content_policy_violation")
+        self.assertEqual(len(picked), 1)
+
     def test_task_check_failure_waits_on_the_same_account_before_switching(self):
         unsure = FakeBackend(sse(START, assistant(COPY_ONLY), metadata(False, "multimodal")),
                              doc=document(doc_text(COPY_ONLY)), tasks_error=TimeoutError("tasks timed out"))
@@ -650,10 +739,52 @@ class PollTaskErrorTests(unittest.TestCase):
     def test_service_error_is_not_a_policy_violation(self):
         from services.openai_backend_api import ImageContentPolicyError, ImageUpstreamTaskError
 
-        with self.assertRaises(ImageUpstreamTaskError):
-            self.resolve_with_task_error("服务暂时不可用，请稍后再试。")
+        for text in ("服务暂时不可用，请稍后再试。", SERVICE_DOWN):
+            with self.subTest(text=text), self.assertRaises(ImageUpstreamTaskError):
+                self.resolve_with_task_error(text)
         with self.assertRaises(ImageContentPolicyError):
             self.resolve_with_task_error("非常抱歉，生成的图片可能违反了我们的内容政策。")
+
+
+class PolicyJudgementConsistencyTests(unittest.TestCase):
+    """串流文字、任务查询、等图超时后的任务错误、会话文档里的助手文字：对同一句话结论一致。"""
+
+    SENTENCES = (
+        (POSTER_REPLY, False),
+        (SERVICE_DOWN, False),
+        ("这段提示词没有违反任何内容政策，我来帮你整理一下。", False),
+        ("This poster explains our content policy and blocked words.", False),
+        ("The request was blocked.", False),
+        ("我无法生成这张图片。", False),
+        (IMAGE_POLICY, True),
+        (POLICY, True),
+        ("我无法在此生成这类内容，因为它违反了我们的内容政策", True),
+        ("I'm sorry, but this image may violate our content policies.", True),
+        ("Sorry. This request violates our usage policies.", True),
+    )
+
+    def test_every_path_agrees(self):
+        from services.openai_backend_api import _is_content_policy_error
+        from utils.image_refusal import is_policy_refusal
+
+        for text, expected in self.SENTENCES:
+            with self.subTest(text=text[:24]):
+                self.assertEqual(is_policy_refusal(text), expected)
+                self.assertEqual(conversation.classify_not_started_text(text) == "policy", expected)  # 串流文字
+                self.assertEqual(_is_content_policy_error(text), expected)  # 任务错误、等图超时后的转换
+                found = OpenAIBackendAPI._find_content_policy_error_in_conversation(document(doc_text(text)))
+                self.assertEqual(bool(found), expected)  # 会话文档里的助手文字
+                task = {"image_gen_message": {"author": {"role": "assistant"}, "metadata": {"is_error": True},
+                                              "content": {"content_type": "text", "parts": [text]}}}
+                probe_backend = FakeBackend([], tasks=[dict(task, conversation_id=CONV_ID)])
+                with mock.patch.object(conversation.time, "sleep"):
+                    state = conversation.probe_image_task(probe_backend, CONV_ID).state
+                self.assertEqual(state, "refused" if expected else "service_error")  # 快速查任务
+
+    def test_service_errors_are_their_own_kind(self):
+        self.assertEqual(conversation.classify_not_started_text(SERVICE_DOWN), "service_error")
+        self.assertEqual(conversation.classify_not_started_text("目前无法在此对话中直接生成图片。"), "cannot_generate")
+        self.assertEqual(conversation.classify_not_started_text(QUOTA_EXHAUSTED), "quota_exhausted")
 
 
 class SharedAccountSlotTests(unittest.TestCase):
