@@ -52,6 +52,7 @@ type Service struct {
 	// Daily image counts are added up in memory and written by one goroutine: every successful
 	// image call bumps the same row, and doing that inside each call's transaction made concurrent
 	// calls wait for each other's commit. Reads add what is not written yet, so counts stay exact.
+	commitMu  sync.RWMutex // a count write commits under it; reads of the counts share it
 	countMu   sync.Mutex
 	countCond *sync.Cond
 	pending   map[countKey]int64 // not written yet
@@ -134,6 +135,8 @@ func (s *Service) writeCounts() {
 		batch := s.inWrite
 		s.countMu.Unlock()
 
+		// a reader sees the batch either in the table or in inWrite, never in neither
+		s.commitMu.Lock()
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			for key, n := range batch {
 				row := DailyCount{Day: key.day}
@@ -153,6 +156,7 @@ func (s *Service) writeCounts() {
 		})
 		s.countMu.Lock()
 		s.inWrite = nil
+		s.commitMu.Unlock()
 		if err != nil {
 			log.Printf("image count write failed (kept, retried with the next count): %v", err)
 			for key, n := range batch {
@@ -270,10 +274,14 @@ func (s *Service) Delete(ids []string) (int64, error) {
 // ImageOutputCounts is image_output_counts: successful images per kind in UTC+8 windows.
 func (s *Service) ImageOutputCounts(now time.Time) (map[string]map[string]int64, error) {
 	var rows []DailyCount
-	if err := s.db.Find(&rows).Error; err != nil {
+	s.commitMu.RLock()
+	err := s.db.Find(&rows).Error
+	unwritten := s.unwritten()
+	s.commitMu.RUnlock()
+	if err != nil {
 		return nil, err
 	}
-	for key, n := range s.unwritten() {
+	for key, n := range unwritten {
 		row := DailyCount{Day: key.day}
 		if key.column == "edits" {
 			row.Edits = n
