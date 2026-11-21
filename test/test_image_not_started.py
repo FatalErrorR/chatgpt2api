@@ -57,6 +57,9 @@ def doc_text(text: str) -> dict:
 DOC_TOOL_CALL = {"author": {"role": "assistant"}, "recipient": "t2uay3k.sj1i4kz",
                  "content": {"content_type": "code", "text": '{"size":"1024x1024","n":1,"prompt":"a cat"}'}}
 
+POLICY_TASK = {"conversation_id": CONV_ID, "image_gen_message": {
+    "author": {"role": "assistant"}, "metadata": {"is_error": True},
+    "content": {"content_type": "text", "parts": ["非常抱歉，生成的图片可能违反了我们的内容政策。"]}}}
 COPY_ONLY = "你的提示词已经非常完整，以下是整理后的精简版本：画面中央一只猫，暖色调，柔和光线。"
 CANNOT_GENERATE = "目前无法在此对话中直接生成图片。\n\n可以使用以下精简提示词：纯白背景，中央一个小黑点。"
 QUOTA_EXHAUSTED = "你已达到免费套餐的图片生成上限，限制将在 23 小时 10 分钟后重置。"
@@ -69,11 +72,12 @@ class FakeBackend(OpenAIBackendAPI):
     def __new__(cls, *args, **kwargs):
         return object.__new__(cls)
 
-    def __init__(self, payloads, doc=None, tasks=None, doc_error=None):
+    def __init__(self, payloads, doc=None, tasks=None, doc_error=None, tasks_error=None):
         self.payloads = payloads
         self.doc = doc if doc is not None else document()
         self.tasks = tasks or []
         self.doc_error = doc_error
+        self.tasks_error = tasks_error
         self.poll_timeouts: list[float] = []
         self.doc_reads = 0
 
@@ -87,6 +91,8 @@ class FakeBackend(OpenAIBackendAPI):
         return self.doc
 
     def _query_backend_tasks(self, conversation_id="", task_id="", timeout_secs=30.0):
+        if self.tasks_error:
+            raise self.tasks_error
         return self.tasks
 
     def _poll_image_results(self, conversation_id, timeout_secs=120.0, initial_file_ids=None, initial_sediment_ids=None):
@@ -234,6 +240,41 @@ class StreamAssessmentTests(unittest.TestCase):
         self.assertIsInstance(error, ImagePollTimeoutError)  # 走原来的等图流程
         self.assertEqual(backend.poll_timeouts, [60])
 
+    def test_task_list_timeout_keeps_the_state_unknown_and_waits_on_the_same_account(self):
+        # 会话里暂时没图，任务列表又查不到：不能当成没开画
+        backend = FakeBackend(sse(START, assistant(COPY_ONLY), metadata(False, "multimodal")),
+                              doc=document(doc_text(COPY_ONLY)), tasks_error=TimeoutError("tasks timed out"))
+        _, error, _ = self.run_stream(backend)
+        self.assertNotIsInstance(error, conversation.ImageNotStartedError)
+        self.assertIsInstance(error, ImagePollTimeoutError)
+        self.assertFalse(getattr(error, "task_started", False))
+        self.assertEqual(backend.poll_timeouts, [60])  # 先在原账号上按单号时限等一轮
+
+    def test_task_list_refusal_without_text_ends_with_the_refusal(self):
+        backend = FakeBackend(sse(START, metadata(False, "unknown")), tasks=[POLICY_TASK])
+        outputs, error, _ = self.run_stream(backend, images=["ref"])
+        self.assertIsNone(error)
+        self.assertEqual(outputs[-1].kind, "message")
+        self.assertIn("内容政策", outputs[-1].text)
+        self.assertEqual(backend.poll_timeouts, [])
+
+    def test_tool_params_marked_as_task_error_still_counts_as_running(self):
+        params_task = {"conversation_id": CONV_ID, "image_gen_message": {
+            "author": {"role": "assistant"}, "metadata": {"is_error": True},
+            "content": {"content_type": "text", "parts": ['{"size":"1024x1024","n":1}']}}}
+        backend = FakeBackend(sse(START, metadata(False, "unknown")), tasks=[params_task])
+        _, error, _ = self.run_stream(backend, images=["ref"])
+        self.assertTrue(getattr(error, "task_started", False))
+
+    def test_input_too_large_without_tool_invoked_is_checked_too(self):
+        for doc, expected in ((document(), conversation.ImageInputTooLargeError),
+                              (document(DOC_TOOL_CALL), ImagePollTimeoutError)):
+            with self.subTest(expected=expected.__name__):
+                backend = FakeBackend(sse(START, TOO_LARGE), doc=doc)  # 没有 server_ste_metadata
+                _, error, _ = self.run_stream(backend, images=["ref"])
+                self.assertIsInstance(error, expected)
+                self.assertEqual(backend.doc_reads, 1)
+
     def test_missing_tool_invoked_keeps_the_state_unknown(self):
         backend = FakeBackend(sse(START, PROGRESS))
         _, error, _ = self.run_stream(backend, images=["ref"])
@@ -263,6 +304,8 @@ class StreamAssessmentTests(unittest.TestCase):
             ("目前无法直接在此对话中生成图片，但可以帮你整理提示词", "cannot_generate"),
             ("我目前无法在这个聊天中直接生成或编辑图片", "cannot_generate"),
             ("I can't generate images in this chat, but here is a prompt.", "cannot_generate"),
+            ("我目前无法直接在此对图片进行生成或编辑", "cannot_generate"),  # 线上原话
+            ("我无法在此生成这类内容，因为它违反了我们的内容政策", "policy"),  # 政策字眼优先
             (QUOTA_EXHAUSTED, "quota_exhausted"),
             ("You've hit the free plan limit for image generation requests. It resets in 5 hours.", "quota_exhausted"),
             (POLICY, "policy"),
@@ -435,6 +478,113 @@ class GenerateAttemptTests(unittest.TestCase):
         self.assertEqual(outcomes[0]["reason"], "not_started:text_only")
         assessed = [item for item in payloads if item.get("event") == "image_turn_assessed"]
         self.assertTrue(assessed and assessed[0]["task_state"] == "none")
+
+
+class ImageApiEntryTests(unittest.TestCase):
+    """从 /v1/images/generations 入口验证最终的 HTTP 状态和错误码（单张、多张）。"""
+
+    def setUp(self):
+        import os
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        import api.ai as ai_module
+        import services.log_service as log_module
+
+        conversation._cannot_generate_seen.clear()
+        self.addCleanup(conversation._cannot_generate_seen.clear)
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(mock.patch.dict(os.environ, {"CHATGPT2API_AUTH_KEY": "chatgpt2api"}))
+        stack.enter_context(mock.patch.object(log_module.log_service, "add"))
+        self.stack = stack
+        app = FastAPI()
+        app.include_router(ai_module.create_router())
+        self.client = TestClient(app)
+
+    def post(self, backends, *, n=1, parallel=True, tokens=("one", "two", "three")):
+        service = mock.Mock()
+        service.get_account.side_effect = lambda token: {"email": f"account{tokens.index(token) + 1}@example.com"}
+        lock = threading.Lock()
+
+        def pick(**kwargs):
+            with lock:
+                free = [token for token in tokens if token not in kwargs["excluded_tokens"]]
+                if not free:
+                    raise RuntimeError("no available image quota")
+                return free[0]
+
+        service.get_available_access_token.side_effect = pick
+        settings = {"image_failover_enabled": True, "image_failover_secs": 60, "image_poll_timeout_secs": 600,
+                    "image_parallel_generation": parallel}
+        with contextlib.ExitStack() as stack:
+            for name, value in settings.items():
+                stack.enter_context(mock.patch.object(type(conversation.config), name, new_callable=mock.PropertyMock,
+                                                      return_value=value))
+            stack.enter_context(mock.patch.object(conversation, "account_service", service))
+            stack.enter_context(mock.patch.object(conversation, "OpenAIBackendAPI",
+                                                  side_effect=lambda access_token: backends[access_token]))
+            stack.enter_context(mock.patch.object(conversation, "_remove_image_conversation_later"))
+            stack.enter_context(mock.patch.object(conversation, "format_image_result", fake_result))
+            stack.enter_context(mock.patch.object(conversation.time, "sleep", Sleeps()))
+            response = self.client.post("/v1/images/generations", headers={"Authorization": "Bearer chatgpt2api"},
+                                        json={"model": "gpt-image-2", "prompt": "a cat", "n": n})
+        picked = [call.kwargs for call in service.get_available_access_token.call_args_list]
+        return response, picked
+
+    @staticmethod
+    def code(response):
+        return response.json()["error"]["code"]
+
+    def test_input_too_large_is_400_for_one_and_for_many_images(self):
+        for n, parallel in ((1, True), (2, True), (2, False)):
+            with self.subTest(n=n, parallel=parallel):
+                too_large = FakeBackend(sse(START, TOO_LARGE, metadata(False, "unknown")))
+                response, picked = self.post({"one": too_large}, n=n, parallel=parallel)
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(self.code(response), "input_too_large")
+                self.assertIn("缩短", response.json()["error"]["message"])
+                # 每张图只取一次号，不换号（串行时第一张失败就结束）
+                self.assertEqual(len(picked), n if parallel else 1)
+
+    def test_not_started_keeps_its_code_for_one_and_for_many_images(self):
+        def copy_only():
+            return FakeBackend(sse(START, assistant(COPY_ONLY), metadata(False, "chat")), doc=document(doc_text(COPY_ONLY)))
+
+        for n in (1, 2):
+            with self.subTest(n=n):
+                response, picked = self.post({"one": copy_only(), "two": copy_only(), "three": copy_only()}, n=n)
+                self.assertEqual(response.status_code, 502, response.text)
+                self.assertEqual(self.code(response), "image_generation_not_started")
+                self.assertIn("上游未启动生图", response.json()["error"]["message"])
+                self.assertEqual(len(picked), 2 * n)  # 每张图最多换一个号
+
+    def test_policy_refusal_takes_one_account_and_ends(self):
+        for name, backend in (
+            ("reply text", FakeBackend(sse(START, assistant(POLICY), metadata(False, "chat")))),
+            ("task list", FakeBackend(sse(START, metadata(False, "unknown")), tasks=[POLICY_TASK])),
+        ):
+            with self.subTest(source=name):
+                response, picked = self.post({"one": backend})
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(self.code(response), "content_policy_violation")
+                self.assertEqual(len(picked), 1)
+
+    def test_task_check_failure_waits_on_the_same_account_before_switching(self):
+        unsure = FakeBackend(sse(START, assistant(COPY_ONLY), metadata(False, "multimodal")),
+                             doc=document(doc_text(COPY_ONLY)), tasks_error=TimeoutError("tasks timed out"))
+        drawing = FakeBackend(sse(START, PROGRESS, IMAGE_TOOL_MESSAGE, metadata(True, "image gen")))
+        response, picked = self.post({"one": unsure, "two": drawing})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(unsure.poll_timeouts, [60])  # 先在原账号上等满一轮才换号
+        self.assertEqual(len(picked), 2)
+
+    def test_copy_only_then_success_returns_the_image(self):
+        copy_only = FakeBackend(sse(START, assistant(COPY_ONLY), metadata(False, "chat")), doc=document(doc_text(COPY_ONLY)))
+        drawing = FakeBackend(sse(START, IMAGE_TOOL_MESSAGE, metadata(True, "image gen")))
+        response, picked = self.post({"one": copy_only, "two": drawing})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()["data"]), 1)
+        self.assertEqual(copy_only.poll_timeouts, [])
 
 
 class SharedAccountSlotTests(unittest.TestCase):

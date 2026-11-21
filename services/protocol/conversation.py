@@ -1004,6 +1004,12 @@ _CANNOT_GENERATE_RE = re.compile(
     r"[^.!?\n]{0,30}\b(images?|pictures?)\b[^.!?\n]{0,20}\b(this|the current)\s+(chat|conversation)",
     re.IGNORECASE,
 )
+# 明确的内容政策字眼优先：「无法生成这张图片，因为违反了内容政策」是拒绝，不是账号生不了图
+_STRONG_POLICY_RE = re.compile(r"违反|違反|内容政策|內容政策|防护限制|防護限制|content policy|violat", re.IGNORECASE)
+# 线上原话：「我目前无法直接在此对图片进行生成或编辑」
+_CANNOT_GENERATE_HERE_RE = re.compile(
+    r"(无法|不能|没法|没办法|無法)[^。！？!?\n]{0,6}在(此|这|這)[^。！？!?\n]{0,10}"
+    r"(生成|创建|創建|编辑|編輯|绘制|繪製|制作|製作)")
 _QUOTA_IMAGE_RE = re.compile(r"图片|图像|圖片|圖像|生图|生圖|\bimages?\b", re.IGNORECASE)
 _QUOTA_LIMIT_RE = re.compile(r"上限|限额|限額|额度|額度|\blimit\b", re.IGNORECASE)
 _QUOTA_EXHAUSTED_RE = re.compile(r"已达|已達|达到|達到|用完|用尽|用盡|重置|\bhit\b|\breached\b|\bused up\b|\bresets?\b", re.IGNORECASE)
@@ -1049,7 +1055,8 @@ class ImageNotStartedError(ImageGenerationError):
 
 @dataclass
 class ImageTaskProbe:
-    # images：会话里已经有图；running：有生图任务（还没出图）；none：确认没有；unknown：查不到
+    # images：会话里已经有图；running：有生图任务（还没出图）；refused：任务列表明确报错（多为内容政策拒绝）；
+    # none：会话和任务都查到了，确认没有；unknown：有一处没查到
     state: str
     file_ids: list[str] = field(default_factory=list)
     sediment_ids: list[str] = field(default_factory=list)
@@ -1063,7 +1070,9 @@ def classify_not_started_text(text: str) -> str:
     text = str(text or "").strip()
     if not text:
         return "empty"
-    if _CANNOT_GENERATE_RE.search(text):
+    if _STRONG_POLICY_RE.search(text):
+        return "policy"
+    if _CANNOT_GENERATE_RE.search(text) or _CANNOT_GENERATE_HERE_RE.search(text):
         return "cannot_generate"
     if _QUOTA_IMAGE_RE.search(text) and _QUOTA_LIMIT_RE.search(text) and _QUOTA_EXHAUSTED_RE.search(text):
         return "quota_exhausted"
@@ -1101,10 +1110,9 @@ def note_cannot_generate(account_key: str, request_key: int) -> bool:
 
 
 def probe_image_task(backend: OpenAIBackendAPI, conversation_id: str) -> ImageTaskProbe:
-    """tool_invoked=false 时查一次会话文档和任务列表，确认上游到底有没有开画。
+    """查一次会话文档和任务列表，确认上游到底有没有开画。
 
-    会话文档查不到就是 unknown（不能当成没开画，免得误判仍在跑的任务）；
-    任务列表查不到不影响结论，会话文档里有没有工具调用才是准的。
+    任何一处查不到都是 unknown：不能当成没开画，免得把仍在跑的任务当成没开画、换号重画。
     """
     if not conversation_id:
         return ImageTaskProbe("unknown")
@@ -1133,14 +1141,19 @@ def probe_image_task(backend: OpenAIBackendAPI, conversation_id: str) -> ImageTa
     except Exception as exc:
         logger.warning({"event": "image_task_probe_failed", "conversation_id": conversation_id,
                         "source": "tasks", "error": repr(exc)[:300]})
-        tasks = []
+        probe.state = "running" if running else "unknown"
+        return probe
     for task in tasks:
         is_error, error_msg, _ = backend.check_task_error(task)
-        if is_error:
-            probe.task_error = error_msg or probe.task_error
+        if is_error and error_msg and not is_model_text_reply_instead_of_image(error_msg):
+            probe.task_error = error_msg
         else:
+            # 没报错的任务在跑；上游有时把生图参数 JSON 标成 is_error，图其实还在生成
             running = True
-    probe.state = "running" if running else "none"
+    if running:
+        probe.state = "running"
+    elif probe.task_error:
+        probe.state = "refused"
     return probe
 
 
@@ -1232,7 +1245,9 @@ def stream_image_outputs(
     # tool_invoked 缺失或查不到时保持「未知」，走下面原来的等图流程，免得误判仍在跑的任务。
     task_state = "sse_images" if (file_ids or sediment_ids) else ("started" if started else "not_checked")
     text_kind = ""
-    if not file_ids and not sediment_ids and not started and tool_invoked is False:
+    unknown_after_check = False
+    # 上游给了明确错误码（如 input_too_large）但没带 tool_invoked 时也查一次
+    if not file_ids and not sediment_ids and not started and (tool_invoked is False or error_code):
         text_kind = classify_not_started_text(message)
         if text_kind != "policy" or error_code:
             probe = probe_image_task(backend, conversation_id)
@@ -1242,6 +1257,15 @@ def stream_image_outputs(
                 add_unique(sediment_ids, probe.sediment_ids)
             elif probe.state == "running":
                 started = True
+            elif probe.state == "unknown":
+                # 查不到：先在原账号上按单号时限等一轮确认，不当成没开画立刻换号或报错
+                unknown_after_check = True
+            elif probe.state == "refused":
+                # 任务列表明确拒绝（多为内容政策）：交给原有的拒绝处理，结束这次请求
+                _log_turn_assessment(conversation_id, tool_invoked, error_code, task_state, "task_refused")
+                yield ImageOutput(kind="message", model=request.model, index=index, total=total,
+                                  text=probe.task_error, conversation_id=conversation_id)
+                return
             elif probe.state == "none":
                 _log_turn_assessment(conversation_id, tool_invoked, error_code, task_state,
                                      "input_too_large" if error_code == INPUT_TOO_LARGE_CODE else text_kind)
@@ -1257,7 +1281,8 @@ def stream_image_outputs(
                     return
     _log_turn_assessment(conversation_id, tool_invoked, error_code, task_state, text_kind or "", started=started)
 
-    should_poll_for_image = started or bool(request.images) or last.get("turn_use_case") == "image gen"
+    should_poll_for_image = (started or unknown_after_check or bool(request.images)
+                             or last.get("turn_use_case") == "image gen")
     if message and not file_ids and not sediment_ids and not should_poll_for_image:
         yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=message, conversation_id=conversation_id)
         return
@@ -2187,6 +2212,10 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
                 })
 
     if not emitted:
+        # 全部失败：有明确错误（如 400 input_too_large、上游未启动生图）就原样抛出，别包成 502
+        for index in sorted(errors):
+            if isinstance(errors[index], ImageGenerationError):
+                raise errors[index]
         if not last_error:
             last_error = "no account in the pool could generate images — check account quota and rate-limit status"
         raise ImageGenerationError(image_stream_error_message(last_error), conversation_id="")
