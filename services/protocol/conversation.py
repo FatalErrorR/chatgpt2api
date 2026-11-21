@@ -1245,7 +1245,8 @@ def stream_image_outputs(
     })
     if request.progress_callback:
         request.progress_callback("image_stream_resolve_start")
-    if message and not file_ids and not sediment_ids and last.get("blocked"):
+    if not file_ids and not sediment_ids and last.get("blocked"):
+        # 上游明确拦截（moderation_response.blocked）且没出图：直接按拦截结束，助手文字为空也一样，不等图、不换号。
         # 尝试从 /backend-api/tasks/ 获取详细错误信息
         detailed_error = _get_detailed_error_from_tasks(backend, conversation_id)
         error_text = detailed_error or message or "Image generation was rejected by upstream policy."

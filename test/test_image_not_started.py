@@ -70,6 +70,8 @@ SERVICE_DOWN_TASK_2 = {"conversation_id": CONV_ID, "image_gen_message": {
 DOC_IMAGE = {"author": {"role": "tool"}, "recipient": "all", "metadata": {"async_task_type": "image_gen"},
              "content": {"content_type": "multimodal_text", "parts": [
                  {"content_type": "image_asset_pointer", "asset_pointer": "sediment://file_0000000099aa"}]}}
+MODERATION_BLOCKED = {"type": "moderation", "conversation_id": CONV_ID,
+                      "moderation_response": {"blocked": True, "flagged": True}}
 POLICY_TASK = {"conversation_id": CONV_ID, "image_gen_message": {
     "author": {"role": "assistant"}, "metadata": {"is_error": True},
     "content": {"content_type": "text", "parts": ["非常抱歉，生成的图片可能违反了我们的内容政策。"]}}}
@@ -702,6 +704,27 @@ class ImageApiEntryTests(unittest.TestCase):
         response, picked = self.post({"one": backend, "two": backend}, path="/v1/images/edits")
         self.assertEqual(response.status_code, 400, response.text)
         self.assertEqual(self.code(response), "content_policy_violation")
+        self.assertEqual(len(picked), 1)
+
+    def test_moderation_blocked_with_empty_text_is_400_on_one_account(self):
+        # 上游明确给了 moderation_response.blocked=true，没有图，助手文字为空：不靠关键字，直接按拦截处理
+        for path in ("/v1/images/edits", "/v1/images/generations"):
+            for name, tail in (("tool_invoked=false", [metadata(False, "unknown")]), ("no tool_invoked", [])):
+                with self.subTest(path=path, case=name):
+                    blocked = FakeBackend(sse(START, PROGRESS, MODERATION_BLOCKED, *tail))
+                    response, picked = self.post({"one": blocked, "two": blocked}, path=path)
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertEqual(self.code(response), "content_policy_violation")
+                    self.assertTrue(response.json()["error"]["message"])
+                    self.assertEqual(len(picked), 1)  # 不换号
+                    self.assertEqual(blocked.poll_timeouts, [])  # 不轮询
+                    self.assertEqual(blocked.doc_reads, 0)  # 不去查会话
+                    self.service.mark_image_result.assert_called_once_with("one", False)
+
+    def test_moderation_blocked_but_image_returned_still_returns_the_image(self):
+        backend = FakeBackend(sse(START, MODERATION_BLOCKED, IMAGE_TOOL_MESSAGE, metadata(True, "image gen")))
+        response, picked = self.post({"one": backend}, path="/v1/images/edits")
+        self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(len(picked), 1)
 
     def test_task_check_failure_waits_on_the_same_account_before_switching(self):
