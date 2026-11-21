@@ -64,6 +64,11 @@ class ImageContentPolicyError(ImageTaskError):
     pass
 
 
+class ImageUpstreamTaskError(ImageTaskError):
+    """任务列表报了错，但不是内容政策拒绝（如「服务暂时不可用」）：是上游服务的问题。"""
+    pass
+
+
 class ImageStreamHardTimeoutError(RuntimeError):
     """图片 SSE 流读取超过硬上限时抛出，用于快速中断被挂起的长连接。"""
     pass
@@ -2686,7 +2691,9 @@ class OpenAIBackendAPI:
                 task_error = getattr(exc, "task_error", "")
                 if not file_ids and not sediment_ids:
                     if task_error:
-                        raise ImageContentPolicyError(task_error, conversation_id or "") from exc
+                        # 只有内容政策拒绝才算内容违规；其它任务错误是上游服务出错
+                        error_cls = ImageContentPolicyError if _is_content_policy_error(task_error) else ImageUpstreamTaskError
+                        raise error_cls(task_error, conversation_id or "") from exc
                     raise
                 logger.warning({
                     "event": "image_resolve_poll_partial_timeout",

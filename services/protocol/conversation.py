@@ -15,7 +15,12 @@ import tiktoken
 from services.account_service import account_service, is_edit_upload_throttled
 from services.config import config
 from services.image_storage_service import image_storage_service
-from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeoutError, OpenAIBackendAPI
+from services.openai_backend_api import (
+    ImageContentPolicyError,
+    ImagePollTimeoutError,
+    ImageUpstreamTaskError,
+    OpenAIBackendAPI,
+)
 from utils.helper import (
     IMAGE_MODELS,
     UpstreamHTTPError,
@@ -1055,8 +1060,8 @@ class ImageNotStartedError(ImageGenerationError):
 
 @dataclass
 class ImageTaskProbe:
-    # images：会话里已经有图；running：有生图任务（还没出图）；refused：任务列表明确报错（多为内容政策拒绝）；
-    # none：会话和任务都查到了，确认没有；unknown：有一处没查到
+    # images：会话里已经有图；running：有生图任务（还没出图）；refused：任务列表明确是内容政策拒绝；
+    # service_error：任务列表报了别的错（如服务暂时不可用）；none：会话和任务都查到了，确认没有；unknown：有一处没查到
     state: str
     file_ids: list[str] = field(default_factory=list)
     sediment_ids: list[str] = field(default_factory=list)
@@ -1079,6 +1084,11 @@ def classify_not_started_text(text: str) -> str:
     if _is_content_policy_error(text):
         return "policy"
     return "text_only"
+
+
+def is_policy_refusal(text: str) -> bool:
+    """上游的文字是不是明确的内容政策拒绝。"""
+    return classify_not_started_text(text) == "policy"
 
 
 def quota_reset_secs(text: str, account: dict | None = None) -> int:
@@ -1153,7 +1163,7 @@ def probe_image_task(backend: OpenAIBackendAPI, conversation_id: str) -> ImageTa
     if running:
         probe.state = "running"
     elif probe.task_error:
-        probe.state = "refused"
+        probe.state = "refused" if is_policy_refusal(probe.task_error) else "service_error"
     return probe
 
 
@@ -1241,6 +1251,12 @@ def stream_image_outputs(
         yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=error_text, conversation_id=conversation_id)
         return
 
+    if message and not file_ids and not sediment_ids and is_policy_refusal(message):
+        # 串流里已经明确回了政策拒绝：不会有图了，直接结束（图生图也不再等图、换号）
+        _log_turn_assessment(conversation_id, tool_invoked, error_code, "not_checked", "policy")
+        yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=message, conversation_id=conversation_id)
+        return
+
     # 上游明确说没调生图工具（tool_invoked=false）：查一次会话和任务确认真的没开画，没开画就不等图。
     # tool_invoked 缺失或查不到时保持「未知」，走下面原来的等图流程，免得误判仍在跑的任务。
     task_state = "sse_images" if (file_ids or sediment_ids) else ("started" if started else "not_checked")
@@ -1260,8 +1276,12 @@ def stream_image_outputs(
             elif probe.state == "unknown":
                 # 查不到：先在原账号上按单号时限等一轮确认，不当成没开画立刻换号或报错
                 unknown_after_check = True
+            elif probe.state == "service_error":
+                # 任务列表报的是服务错误（如服务暂时不可用）：回上游服务错误，不能当成内容违规
+                _log_turn_assessment(conversation_id, tool_invoked, error_code, task_state, "task_service_error")
+                raise ImageUpstreamTaskError(probe.task_error, conversation_id)
             elif probe.state == "refused":
-                # 任务列表明确拒绝（多为内容政策）：交给原有的拒绝处理，结束这次请求
+                # 任务列表明确是内容政策拒绝：交给原有的拒绝处理，结束这次请求
                 _log_turn_assessment(conversation_id, tool_invoked, error_code, task_state, "task_refused")
                 yield ImageOutput(kind="message", model=request.model, index=index, total=total,
                                   text=probe.task_error, conversation_id=conversation_id)
@@ -1335,6 +1355,8 @@ def stream_image_outputs(
                 "conversation_id": conversation_id,
                 "error": detailed_error,
             })
+            if not is_policy_refusal(detailed_error):
+                raise ImageUpstreamTaskError(detailed_error, conversation_id)
             yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=detailed_error, conversation_id=conversation_id)
             return
         if detailed_error and (should_poll_for_image or is_text_reply):
@@ -1968,6 +1990,18 @@ def _generate_single_image(
                              retry_count=poll_timeout_retry_count)
                 raise
             raise
+        except ImageUpstreamTaskError as exc:
+            # 上游生图服务自己出错，不是账号故障、也不是内容违规
+            slot.finish(None)
+            _log_attempt(index, token, account_email, "finish", "upstream_service_error", exc, error=str(exc)[:200])
+            raise ImageGenerationError(
+                f"上游生图服务出错：{str(exc)[:200] or '未知错误'}，请稍后重试。",
+                status_code=502,
+                error_type="server_error",
+                code="upstream_service_error",
+                account_email=account_email,
+                conversation_id=getattr(exc, "conversation_id", ""),
+            ) from exc
         except ImageContentPolicyError as exc:
             slot.finish(False)
             _log_attempt(index, token, account_email, "finish", "content_policy", exc, error=str(exc)[:200])
