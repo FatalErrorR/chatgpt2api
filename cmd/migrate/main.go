@@ -27,6 +27,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "rollback" {
+		rollback(os.Args[2:])
+		return
+	}
 	dataDir := flag.String("data", "data", "the Python version's data directory (read only)")
 	databaseURL := flag.String("database-url", os.Getenv("DATABASE_URL"), "target database (default $DATABASE_URL)")
 	logDays := flag.Int("log-days", 30, "migrate log lines from the last N days; 0 for all")
@@ -128,4 +132,59 @@ func printAccounts(db *gorm.DB, target string) {
 		fmt.Printf("：%s", strings.Join(emails, "、"))
 	}
 	fmt.Println()
+}
+
+// rollback: chatgpt2api-migrate rollback -snapshot DIR -python DIR -go-data DIR -out NEWDIR -expect-db NAME
+// Writes the files to lay over Python's data directory (rsync -a NEWDIR/ data/ with Python stopped).
+func rollback(args []string) {
+	set := flag.NewFlagSet("rollback", flag.ExitOnError)
+	snapshot := set.String("snapshot", "", "the data directory the migration read (unchanged since)")
+	python := set.String("python", "", "Python's data directory now (read only)")
+	goData := set.String("go-data", "", "the Go instance's data directory (read only)")
+	out := set.String("out", "", "a new directory for the merged files")
+	databaseURL := set.String("database-url", os.Getenv("DATABASE_URL"), "the Go database (default $DATABASE_URL)")
+	expectDB := set.String("expect-db", "", "the database name it must have (required for PostgreSQL)")
+	allowAdmin := set.Bool("allow-admin-changes", false, "go on when API keys, proxies, CPA, sub2api or backup state changed on Go (they are not merged)")
+	set.Parse(args)
+	if *databaseURL == "" {
+		fmt.Fprintln(os.Stderr, "需要 -database-url 或环境变量 DATABASE_URL")
+		os.Exit(2)
+	}
+	repo, err := repository.Open(*databaseURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "连接数据库失败：", err)
+		os.Exit(1)
+	}
+	defer repo.Close()
+	target := describeTarget(repo.DB())
+	fmt.Printf("Go 库：%s\n快照：%s\nPython 数据：%s\nGo 数据：%s\n输出：%s\n\n", target.text, *snapshot, *python, *goData, *out)
+	if target.postgres && *expectDB == "" {
+		fmt.Fprintln(os.Stderr, "PostgreSQL 必须用 -expect-db 写明库名")
+		os.Exit(2)
+	}
+	if *expectDB != "" && target.name != *expectDB {
+		fmt.Fprintf(os.Stderr, "库是 %q，不是 -expect-db 指定的 %q，未做任何改动\n", target.name, *expectDB)
+		os.Exit(2)
+	}
+	report, err := migrate.Rollback(repo.DB(), migrate.RollbackOptions{Snapshot: *snapshot, Python: *python, GoData: *goData, Out: *out, AllowAdminChanges: *allowAdmin})
+	if report != nil {
+		for _, item := range report.Items {
+			fmt.Printf("%-34s %6d  -> %6d  %s\n", item.Name, item.Source, item.Written, item.Note)
+		}
+		if len(report.Checks) > 0 {
+			fmt.Println("\n对账（重新读取输出文件，与 Python 数据和 Go 库比对）：")
+			for _, check := range report.Checks {
+				mark := "通过"
+				if !check.OK {
+					mark = "不一致"
+				}
+				fmt.Printf("  %-6s %-44s 期望 %6d  实际 %6d  %s\n", mark, check.Name, check.Expected, check.Actual, check.Detail)
+			}
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "\n回切文件生成失败，未输出任何文件：", err)
+		os.Exit(1)
+	}
+	fmt.Printf("\n回切文件已生成：%s\n停止 Python 后执行 rsync -a %s/ <Python 的 data 目录>/，再启动 Python。\n", *out, *out)
 }

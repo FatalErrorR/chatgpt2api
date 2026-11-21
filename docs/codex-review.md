@@ -37,7 +37,7 @@
 | `sources` | cpa_service、sub2api_service | 文档 cpa_config.json、sub2api_config.json |
 | `backup` | backup_service.py | 文档 backup_state.json；压缩包布局与 Python 相同 |
 
-- 对上游 Go 代码的改动只有：`internal/upstream/exported.go`（导出传输层）、上游客户端加匿名线路（`/backend-anon/*`）、上游地址可配置（`CHATGPT2API_UPSTREAM_BASE_URL`）。
+- 对上游 Go 代码的改动只有：`internal/upstream/exported.go`（导出传输层）、上游客户端加匿名线路（`/backend-anon/*`）、上游地址可配置（`CHATGPT2API_UPSTREAM_BASE_URL`）、`ProxyService.Test` 把 context 的截止时间作为 TLS 客户端超时（a5a219f）。
 
 ## 有意与 Python 不同的地方
 

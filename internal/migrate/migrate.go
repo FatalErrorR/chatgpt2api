@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -234,7 +235,75 @@ type plan struct {
 	countSource string
 	logFile     string
 	logFound    bool
+	maxLogSeq   int64
 	report      *Report
+}
+
+// InfoKey is the compat_kv row describing the last migration: what the rollback needs to tell the
+// rows the Go version wrote from the rows it was given.
+const InfoKey = "migration_info"
+
+// Info is the migration_info row.
+type Info struct {
+	MigratedAt string            `json:"migrated_at"`
+	Source     string            `json:"source"`
+	LogDays    int               `json:"log_days"`
+	Now        string            `json:"now"`
+	MaxLogSeq  int64             `json:"max_log_seq"` // migrated log lines keep their line number as seq; new ones are nanoseconds
+	Files      map[string]string `json:"files"`       // sha256 of each source file, to check the snapshot was kept as it was
+}
+
+// snapshotFiles are the source files whose checksums the migration records.
+var snapshotFiles = []string{"accounts.json", ".cumulative_total", "auth_keys.json", "proxies.json", "cpa_config.json", "sub2api_config.json",
+	"backup_state.json", "image_index.json", "image_tags.json", "image_tasks.json", "editable_file_tasks.json", "image_output_counts.json", "logs.jsonl"}
+
+// FileChecksums is the sha256 of each snapshot file that exists.
+func FileChecksums(dir string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, name := range snapshotFiles {
+		handle, err := os.Open(filepath.Join(dir, name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.New()
+		_, err = io.Copy(sum, handle)
+		handle.Close()
+		if err != nil {
+			return nil, err
+		}
+		out[name] = hex.EncodeToString(sum.Sum(nil))
+	}
+	return out, nil
+}
+
+func (p *plan) writeInfo(tx *gorm.DB) error {
+	files, err := FileChecksums(p.opts.DataDir)
+	if err != nil {
+		return err
+	}
+	source, _ := filepath.Abs(p.opts.DataDir)
+	raw, _ := json.Marshal(Info{MigratedAt: time.Now().Format(time.RFC3339), Source: source, LogDays: p.opts.LogDays,
+		Now: p.opts.Now.Format(time.RFC3339), MaxLogSeq: p.maxLogSeq, Files: files})
+	if err := tx.Where("key = ?", InfoKey).Delete(&kvRow{}).Error; err != nil {
+		return err
+	}
+	return tx.Create(&kvRow{Key: InfoKey, Value: string(raw)}).Error
+}
+
+// LoadInfo reads the migration_info row; found is false when the database was not made by this tool.
+func LoadInfo(db *gorm.DB) (Info, bool, error) {
+	var rows []kvRow
+	if err := db.Where("key = ?", InfoKey).Limit(1).Find(&rows).Error; err != nil || len(rows) == 0 {
+		return Info{}, false, err
+	}
+	var info Info
+	if err := json.Unmarshal([]byte(rows[0].Value), &info); err != nil {
+		return Info{}, false, err
+	}
+	return info, true, nil
 }
 
 func (p *plan) path(name string) string { return filepath.Join(p.opts.DataDir, name) }
@@ -778,7 +847,9 @@ func (p *plan) write(tx *gorm.DB) error {
 				return err
 			}
 			duplicates := 0
+			var maxSeq int64
 			err := windowLogs(p.logFile, p.opts, func(entry logs.Entry) error {
+				maxSeq = max(maxSeq, entry.Seq)
 				if seen[entry.ID] {
 					duplicates++ // the same explicit id twice: log_service.list would show both, the table keeps one
 					return nil
@@ -803,8 +874,10 @@ func (p *plan) write(tx *gorm.DB) error {
 				note = fmt.Sprintf("%d 行与前面的行 id 相同，只保留第一行", duplicates)
 			}
 			p.report.add("logs", written+duplicates, written, note)
+			p.maxLogSeq = maxSeq
 			return nil
 		},
+		func() error { return p.writeInfo(tx) },
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
@@ -817,8 +890,6 @@ func (p *plan) write(tx *gorm.DB) error {
 // ErrVerification is returned when the tables do not match the sources; nothing is kept.
 var ErrVerification = errors.New("对账不一致，已回滚，目标库未改动")
 
-// Run migrates everything under opts.DataDir in one transaction, verifies it against the sources
-// and commits only when every check passes.
 // Validate reads and validates every source file like Run, without touching any database (dry run).
 func Validate(opts Options) (*Report, error) {
 	p, err := read(opts.withDefaults())
@@ -828,6 +899,8 @@ func Validate(opts Options) (*Report, error) {
 	return p.report, nil
 }
 
+// Run migrates everything under opts.DataDir in one transaction, verifies it against the sources
+// and commits only when every check passes.
 func Run(db *gorm.DB, opts Options) (*Report, error) {
 	opts = opts.withDefaults()
 	p, err := read(opts)

@@ -213,5 +213,14 @@
   - 部署：`deploy/staging/docker-compose.yml` 挂载设置目录（单文件挂载会让保存的 rename 失败）；迁移在对应服务的容器里执行，
     工具打印实际目标库，PostgreSQL 必须写 `-expect-db`，不符即拒绝，`-dry-run` 只校验（ec86fe6）
   - 演练实例放在没有出口的内部网络，管理入口经 socat gate；`deploy/staging/verify-local.sh` 用合成数据验证全部隔离与持久化，失败退出码非 0
+- [x] 压测（本机，F1/F2）与回切工具（2026-11-20/21）
+  - `tools/loadtest/run.sh`：Go + PostgreSQL + 假上游（每张图 30 秒、每张内容不同），120 个账号，300 个生图请求同时发出
+  - F1：300/300 成功，无排队上限；管理接口 p95 15–19 ms（标准 500 ms）
+  - F2：起初服务自身开销 p95 约 570 ms。用 trace 和 mutex profile 定位，依次修掉：号池在持锁时序列化全部账号并写库、
+    持锁写账号日志、每次调用在事务里更新同一行每日计数（9e58788）。三轮复测 p95 开销 176 / 199 / 192 ms（服务端 153–177 ms），
+    达标但余量不大
+  - 顺带发现：代理检测在代理卡住时要等 TLS 客户端的 300 秒（Python 是 15 秒），「检测并清理」会长时间转圈；已修（a5a219f）
+  - F3（连续 2 小时）：本机这次 3 分钟后机器睡眠，作废，需接电源、开盖重跑
+  - 回切工具 `chatgpt2api-migrate rollback` 与本机演练 `tools/rollback/rehearse.sh`（G2）：见 `docs/go-staging.md` 第三节
 - [ ] 12. 完整测试
 - [ ] 13. 并行上线
